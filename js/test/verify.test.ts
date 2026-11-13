@@ -309,6 +309,25 @@ describe("drand", () => {
 });
 
 describe("key rotation", () => {
+  it("registers a key rotated while this process holds the SDK (keys rotate), and verify passes", async () => {
+    note("a", {});
+    expect((await flush()).shipped).toBe(1); // the first key is registered in this process
+    const rec = getRecorder();
+    const agent = rec.defaultAgent;
+    // What `signafaide keys rotate` does (from this process or another one): a new key file.
+    const [old, next] = rec.state.rotateKey(agent);
+    note("b", {}); // signed by the new key
+    const r = await flush();
+    expect(r.errors).toEqual({});
+    expect(r.shipped).toBe(1);
+    const prj = [...ctx.service.projects.values()][0];
+    expect(prj.agents.get(agent).get(next.keyId).valid_to).toBeNull();
+    expect(prj.agents.get(agent).get(old.keyId).valid_to).toBe(rec.state.retiredAt(agent, old.keyId));
+    const v = await verify();
+    expect(v.ok, String(v)).toBe(true);
+    expect(v.check("record_sig").status).toBe("pass");
+  });
+
   it("retires the old key: its earlier records ship first, then it cannot add records", async () => {
     note("a", {});
     await flush();

@@ -68,7 +68,7 @@ export class FakeService {
     if (method === "POST" && path === "/v1/sandbox") {
       const key = "sfa_test_" + String(++this.n).padStart(32, "0");
       const prj = this.addProject(key, "test");
-      return [200, { project: prj.project, api_key: key, claim_url: `${this.url}/app/claim/${this.n}`, free_quota: 1000 }];
+      return [200, { project: prj.project, api_key: key, claim_url: `${this.url}/app/claim/${this.n}`, free_quota: 1000, terms_url: `${this.url}/legal/terms`, privacy_url: `${this.url}/legal/privacy` }];
     }
     if (method === "POST" && path === "/v1/events") {
       this.events.push(body.name);
@@ -124,8 +124,11 @@ export class FakeService {
       if (prj.records.has(h)) continue;
       const env = r.envelope;
       if (env.project !== prj.project || env.env !== prj.env) return err(400, "invalid_record", "envelope.project and envelope.env must be this key's project and env.");
-      const key = prj.agents.get(env.agent)?.get(r.key_id);
-      if (!key) return err(400, "unknown_agent", `Agent ${env.agent} has no key ${r.key_id}; register it with POST /v1/agents.`);
+      // As the real service: an unknown agent is unknown_agent; a known agent's unregistered key is bad_signature.
+      const keys = prj.agents.get(env.agent);
+      if (!keys) return err(400, "unknown_agent", `agent '${env.agent}' is not registered in this project and env; call POST /v1/agents first.`);
+      const key = keys.get(r.key_id);
+      if (!key) return err(400, "bad_signature", `key ${r.key_id} is not registered for agent '${env.agent}'; register it with POST /v1/agents.`);
       if (key.valid_to !== null) return err(400, "bad_signature", `key ${r.key_id} was retired or revoked at ${key.valid_to}; it cannot add records.`);
       if (!verifySig(key.public_key, "record", h, r.sig)) return err(400, "bad_signature", "The record signature does not verify.");
       if (r.content && hashJson(r.content) !== env.content_hash) return err(400, "content_mismatch", "content does not match content_hash.");

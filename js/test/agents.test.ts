@@ -201,9 +201,11 @@ describe("agent setup safety", () => {
 describe("skill text", () => {
   it("opens with the facts: what leaves the machine, no account, self-host, open source", () => {
     const head = SKILL_BODY.split("\n").slice(0, 8).join("\n");
-    expect(head).toContain("only hashes");
-    expect(head).toContain("never inputs, outputs or personal data");
+    expect(head).toContain("each record's hashes, plus its tool name, agent name and time; never inputs or outputs");
+    expect(head).toContain("never put personal data in agent or tool names");
+    expect(head).not.toContain("personal data.");
     expect(head).toContain("Nothing at all is sent until a person runs `signafaide init` or sets `SIGNAFAIDE_API_KEY`");
+    expect(head).toContain("agree to the signafAIde Terms and Privacy notice");
     expect(head).toContain("needs no account, email or card");
     expect(head).toContain("self-host the witness and set `SIGNAFAIDE_URL` (https://signafaide.com/docs/self-host)");
     expect(head).toContain("Apache-2.0, with a public protocol spec and an independent verifier");

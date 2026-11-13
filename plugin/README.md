@@ -1,6 +1,6 @@
 # signafAIde for Claude Code
 
-signafAIde records what AI agents decide. Each record is signed by the agent's own key and countersigned by the signafAIde service, so neither side can forge or edit it alone. Records stay on your machine, signed and chained, until a person opts in; after that only hashes leave it (never inputs, outputs or personal data).
+signafAIde records what AI agents decide. Each record is signed by the agent's own key and countersigned by the signafAIde service, so neither side can forge or edit it alone. Records stay on your machine, signed and chained, until a person opts in; after that each record sends its hashes with its tool name, agent name and time, never its inputs or outputs. Don't put personal data in agent or tool names.
 
 This plugin adds:
 

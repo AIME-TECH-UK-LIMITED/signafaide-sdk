@@ -11,7 +11,7 @@ import { statusLines } from "./cli.js";
 import { explainError } from "./errors.js";
 import { verify } from "./index.js";
 import { FRAMEWORKS, LANGUAGES, detectProject, installCommand, snippet, verifyCommand, type Framework, type Language } from "./project.js";
-import { configure, envOf, type Recorder } from "./runtime.js";
+import { configure, envOf, legalLinks, termsNotice, type Recorder } from "./runtime.js";
 import { findRoot } from "./state.js";
 import { SELF_HOST_DOC, SKILL_DESCRIPTION } from "./skill.js";
 import { VERSION } from "./version.js";
@@ -72,6 +72,7 @@ function keyLine(rec: Recorder): string {
 function sandboxPreview(rec: Recorder): string[] {
   return [
     `What a sandbox would send (only after a person agrees: signafaide_init, or \`npx signafaide init\` run by them): one POST ${rec.url}/v1/sandbox with no body, which creates an anonymous project (no account, email or card) and returns an API key saved to .env and a claim link.`,
+    `Creating it means the person agrees to the signafAIde Terms (${legalLinks({}, rec.url).terms_url}) and Privacy notice (${legalLinks({}, rec.url).privacy_url}); show them both links when you ask.`,
     "Then, per record, only the envelope: {v, kind, project, env, agent, seq, prev, time, name, content_hash, ref} with the agent's signature, plus each agent's public key once. Inputs and outputs stay in .signafaide/chain/ (hash-only); store_content=True / storeContent sends them encrypted (live records need the Team plan).",
     `To keep the evidence in your environment instead, self-host the witness and set SIGNAFAIDE_URL (${SELF_HOST_DOC}).`,
   ];
@@ -140,7 +141,8 @@ export function createServer(root: string = process.cwd()): McpServer {
       description:
         "Creates an external sandbox project on the signafAIde service (or the SIGNAFAIDE_URL witness), saves its API key to .env and returns the claim link. " +
         "From then on record hashes (never content) are sent there, and records written earlier ship with their original times. " +
-        "This is an external side effect: ask the user and call it only after they agree. Without it, records stay local and still verify.",
+        "This is an external side effect: ask the user and call it only after they agree. Without it, records stay local and still verify. " +
+        "Creating a sandbox means the user agrees to the signafAIde Terms and Privacy notice (<service>/legal/terms and <service>/legal/privacy, where <service> is SIGNAFAIDE_URL or the signafAIde service): show them both links when you ask, and pass on the notice this tool returns.",
       inputSchema: z.object({ directory }),
     },
     ({ directory: dir }) =>
@@ -152,7 +154,8 @@ export function createServer(root: string = process.cwd()): McpServer {
         const claim = rec.state.sandbox()?.claim_url;
         return (
           `Created a sandbox at ${rec.url} (no account) and saved SIGNAFAIDE_API_KEY to ${path.join(rec.state.root, ".env")} (in .gitignore). ` +
-          `Give the human this claim link so they can keep the records: ${claim}. Records written before now ship on the next run, or call signafaide_verify.`
+          `Give the human this claim link so they can keep the records: ${claim}. Records written before now ship on the next run, or call signafaide_verify.\n` +
+          `Tell the human: ${termsNotice(rec.legal())}`
         );
       }),
   );

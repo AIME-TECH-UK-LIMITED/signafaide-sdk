@@ -31,8 +31,9 @@ describe("cli", () => {
   it("init, then claim", async () => {
     const [code, out] = await cli("init");
     expect(code).toBe(0);
-    expect(out.split("\n")).toHaveLength(2);
+    expect(out.split("\n")).toHaveLength(3);
     expect(out).toContain(`claim it at ${ctx.service.url}/app/claim/`);
+    expect(out).toContain(`By creating a sandbox you agree to the signafAIde Terms (${ctx.service.url}/legal/terms) and Privacy notice (${ctx.service.url}/legal/privacy).`);
     expect(out).toContain("records written before now ship with their original times");
     const claim = out.split("\n")[0].split(" ").at(-1)!;
     expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf8")).toMatch(/^SIGNAFAIDE_API_KEY=sfa_test_[^\n]+\nSIGNAFAIDE_URL=http:\/\/127\.0\.0\.1:\d+\n$/); // not the default service: its URL goes with the key

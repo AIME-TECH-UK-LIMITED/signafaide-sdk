@@ -615,7 +615,7 @@ export class State {
     writeJson(path.join(this.home, "config.json"), { ...this.config(), ...values });
   }
 
-  sandbox(): { project?: string; claim_url?: string; free_quota?: number; url?: string; created?: string } | null {
+  sandbox(): { project?: string; claim_url?: string; free_quota?: number; url?: string; created?: string; terms_url?: string; privacy_url?: string } | null {
     return readJson(path.join(this.home, "sandbox.json"));
   }
 

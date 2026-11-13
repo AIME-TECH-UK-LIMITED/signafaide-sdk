@@ -60,7 +60,8 @@ class FakeService:
             self.sandbox_n += 1
             key = "sfa_test_" + f"{self.sandbox_n:032d}"
             prj = self.add_project(key)
-            return 200, {"project": prj["project"], "api_key": key, "claim_url": f"{self.url}/app/claim/{self.sandbox_n}", "free_quota": 1000}
+            return 200, {"project": prj["project"], "api_key": key, "claim_url": f"{self.url}/app/claim/{self.sandbox_n}", "free_quota": 1000,
+                         "terms_url": f"{self.url}/legal/terms", "privacy_url": f"{self.url}/legal/privacy"}
         if method == "POST" and path == "/v1/events":
             self.events.append(body.get("name"))
             return 200, {}
@@ -126,9 +127,13 @@ class FakeService:
             env = r["envelope"]
             if (env["project"], env["env"]) != (prj["project"], prj["env"]):
                 return err(400, "invalid_record", "envelope.project and envelope.env must be this key's project and env.")
-            key = prj["agents"].get(env["agent"], {}).get(r["key_id"])
+            # As the real service: an unknown agent is unknown_agent; a known agent's unregistered key is bad_signature.
+            keys = prj["agents"].get(env["agent"])
+            if keys is None:
+                return err(400, "unknown_agent", f"agent '{env['agent']}' is not registered in this project and env; call POST /v1/agents first.")
+            key = keys.get(r["key_id"])
             if key is None:
-                return err(400, "unknown_agent", f"Agent {env['agent']} has no key {r['key_id']}; register it with POST /v1/agents.")
+                return err(400, "bad_signature", f"key {r['key_id']} is not registered for agent '{env['agent']}'; register it with POST /v1/agents.")
             if key["valid_to"] is not None:
                 return err(400, "bad_signature", f"key {r['key_id']} was retired or revoked at {key['valid_to']}; it cannot add records.")
             if not verify_sig(key["public_key"], "record", h, r["sig"]):

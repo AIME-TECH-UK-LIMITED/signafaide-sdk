@@ -2,7 +2,7 @@
 
 Signed, chained records of what your AI agents decided. Each record is signed with the agent's own key and chained on your machine; once you opt in, a witness (the signafAIde service, or one you host) co-signs and publicly timestamps it, so neither side can forge or edit a record alone.
 
-- Nothing is sent until a person runs `npx signafaide init` or sets `SIGNAFAIDE_API_KEY`. After that only hashes leave the machine (plus each record's tool name, agent name and time), never inputs, outputs or personal data.
+- Nothing is sent until a person runs `npx signafaide init` or sets `SIGNAFAIDE_API_KEY`. After that each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them.
 - The sandbox `init` creates needs no account, email or card.
 - To keep the evidence in your environment, self-host the witness and set `SIGNAFAIDE_URL` ([self-host](https://signafaide.com/docs/self-host)).
 - Apache-2.0, with a public protocol spec and an independent verifier.
@@ -196,7 +196,7 @@ X-Signafaide-Client: signafaide-js/0.1.0 (node 22.22.0; adapter=vercel-ai; agent
 
 It holds the SDK and its version, the JavaScript runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `vercel-ai` or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables and kept in `.signafaide/config.json`. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
 
-Nothing else is sent: no content, no names, no paths, no hostnames, nothing personal. `SIGNAFAIDE_TELEMETRY=0` removes the adapter and the agent from the header, and turns the events off. The SDK name and version are still sent.
+The header and the events hold no content, file paths, hostnames or user names. `SIGNAFAIDE_TELEMETRY=0` removes the adapter, the coding agent and the strict-mode flag from the header, stops the coding agent being saved in `.signafaide/config.json`, and turns the events off. The SDK and its version, the runtime and its version, and how the call was made (`via`) are still sent.
 
 ## Configuration
 
@@ -205,7 +205,7 @@ Nothing else is sent: no content, no names, no paths, no hostnames, nothing pers
 | `SIGNAFAIDE_API_KEY` | read from the environment, then `.env`; created by `signafaide init`; none: local only |
 | `SIGNAFAIDE_URL` | `http://127.0.0.1:7474`; a self-hosted witness. Alone it sends nothing |
 | `SIGNAFAIDE_HOME` | `.signafaide/` in the project root |
-| `SIGNAFAIDE_TELEMETRY` | `0` turns off the adapter and agent fields and the events |
+| `SIGNAFAIDE_TELEMETRY` | `0` turns off the adapter, agent and strict fields and the events |
 
 Each project and env has its own chain per agent. A new key, for example a live key replacing the sandbox key, starts a fresh chain at seq 1. The old chain stays on disk, and `signafaide status` lists every chain.
 

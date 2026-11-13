@@ -128,6 +128,7 @@ Every `ANCHOR_INTERVAL` (default 3600 s), the service builds one RFC 6962 tree o
 - Each batch gets an inclusion path into its anchor: the §3.2 tree with `batch_hash` as the item, written as `{"index": <leaf index>, "path": [...]}`.
 - `ots` uses the standard base64 alphabet with padding.
 - Sandbox (`env=test`) batches are anchored the same way, with the same inclusion paths. Deleting an unclaimed sandbox later is fine: only the root was published.
+- When a project, organization or sandbox is deleted, the service keeps, for each of its batches already in an anchor, only the `batch_hash`, its index and its inclusion path (no envelope, project or env), so the anchor's tree can still be rebuilt; other projects' proofs never need anything of it.
 
 Together, the three give the combined claim: the drand round says "not before", the anchor says "not after", and the two signatures say "both agreed".
 
@@ -146,7 +147,7 @@ API keys are `sfa_test_<32 base62>` for the sandbox and `sfa_live_<32 base62>` f
 
 | method and path | auth | purpose |
 |---|---|---|
-| `POST /v1/sandbox` | none (rate-limited per IP) | creates an anonymous sandbox project: no account, email or card. Returns `{project, api_key, claim_url, free_quota}` (`free_quota` in records per month). Clients call it only on an explicit human opt-in (`signafaide init`, the MCP `signafaide_init` tool); recording never calls it (§8) |
+| `POST /v1/sandbox` | none (rate-limited per IP) | creates an anonymous sandbox project: no account, email or card. Returns `{project, api_key, claim_url, free_quota, terms_url, privacy_url, notice}` (`free_quota` in records per month; `terms_url` and `privacy_url` are the service's Terms and Privacy notice, which creating a sandbox accepts, and `notice` says so in one line that clients show the person). Clients call it only on an explicit human opt-in (`signafaide init`, the MCP `signafaide_init` tool); recording never calls it (§8) |
 | `GET /v1/project` | key | `{project, env}` of the key, so a client can sign envelopes (§2.2) before its first record is accepted |
 | `POST /v1/agents` | key | `{name, public_key, valid_from, proof, rotation?}` (§2.4) returns `{agent, key_id, retired}`. Idempotent. A missing or wrong `proof` or `rotation` is `bad_signature`; a key already registered to another agent, or a `valid_from` out of range, is `invalid_record` |
 | `POST /v1/records` | key | `{records:[signed record...]}` (at most 1000) returns `{receipts:[...], heads:[{head, head_sig}]}` |
@@ -245,7 +246,7 @@ The SDK keeps a `.signafaide/` folder in the project root (or `SIGNAFAIDE_HOME`)
 - `outbox/<chain id>/<seq, 12 digits>.json`: the signed records not yet accepted by the service, as sent: `{envelope, key_id, sig}`, plus `content` when it is stored with the service. They are shipped in the background, in seq order per chain, and kept on failure (offline mode). A record leaves the outbox once its receipt is in the chain file. Only the outbox of the current API key's project is shipped; the outbox of another project waits until that project's key is used again. The delay shows as the gap between `envelope.time` and `batch.server_time`.
 - `head.json`: the newest signed head per chain, `{"<project>": {"<env>": {"<agent>": {head, head_sig}}}}` (pretty-printed JSON). A head with a lower `seq` than the one kept is not stored and is reported: it proves truncation. The local `verify` of a pack uses it as `--head` by default.
 - `config.json`: `{"agent": "<coding agent>", "projects": {"<key fingerprint>": {"project", "env"}}}` (pretty-printed JSON). `agent` is the coding agent detected when the project was set up (§6 client header). It is not stored when `SIGNAFAIDE_TELEMETRY=0`. `projects` maps API keys to their project. Neither holds an API key.
-- `sandbox.json`: written when the SDK creates a sandbox (`signafaide init`): `{"project", "claim_url", "free_quota", "url", "created"}` (pretty-printed JSON), so the claim link can be shown again.
+- `sandbox.json`: written when the SDK creates a sandbox (`signafaide init`): `{"project", "claim_url", "free_quota", "url", "created", "terms_url", "privacy_url"}` (pretty-printed JSON), so the claim link and the Terms and Privacy notice links can be shown again. A client prints the Terms and Privacy notice links when it creates a sandbox; when the service sends none, or anything but an `http(s)` URL, it uses `<url>/legal/terms` and `<url>/legal/privacy`.
 - The API key itself lives in `SIGNAFAIDE_API_KEY`, read from the environment, then from `.env` in the project root. When the SDK creates a sandbox (only on `signafaide init`), it appends `SIGNAFAIDE_API_KEY=...` to `.env` (created with file mode 0600), never changes other lines, and adds `.env` to `.gitignore` the same way as `.signafaide/`, so the key is not committed. The SDK never trusts the service's values for paths or files: an API key must match `^sfa_(test|live)_[0-9A-Za-z]{32}$`, a project id §1, and an env `test` or `live`, before anything is written to `.env` or used in a path.
 
 ## 9. Free quota and sandbox (defaults, configurable)

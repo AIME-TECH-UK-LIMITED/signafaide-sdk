@@ -3,8 +3,8 @@
 Sent: the SDK name and version, the language and runtime version, the framework
 adapter in use, the coding agent that set the project up, and how the request was
 made (sdk, cli or mcp). CLI ``verify`` and ``export`` also send one event naming the
-command. Never sent: content, names, paths, hostnames or anything personal.
-``SIGNAFAIDE_TELEMETRY=0`` drops the adapter, the agent and the events.
+command. Never sent: content, file paths, hostnames or user names.
+``SIGNAFAIDE_TELEMETRY=0`` drops the adapter, the agent, the strict flag and the events.
 """
 
 from __future__ import annotations

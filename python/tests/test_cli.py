@@ -29,7 +29,8 @@ def test_commands_registered():
 
 def test_init_then_claim(cli, project, service):
     code, out, _ = cli("init")
-    assert code == 0 and out.count("\n") == 2 and "claim it at " + service.url in out
+    assert code == 0 and out.count("\n") == 3 and "claim it at " + service.url in out
+    assert f"By creating a sandbox you agree to the signafAIde Terms ({service.url}/legal/terms) and Privacy notice ({service.url}/legal/privacy)." in out
     assert "records written before now ship with their original times" in out
     claim = out.splitlines()[0].rsplit(" ", 1)[1]
     env = (project / ".env").read_text()

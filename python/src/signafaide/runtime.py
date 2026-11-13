@@ -6,6 +6,7 @@ import atexit
 import contextvars
 import logging
 import os
+import re
 import sys
 import threading
 from typing import Dict, Optional, Set, Tuple
@@ -146,12 +147,13 @@ class Recorder:
                 append_env_file(env_file, "SIGNAFAIDE_URL", self.url)
             ensure_gitignore(self.state.root / ".gitignore", ".env")  # the key must not be committed
             self.state.learn_project(key, resp["project"], "test")
+            legal = legal_links(resp, self.url)
             self.state.save_sandbox(
-                {k: resp.get(k) for k in ("project", "claim_url", "free_quota")} | {"url": self.url, "created": now()}
+                {k: resp.get(k) for k in ("project", "claim_url", "free_quota")} | {"url": self.url, "created": now()} | legal
             )
             self._api_key = key
             if not self.quiet:
-                print(f"signafaide: sandbox ready, key saved to .env; claim it at {resp.get('claim_url')}", file=sys.stderr)
+                print(f"signafaide: sandbox ready, key saved to .env; claim it at {resp.get('claim_url')}. {terms_notice(legal)}", file=sys.stderr)
         return key
 
     def _resolve_now(self) -> None:
@@ -364,7 +366,7 @@ class Recorder:
                     resp = client.submit(batch)
                 except SignafaideError as e:
                     if e.code == "unknown_agent":
-                        self._registered.discard((client.api_key, agent))
+                        self._registered.discard((client.api_key, agent, self.key(agent).key_id))
                         self._register(client, agent)
                         resp = client.submit(batch)
                     elif e.code == "chain_conflict":
@@ -398,7 +400,8 @@ class Recorder:
         """§2.4: register the agent's key with its proof of possession, and a rotation
         signature by the newest retired key when there is one."""
         k = self.key(agent)
-        if (client.api_key, agent) in self._registered:
+        # Per key: a key rotated while this process runs (`signafaide keys rotate`) is registered too.
+        if (client.api_key, agent, k.key_id) in self._registered:
             return
         project, env = self.state.bucket(client.api_key).split("/")
         floor = (datetime.now(timezone.utc) - KEY_MAX_AGE).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -414,7 +417,7 @@ class Recorder:
         for r in resp.get("retired") or []:
             if isinstance(r, dict) and isinstance(r.get("key_id"), str) and isinstance(r.get("valid_to"), str):
                 self.state.mark_retired(agent, r["key_id"], r["valid_to"])
-        self._registered.add((client.api_key, agent))
+        self._registered.add((client.api_key, agent, k.key_id))
 
     # --- background thread --------------------------------------------------
 
@@ -544,3 +547,22 @@ def configure(**kwargs) -> Recorder:
         _default = Recorder(**kwargs)
         return _default
 
+
+
+def legal_links(resp: dict, url: str) -> dict:
+    """The Terms and Privacy notice links from a ``POST /v1/sandbox`` answer (or ``sandbox.json``);
+    a service that sends none (or anything but an http(s) URL) gets ``<url>/legal/terms`` and ``/legal/privacy``."""
+
+    def ok(v: object) -> bool:
+        return isinstance(v, str) and len(v) <= 300 and re.fullmatch(r"https?://\S+", v) is not None
+
+    base = url.rstrip("/")
+    return {
+        "terms_url": resp.get("terms_url") if ok(resp.get("terms_url")) else f"{base}/legal/terms",
+        "privacy_url": resp.get("privacy_url") if ok(resp.get("privacy_url")) else f"{base}/legal/privacy",
+    }
+
+
+def terms_notice(links: dict) -> str:
+    """The one line shown when a sandbox is created."""
+    return f"By creating a sandbox you agree to the signafAIde Terms ({links['terms_url']}) and Privacy notice ({links['privacy_url']})."

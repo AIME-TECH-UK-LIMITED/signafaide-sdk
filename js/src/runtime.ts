@@ -52,6 +52,8 @@ export class Recorder {
   /** @internal */ _apiKey?: string;
   /** agent -> [key, the key file's identity when loaded] */
   private keys = new Map<string, [SigningKey, string]>();
+  /** `<api key>\n<agent>\n<key id>` of each key registered by this process: a key rotated
+   * while the process runs (`signafaide keys rotate`) is a new entry, so it gets registered. */
   private registered = new Set<string>();
   private reconciled = new Set<string>();
   private blocked = new Map<string, SignafaideError>();
@@ -122,6 +124,12 @@ export class Recorder {
     }
   }
 
+  /** The Terms and Privacy notice links of this project's sandbox (from the service's answer). */
+  legal(): { terms_url: string; privacy_url: string } {
+    const s = this.state.sandbox();
+    return legalLinks(s ?? {}, s?.url ?? this.url);
+  }
+
   get defaultAgent(): string {
     return agentName(path.basename(this.state.root));
   }
@@ -155,9 +163,10 @@ export class Recorder {
       if (this.url !== DEFAULT_URL && !readEnvFile(envFile).SIGNAFAIDE_URL) appendEnvFile(envFile, "SIGNAFAIDE_URL", this.url);
       ensureGitignore(path.join(this.state.root, ".gitignore"), ".env"); // the key must not be committed
       this.state.learnProject(resp.api_key, resp.project, "test");
-      this.state.saveSandbox({ project: resp.project, claim_url: resp.claim_url, free_quota: resp.free_quota, url: this.url, created: now() });
+      const legal = legalLinks(resp, this.url);
+      this.state.saveSandbox({ project: resp.project, claim_url: resp.claim_url, free_quota: resp.free_quota, url: this.url, created: now(), ...legal });
       this._apiKey = resp.api_key;
-      if (!this.quiet) console.error(`signafaide: sandbox ready, key saved to .env; claim it at ${resp.claim_url}`);
+      if (!this.quiet) console.error(`signafaide: sandbox ready, key saved to .env; claim it at ${resp.claim_url}. ${termsNotice(legal)}`);
       return resp.api_key;
     });
   }
@@ -355,7 +364,7 @@ export class Recorder {
       } catch (e) {
         if (!(e instanceof SignafaideError)) throw e;
         if (e.code === "unknown_agent") {
-          this.registered.delete(`${client.apiKey}\n${agent}`);
+          this.registered.delete(`${client.apiKey}\n${agent}\n${this.key(agent).keyId}`);
           await this.register(client, agent);
           resp = await client.submit(batch);
         } else if (e.code === "chain_conflict") {
@@ -390,11 +399,11 @@ export class Recorder {
   }
 
   private async register(client: Client, agent: string): Promise<void> {
-    const id = `${client.apiKey}\n${agent}`;
+    const k = this.key(agent);
+    const id = `${client.apiKey}\n${agent}\n${k.keyId}`;
     if (this.registered.has(id)) return;
     // §2.4: the registration with its proof of possession, and a rotation signature by the
     // newest retired key when there is one.
-    const k = this.key(agent);
     const [project, env] = this.state.bucket(client.apiKey).split("/");
     const floor = new Date(Date.now() - KEY_MAX_AGE_MS).toISOString().slice(0, 19) + ".000Z";
     const created = this.state.keyCreated(agent) ?? now();
@@ -533,4 +542,17 @@ export function configure(opts: RecorderOptions = {}): Recorder {
   current?.close();
   current = new Recorder(opts);
   return current;
+}
+
+/** The Terms and Privacy notice links from a `POST /v1/sandbox` answer (or `sandbox.json`); a
+ * service that sends none (or anything but an http(s) URL) gets `<url>/legal/terms` and `/legal/privacy`. */
+export function legalLinks(resp: { terms_url?: unknown; privacy_url?: unknown }, url: string): { terms_url: string; privacy_url: string } {
+  const ok = (v: unknown): v is string => typeof v === "string" && v.length <= 300 && /^https?:\/\/[^\s]+$/.test(v);
+  const base = url.replace(/\/+$/, "");
+  return { terms_url: ok(resp.terms_url) ? resp.terms_url : `${base}/legal/terms`, privacy_url: ok(resp.privacy_url) ? resp.privacy_url : `${base}/legal/privacy` };
+}
+
+/** The one line shown when a sandbox is created. */
+export function termsNotice(l: { terms_url: string; privacy_url: string }): string {
+  return `By creating a sandbox you agree to the signafAIde Terms (${l.terms_url}) and Privacy notice (${l.privacy_url}).`;
 }

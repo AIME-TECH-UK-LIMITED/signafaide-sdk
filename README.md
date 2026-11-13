@@ -3,7 +3,7 @@
 signafAIde records the decisions AI agents make. Each record is signed with the agent's own key and chained on the machine that wrote it. Once a person opts in, a witness (the signafAIde service, or one you host) co-signs it and timestamps it publicly, so neither side can forge or edit a record alone. It attests integrity and timing, never whether a decision was right.
 
 - **Local first:** with no API key, records are signed, chained and verified in `.signafaide/`, and nothing is sent. Sending starts only when a person runs `signafaide init` (a sandbox: no account, email or card) or sets `SIGNAFAIDE_API_KEY`.
-- **Hashes only:** after the opt-in, only hashes leave the machine (plus each record's tool name, agent name and time), never inputs, outputs or personal data, unless you turn on stored content.
+- **Hashes, not content:** after the opt-in, each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs, unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them.
 - **Your environment:** self-host the witness and point the SDKs at it with `SIGNAFAIDE_URL` ([self-host guide](https://signafaide.com/docs/self-host)).
 - **Independent checks:** the protocol is a public spec with test vectors, and the verifier checks a verification pack without our service.
 

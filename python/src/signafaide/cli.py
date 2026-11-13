@@ -46,6 +46,7 @@ def cmd_init(a: argparse.Namespace) -> int:
     claim = sandbox.get("claim_url")
     if not had:
         print(f"sandbox ready at {rec.url}, key saved to {rec.state.root / '.env'}; claim it at {claim}")
+        print(runtime.terms_notice(runtime.legal_links(sandbox, sandbox.get("url") or rec.url)))
         print("from now on record hashes (never content) are sent for co-signature and public timestamps; "
               "records written before now ship with their original times on the next run or with `signafaide flush`")
     elif key.startswith("sfa_test_") and claim:

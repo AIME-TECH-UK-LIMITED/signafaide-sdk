@@ -9,7 +9,7 @@ import { verify } from "./index.js";
 import { VerificationFailed, compare } from "./experiments.js";
 import { replay } from "./replay.js";
 import { plural } from "./plural.js";
-import { configure, envOf, type Recorder } from "./runtime.js";
+import { configure, envOf, termsNotice, type Recorder } from "./runtime.js";
 import { StateError, findRoot } from "./state.js";
 import { AGENT_IDS, SETUP_NOTES, setup } from "./agents.js";
 import { KeysRequired } from "./verifier.js";
@@ -67,6 +67,7 @@ export const COMMANDS: Record<string, Command> = {
       const claim = rec.state.sandbox()?.claim_url;
       if (!had) {
         out(`sandbox ready at ${rec.url}, key saved to ${path.join(rec.state.root, ".env")}; claim it at ${claim}`);
+        out(termsNotice(rec.legal()));
         out("from now on record hashes (never content) are sent for co-signature and public timestamps; records written before now ship with their original times on the next run or with `signafaide flush`");
       }
       else if (key.startsWith("sfa_test_") && claim) out(`key found (${mask(key)}); claim the sandbox at ${claim}`);

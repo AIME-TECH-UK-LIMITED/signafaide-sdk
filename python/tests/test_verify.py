@@ -392,3 +392,19 @@ def test_rotation_retires_the_old_key(recorder, service, keys):
     pack = recorder.client().export(agent)
     r = _verify_pack(pack, keys, agent_keys=signafaide.load_agent_keys(manifest))
     assert r.ok, str(r)
+
+
+def test_rotation_in_a_running_process_registers_the_new_key(recorder, service):
+    signafaide.note("a", {})
+    assert signafaide.flush()["shipped"] == 1  # the first key is registered in this process
+    agent = recorder.default_agent
+    # What `signafaide keys rotate` does (from this process or another one): a new key file.
+    old, new = recorder.state.rotate_key(agent)
+    signafaide.note("b", {})  # signed by the new key
+    r = signafaide.flush()
+    assert r["errors"] == {} and r["shipped"] == 1, r
+    prj = next(iter(service.projects.values()))
+    assert prj["agents"][agent][new.key_id]["valid_to"] is None
+    assert prj["agents"][agent][old.key_id]["valid_to"] == recorder.state.retired_at(agent, old.key_id)
+    v = signafaide.verify()
+    assert v.ok, str(v)

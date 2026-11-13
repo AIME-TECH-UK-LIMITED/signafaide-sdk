@@ -87,6 +87,7 @@ describe("mcp server", () => {
     [out, err] = await call("signafaide_init");
     expect(err).toBe(false);
     expect(out).toMatch(/Created a sandbox at .*claim link.*\/claim\//);
+    expect(out).toContain(`Tell the human: By creating a sandbox you agree to the signafAIde Terms (${ctx.service.url}/legal/terms) and Privacy notice (${ctx.service.url}/legal/privacy).`);
     expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf8")).toMatch(/^SIGNAFAIDE_API_KEY=sfa_test_/);
     expect(fs.readFileSync(path.join(ctx.root, ".gitignore"), "utf8").split("\n")).toEqual(expect.arrayContaining([".signafaide/", ".env"]));
     [out] = await call("signafaide_init");

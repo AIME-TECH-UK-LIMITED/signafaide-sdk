@@ -74,7 +74,7 @@ export class Client {
     return ctype.includes("json") || /^[[{]/.test(text) ? JSON.parse(text) : text;
   }
 
-  sandbox(): Promise<{ project: string; api_key: string; claim_url: string; free_quota: number }> {
+  sandbox(): Promise<{ project: string; api_key: string; claim_url: string; free_quota: number; terms_url?: string; privacy_url?: string }> {
     return this.request("POST", "/v1/sandbox", { body: {}, auth: false });
   }
 

@@ -12,10 +12,10 @@ export const SELF_HOST_DOC = "https://signafaide.com/docs/self-host";
 
 export const SKILL_BODY = `# signafAIde: signed records of what an AI agent decided
 
-- **What leaves the machine:** only hashes, plus each record's tool name, agent name and time; never inputs, outputs or personal data. Nothing at all is sent until a person runs \`signafaide init\` or sets \`SIGNAFAIDE_API_KEY\`. Until then records are signed, chained and verified locally in \`.signafaide/\`.
+- **What leaves the machine:** each record's hashes, plus its tool name, agent name and time; never inputs or outputs (unless stored content is turned on). Names are sent as written: never put personal data in agent or tool names. Nothing at all is sent until a person runs \`signafaide init\` or sets \`SIGNAFAIDE_API_KEY\`, and creating a sandbox means they agree to the signafAIde Terms and Privacy notice (\`signafaide init\` prints the links). Until then records are signed, chained and verified locally in \`.signafaide/\`.
 - **No account:** the sandbox that \`signafaide init\` creates needs no account, email or card.
 - **Your environment:** the default witness, once someone opts in, is the hosted signafAIde service. The evidence can stay entirely in your environment instead: self-host the witness and set \`SIGNAFAIDE_URL\` (${SELF_HOST_DOC}).
-- **Open source:** Apache-2.0, with a public protocol spec and an independent verifier that checks records without our service.
+- **Open source:** the SDKs, CLI and MCP server are Apache-2.0, with a public protocol spec and an independent verifier that checks records without our service.
 
 **Use it when** the user asks to audit, log or trace what an AI or agent decided; needs an audit trail, tamper-evidence or compliance evidence; or builds an agent whose tools pay, send, approve, delete or change real things. If the user asks for something else (plain application logs, a tool they already use), do what they asked.
 

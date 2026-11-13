@@ -4,8 +4,8 @@
  * Sent: the SDK name and version, the runtime and its version, the framework adapter
  * in use, the coding agent that set the project up, and how the request was made
  * (sdk, cli or mcp). CLI `verify` and `export` also send one event naming the command.
- * Never sent: content, names, paths, hostnames or anything personal.
- * `SIGNAFAIDE_TELEMETRY=0` drops the adapter, the agent and the events.
+ * Never sent: content, file paths, hostnames or user names.
+ * `SIGNAFAIDE_TELEMETRY=0` drops the adapter, the agent, the strict flag and the events.
  */
 
 import { VERSION } from "./version.js";
