@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
+import secrets
 from typing import Any, Sequence
 
 from cryptography.exceptions import InvalidSignature
@@ -15,6 +16,7 @@ from .jcs import canonicalize
 
 DOMAINS = ("record", "batch", "head", "anchor", "register", "rotate", "agent_key", "export", "draft")
 HEX64 = re.compile(r"\A[0-9a-f]{64}\Z")
+SALT_RE = re.compile(r"\A[0-9a-f]{32}\Z")
 _B64URL = re.compile(r"\A[A-Za-z0-9_-]*\Z")
 
 
@@ -25,6 +27,34 @@ def sha256_hex(data: bytes) -> str:
 def hash_json(value: Any) -> str:
     """sha256(JCS(value)) as 64 lowercase hex."""
     return sha256_hex(canonicalize(value))
+
+
+def new_salt() -> str:
+    """A fresh content salt (SPEC §2.1): 16 random bytes as 32 lowercase hex."""
+    return secrets.token_hex(16)
+
+
+def content_hash(content: Any, salt: str) -> str:
+    """sha256(salt || JCS(content)) as 64 lowercase hex (SPEC §2.1); content is a JSON object."""
+    if not isinstance(content, dict):
+        raise ValueError("content must be a JSON object")
+    if not isinstance(salt, str) or not SALT_RE.match(salt):
+        raise ValueError("salt must be 32 lowercase hex characters (16 bytes)")
+    return sha256_hex(bytes.fromhex(salt) + canonicalize(content))
+
+
+def check_content(content: Any, salt: Any, expected: str) -> "str | None":
+    """The §2.3 content rule: ``content`` and ``salt`` together or not at all. Returns None when
+    they match ``expected`` (or are both absent); raises ValueError when they cannot be checked;
+    returns the actual hash on a mismatch."""
+    if content is None and salt is None:
+        return None
+    if salt is None:
+        raise ValueError("content is present without its salt")
+    if content is None:
+        raise ValueError("salt is present without content")
+    h = content_hash(content, salt)
+    return None if h == expected else h
 
 
 def b64url(data: bytes) -> str:

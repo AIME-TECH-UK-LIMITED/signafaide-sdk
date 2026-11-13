@@ -9,6 +9,10 @@ import { clientHeader, detectAgent } from "../src/telemetry.js";
 import { VERSION } from "../src/version.js";
 import { deadUrl, useProject } from "./helpers.js";
 
+/** The result line without its check counts (§7), to compare the rest. */
+const noCounts = (line: string | undefined): string => (line ?? "").replace(/: \d+ of 12 checks [^;]*; /, ": ").replace(/: \d+ of 12 checks [^;]*$/, "");
+
+
 const ctx = useProject({ optIn: true });
 
 describe("detectAgent", () => {
@@ -121,7 +125,7 @@ describe("CLI events", () => {
     process.env.SIGNAFAIDE_URL = await deadUrl(); // the event cannot be delivered
     const [code, out, err] = await cli("verify", pack, "--keys", keys);
     expect(code).toBe(0);
-    expect(out.split("\n").at(-1)).toMatch(/^PASS: export of every agent, all records, generated /);
+    expect(noCounts(out.split("\n").at(-1))).toMatch(/^PASS: export of every agent, all records, generated /);
     expect(err).toBe("");
   });
 

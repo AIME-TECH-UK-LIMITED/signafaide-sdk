@@ -8,9 +8,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { sha256 } from "@noble/hashes/sha2";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils";
 import { beforeAll, describe, expect, it } from "vitest";
-import { SigningKey, auditPath, b64url, hashJson, leafHash, merkleRoot, signedMessage, verifyInclusion, verifySig } from "../src/crypto.js";
+import { SigningKey, auditPath, b64url, contentHash, hashJson, leafHash, merkleRoot, sha256Hex, signedMessage, verifyInclusion, verifySig } from "../src/crypto.js";
 import { assertPortableNumbers, canonicalize, parseJson } from "../src/jcs.js";
 import { MAX_NODES, MAX_PROOF_BYTES, base64Decode, blockAttestations, otsStatus, parseOts } from "../src/ots.js";
 import { AGENT_RE, envelopeErrors, manifestEntry, validProjectId, validTime } from "../src/records.js";
@@ -98,7 +98,8 @@ describe.skipIf(!v)("spec/vectors.json", () => {
   it("records", () => {
     for (const r of v.records) {
       expect(canonicalize(r.content)).toBe(r.content_jcs);
-      expect(hashJson(r.content)).toBe(r.content_hash);
+      expect(contentHash(r.content, r.salt)).toBe(r.content_hash);
+      expect(sha256Hex(concatBytes(hexToBytes(r.salt), new TextEncoder().encode(r.content_jcs)))).toBe(r.content_hash);
       expect(canonicalize(r.envelope)).toBe(r.envelope_jcs);
       expect(hashJson(r.envelope)).toBe(r.record_hash);
       expect(envelopeErrors(r.envelope)).toEqual([]);
@@ -211,7 +212,7 @@ describe.skipIf(!v)("spec/vectors.json", () => {
   });
 
   it("tampered packs fail at the expected check", () => {
-    expect(v.tampered.length).toBe(46);
+    expect(v.tampered.length).toBe(48);
     for (const c of v.tampered) {
       const r = verifyPack(c.pack, ...inputs(c, { drand }));
       expect(r.firstFailed(), c.tamper).toBe(c.first_failed);

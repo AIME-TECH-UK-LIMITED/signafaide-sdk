@@ -3,7 +3,7 @@
 signafAIde records the decisions AI agents make. Each record is signed with the agent's own key and chained on the machine that wrote it. Once a person opts in, a witness (the signafAIde service, or one you host) co-signs it and timestamps it publicly, so neither side can forge or edit a record alone. It attests integrity and timing, never whether a decision was right.
 
 - **Local first:** with no API key, records are signed, chained and verified in `.signafaide/`, and nothing is sent. Sending starts only when a person runs `signafaide init` (a sandbox: no account, email or card) or sets `SIGNAFAIDE_API_KEY`.
-- **Hashes, not content:** after the opt-in, each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs, unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them.
+- **Hashes, not content:** after the opt-in, each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs, unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them. Each content hash is salted with 16 random bytes that stay on your machine with the content, so the hash alone cannot be used to guess the content, even when it has only a few possible values.
 - **Your environment:** self-host the witness and point the SDKs at it with `SIGNAFAIDE_URL` ([self-host guide](https://signafaide.com/docs/self-host)).
 - **Independent checks:** the protocol is a public spec with test vectors, and the verifier checks a verification pack without our service.
 
@@ -31,10 +31,10 @@ Wrap the tools that act, run the agent, then `signafaide verify` (`npx signafaid
 ## Verify without our service
 
 ```bash
-cargo run --manifest-path verifier/Cargo.toml -- pack.json --keys keys.json --agent-keys agent-keys.json --offline
+cargo run --manifest-path verifier/Cargo.toml -- pack.json --keys keys.json --agent-keys agent-keys.json --head head.json --offline
 ```
 
-The service keys come from the witness's `/.well-known/signafaide-keys.json` (or a file), the agent keys from the customer's `signafaide keys export`. The Python and TypeScript SDKs run the same checks (`signafaide verify pack.json`). Every verifier gives the same check ids, statuses and result for the same inputs (spec §7).
+The service keys come from the witness's `/.well-known/signafaide-keys.json` (or a file). The agent keys, `agent-keys.json`, come from the customer, who runs `signafaide keys export` and hands the file over with the pack. `--head` is optional: the customer's newest signed head (`.signafaide/head.json`), which proves no record was dropped from the end. `--offline` skips the public timestamp lookup, so that check is reported as not checked, never as passed: the result line says how many of the 12 checks ran, for example `PASS: 11 of 12 checks passed, 1 not checked (public timestamp)`. The Python and TypeScript SDKs run the same checks (`signafaide verify pack.json`). Every verifier gives the same check ids, statuses and result for the same inputs (spec §7).
 
 ## License
 

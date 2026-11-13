@@ -41,7 +41,7 @@ description: Signed, tamper-evident records of what an AI agent decided and did,
 
 ## Sending hashes to a witness (a person's decision)
 
-Co-signature and the public timestamp need a witness. Do not run `signafaide init` yourself: it creates an external sandbox. In your final message, tell the user plainly that the records are local only for now, and that they can run `signafaide init` (a free sandbox, no account; it saves `SIGNAFAIDE_API_KEY` to `.env` and prints a claim link), set `SIGNAFAIDE_API_KEY`, or self-host and set `SIGNAFAIDE_URL`. Records written before that ship afterwards with their original times (up to 7 days old). Content stays local unless they turn on `store_content` (sent encrypted; live records need the Team plan). The SDK adds `.signafaide/` (agent keys and the local evidence chain) and `.env` to `.gitignore`; do not commit them, and tell the user to back up the keys.
+Co-signature and the public timestamp need a witness. Do not run `signafaide init` yourself: it creates an external sandbox. In your final message, tell the user plainly that the records are local only for now, and that they can run `signafaide init` (a free sandbox, no account; it saves `SIGNAFAIDE_API_KEY` to `.env` and prints a claim link), set `SIGNAFAIDE_API_KEY`, or self-host and set `SIGNAFAIDE_URL`. Records written before that ship afterwards with their original times (up to 7 days old). Content stays local unless they turn on `store_content` (sent encrypted; live records need the Team plan). The SDK adds `.signafaide/` (agent keys and the local evidence chain) to `.gitignore`, and `.env` too when it saves a key there (`signafaide init`); do not commit them, and tell the user to back up the keys.
 
 ## With the signafaide MCP tools
 

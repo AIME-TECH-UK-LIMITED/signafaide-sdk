@@ -10,6 +10,7 @@ ed.etc.sha512Sync = (...m: Uint8Array[]) => sha512(concatBytes(...m));
 export const DOMAINS = ["record", "batch", "head", "anchor", "register", "rotate", "agent_key", "export", "draft"] as const;
 export type Domain = (typeof DOMAINS)[number];
 export const HEX64 = /^[0-9a-f]{64}$/;
+export const SALT_RE = /^[0-9a-f]{32}$/;
 const encoder = new TextEncoder();
 
 export function sha256Hex(data: Uint8Array): string {
@@ -19,6 +20,29 @@ export function sha256Hex(data: Uint8Array): string {
 /** sha256(JCS(value)) as 64 lowercase hex. */
 export function hashJson(value: unknown): string {
   return sha256Hex(canonicalBytes(value));
+}
+
+/** A fresh content salt (SPEC §2.1): 16 random bytes as 32 lowercase hex. */
+export function newSalt(): string {
+  return bytesToHex(randomBytes(16));
+}
+
+/** sha256(salt || JCS(content)) as 64 lowercase hex (SPEC §2.1); content is a JSON object. */
+export function contentHash(content: unknown, salt: string): string {
+  if (!content || typeof content !== "object" || Array.isArray(content)) throw new Error("content must be a JSON object");
+  if (typeof salt !== "string" || !SALT_RE.test(salt)) throw new Error("salt must be 32 lowercase hex characters (16 bytes)");
+  return sha256Hex(concatBytes(hexToBytes(salt), canonicalBytes(content)));
+}
+
+/** The §2.3 content rule: `content` and `salt` together or not at all. Returns null when they
+ * match `expected` (or are both absent); throws when they cannot be checked; returns the actual
+ * hash on a mismatch. */
+export function checkContent(content: unknown, salt: unknown, expected: string): string | null {
+  if (content === undefined && salt === undefined) return null;
+  if (salt === undefined) throw new Error("content is present without its salt");
+  if (content === undefined) throw new Error("salt is present without content");
+  const h = contentHash(content, salt as string);
+  return h === expected ? null : h;
 }
 
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";

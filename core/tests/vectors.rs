@@ -45,7 +45,13 @@ fn record_vectors() {
     let agent = &v["keys"][0];
     for r in v["records"].as_array().unwrap() {
         assert_eq!(jcs::canonicalize(&r["content"]).unwrap(), r["content_jcs"].as_str().unwrap());
-        assert_eq!(sha256(r["content_jcs"].as_str().unwrap().as_bytes()), h(&r["content_hash"]));
+        let mut salted = hex::decode(r["salt"].as_str().unwrap()).unwrap();
+        assert_eq!(salted.len(), 16);
+        salted.extend_from_slice(r["content_jcs"].as_str().unwrap().as_bytes());
+        assert_eq!(sha256(&salted), h(&r["content_hash"]));
+        assert_eq!(content_hash(&r["content"], r["salt"].as_str().unwrap()).unwrap(), h(&r["content_hash"]));
+        // Unsalted, or with another salt, the content no longer gives the hash (§2.1).
+        assert_ne!(sha256(r["content_jcs"].as_str().unwrap().as_bytes()), h(&r["content_hash"]));
         let e = Envelope::parse(&r["envelope"]).unwrap();
         assert_eq!(jcs::canonicalize(&r["envelope"]).unwrap(), r["envelope_jcs"].as_str().unwrap());
         assert_eq!(e.record_hash().unwrap(), h(&r["record_hash"]));
@@ -229,7 +235,7 @@ fn valid_pack_passes() {
 fn every_tampered_pack_fails_at_its_check() {
     let v = vectors();
     let tampered = v["tampered"].as_array().unwrap();
-    assert_eq!(tampered.len(), 46, "one tampered pack per rule");
+    assert_eq!(tampered.len(), 48, "one tampered pack per rule");
     for id in v["check_ids"].as_array().unwrap() {
         assert!(tampered.iter().any(|t| t["check"] == *id), "no tampered pack for {id}");
     }
@@ -261,7 +267,7 @@ fn keys_are_required_and_embedded_keys_warn() {
     o.trust_embedded_keys = true;
     let r = verify_pack(pack, &o).unwrap();
     assert!(r.passed() && r.warnings.len() == 1);
-    let scope = ": export of every agent, all records, generated 2026-11-13T12:00:00.000Z";
+    let scope = ": 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z";
     assert_eq!(r.result_line(), format!("PASS (service keys taken from the pack, not independent){scope}"));
     // Without independent agent keys check 3 fails, unless they are trusted explicitly.
     let r = verify_pack(pack, &Options { trust_embedded_keys: true, ..Default::default() }).unwrap();
@@ -282,6 +288,7 @@ fn local_content_is_checked() {
     let mut pack = v["pack"]["pack"].clone();
     for r in pack["records"].as_array_mut().unwrap() {
         r.as_object_mut().unwrap().remove("content");
+        r.as_object_mut().unwrap().remove("salt");
     }
     let none = verify_pack(&pack, &keys(&v)).unwrap();
     assert_eq!(none.check("content").status, Status::NotChecked);
@@ -290,7 +297,7 @@ fn local_content_is_checked() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|r| json!({"envelope": r["envelope"], "content": r["content"]}).to_string())
+        .map(|r| json!({"envelope": r["envelope"], "content": r["content"], "salt": r["salt"]}).to_string())
         .collect();
     let mut opts = keys(&v);
     opts.contents = contents_from_text(&lines.join("\n")).unwrap();
@@ -299,7 +306,11 @@ fn local_content_is_checked() {
 
     let mut bad = v["records"][3].clone();
     bad["content"]["output"]["refund"] = json!(true);
-    opts.contents = contents_from_text(&json!({"envelope": bad["envelope"], "content": bad["content"]}).to_string()).unwrap();
+    opts.contents = contents_from_text(&json!({"envelope": bad["envelope"], "content": bad["content"], "salt": bad["salt"]}).to_string()).unwrap();
+    assert_eq!(verify_pack(&pack, &opts).unwrap().first_failed(), Some("content"));
+    // Without its salt the content cannot be checked against the hash: a failure, never a pass.
+    let good = &v["records"][3];
+    opts.contents = contents_from_text(&json!({"envelope": good["envelope"], "content": good["content"]}).to_string()).unwrap();
     assert_eq!(verify_pack(&pack, &opts).unwrap().first_failed(), Some("content"));
 }
 

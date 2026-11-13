@@ -10,6 +10,11 @@ from signafaide.cli import main
 from signafaide.telemetry import client_header, detect_agent
 
 
+def no_counts(line: str) -> str:
+    """The result line without its check counts (§7), to compare the rest."""
+    return re.sub(r": \d+ of 12 checks [^;]*; ", ": ", re.sub(r": \d+ of 12 checks [^;]*$", "", line))
+
+
 @pytest.mark.parametrize(
     "env,agent",
     [
@@ -128,7 +133,7 @@ def test_cli_events_never_fail_the_command(cli, service, tmp_path, monkeypatch, 
     keys.write_text(json.dumps({"keys": [service.key_doc]}))
     monkeypatch.setenv("SIGNAFAIDE_URL", dead_url)  # the event cannot be delivered
     code, out = cli("verify", str(pack), "--keys", str(keys))
-    assert code == 0 and out.out.strip().splitlines()[-1].startswith("PASS: export of every agent, all records, generated ") and out.err == ""
+    assert code == 0 and no_counts(out.out.strip().splitlines()[-1]).startswith("PASS: export of every agent, all records, generated ") and out.err == ""
 
 
 def test_cli_opt_out_sends_no_events(cli, service, tmp_path, monkeypatch):

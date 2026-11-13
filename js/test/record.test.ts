@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { flush, init, note, record, NotRecorded } from "../src/index.js";
-import { hashJson } from "../src/crypto.js";
+import { contentHash } from "../src/crypto.js";
 import { makeDraft, recordHash } from "../src/records.js";
 import { configure, getRecorder } from "../src/runtime.js";
 import { chainFile, chainOf, deadUrl, errorFor, records, useProject } from "./helpers.js";
@@ -18,7 +18,7 @@ describe("record", () => {
     expect(d.envelope).toMatchObject({ kind: "decision", name: "approve_payout", agent: "claims-project", seq: 1 });
     expect(d.content!.input).toEqual(["c-1", 12.5]);
     expect((d.content!.meta as any).sdk).toMatch(/^signafaide-js\//);
-    expect(d.envelope.content_hash).toBe(hashJson(d.content));
+    expect(d.envelope.content_hash).toBe(contentHash(d.content!, d.salt!));
     expect(o.envelope).toMatchObject({ kind: "outcome", ref: recordHash(d), prev: recordHash(d) });
     expect(o.content).toEqual({ output: { approved: true, amount: 12.5, claimId: "c-1" } });
   });

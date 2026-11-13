@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from . import ots
 from ._plural import plural
 from .bitcoin import check_header
-from .crypto import HEX64, b64url, b64url_decode, hash_json, key_id, sha256_hex, verify_inclusion, verify_sig
+from .crypto import HEX64, b64url, b64url_decode, check_content, hash_json, key_id, sha256_hex, verify_inclusion, verify_sig
 from .records import AGENT_RE, MAX_CLOCK_SKEW_MS, draft_errors, key_entry_errors, manifest_errors, parse_time, receipt_errors, record_errors, valid_project_id
 
 CHECKS = [
@@ -107,8 +107,43 @@ def scope_text(filter: dict, generated: str) -> str:
     return f"export of {who}, {window}, generated {generated}"
 
 
-def result_line(result: str, service: str = INDEPENDENT, agent: str = INDEPENDENT, by_service: bool = False, scope: Optional[str] = None) -> str:
-    """`PASS` or `FAIL`; on PASS, why keys were not independent; then what the pack covers (§7)."""
+#: The short name of each check in the result line (§7).
+SHORT_NAMES = {
+    "schema": "envelope schema", "record_hash": "record hashes", "record_sig": "client signatures", "chain": "agent chains",
+    "merkle": "Merkle proofs", "batch_sig": "batch signatures", "batch_chain": "batch chain", "head_sig": "signed heads",
+    "drand": "drand rounds", "anchor": "anchors", "ots": "public timestamp", "content": "content hashes",
+}
+#: The checks of the witness's part: locally, while nothing is co-signed, they are named together (§7).
+WITNESS_CHECKS = ("record_hash", "merkle", "batch_sig", "batch_chain", "head_sig", "drand", "anchor", "ots")
+NOTHING_COSIGNED = "nothing co-signed yet"
+
+
+def counts_text(checks: List[Tuple[str, str]], nothing_cosigned: bool = False) -> str:
+    """How many checks passed, failed and were not checked (§7 result line)."""
+    total = len(checks)
+    failed = [SHORT_NAMES[i] for i, st in checks if st == FAIL]
+    unchecked_ids = [i for i, st in checks if st == NOT_CHECKED]
+    passed = total - len(failed) - len(unchecked_ids)
+    if failed:
+        out = f"{len(failed)} of {total} checks failed ({', '.join(failed)})"
+        if passed:
+            out += f", {passed} passed"
+        if unchecked_ids:
+            out += f", {len(unchecked_ids)} not checked"
+        return out
+    out = f"{passed} of {total} checks passed"
+    if unchecked_ids:
+        names = [SHORT_NAMES[i] for i in unchecked_ids]
+        if nothing_cosigned and any(i in WITNESS_CHECKS for i in unchecked_ids):
+            names = [NOTHING_COSIGNED] + [SHORT_NAMES[i] for i in unchecked_ids if i not in WITNESS_CHECKS]
+        out += f", {len(unchecked_ids)} not checked ({', '.join(names)})"
+    return out
+
+
+def result_line(result: str, service: str = INDEPENDENT, agent: str = INDEPENDENT, by_service: bool = False, scope: Optional[str] = None,
+                counts: str = "") -> str:
+    """`PASS` or `FAIL`; on PASS, why keys were not independent; then how many checks ran and
+    what the pack covers (§7)."""
     out = result
     if result == "PASS":
         if by_service:
@@ -117,8 +152,10 @@ def result_line(result: str, service: str = INDEPENDENT, agent: str = INDEPENDEN
             r = _key_reasons(service, agent)
             if r:
                 out += f" ({r}, not independent)"
+    if counts:
+        out += f": {counts}"
     if scope:
-        out += f": {scope}"
+        out += f"; {scope}" if counts else f": {scope}"
     return out
 
 
@@ -138,6 +175,8 @@ class Report:
     #: Lines shown after the checks, before the result line: for local state, what still needs
     #: the witness (co-signature, public timestamp).
     after: List[str] = field(default_factory=list)
+    #: Local state with no record co-signed yet: the result line says so (§7).
+    nothing_cosigned: bool = False
 
     @property
     def ok(self) -> bool:
@@ -170,7 +209,8 @@ class Report:
     @property
     def result_line(self) -> str:
         scope = scope_text(self.filter, self.generated) if self.filter is not None and self.generated else None
-        return result_line(self.result, self.sources[0], self.sources[1], self.by_service, scope)
+        counts = counts_text([(c.id, c.status) for c in self.checks], self.nothing_cosigned)
+        return result_line(self.result, self.sources[0], self.sources[1], self.by_service, scope, counts)
 
     def __str__(self) -> str:
         return "\n".join(self.lines())
@@ -288,8 +328,8 @@ def load_heads(src: Any) -> List[dict]:
 
 
 def load_content(src: Any) -> Dict[str, dict]:
-    """record_hash -> content from JSON lines or a JSON array of ``{envelope, content}``
-    objects (a chain .jsonl file), or from every ``*.jsonl`` below a directory (§7)."""
+    """record_hash -> ``{content, salt}`` from JSON lines or a JSON array of ``{envelope, content,
+    salt}`` objects (a chain .jsonl file), or from every ``*.jsonl`` below a directory (§7)."""
     p = Path(src)
     files = sorted(p.rglob("*.jsonl")) if p.is_dir() else [p]
     out: Dict[str, dict] = {}
@@ -302,7 +342,8 @@ def load_content(src: Any) -> Dict[str, dict]:
             items = [loads(line) for line in text.splitlines() if line.strip()]
         for item in items:
             if isinstance(item, dict) and isinstance(item.get("envelope"), dict) and isinstance(item.get("content"), dict) and "draft" not in item:
-                out[hash_json(item["envelope"])] = item["content"]
+                salt = item.get("salt") if isinstance(item.get("salt"), str) else None
+                out[hash_json(item["envelope"])] = {"content": item["content"], "salt": salt}
     return out
 
 
@@ -428,8 +469,9 @@ def verify_local(
                   for k in state.agent_public_keys()]
     heads = {c: h for c, h in state.chain_heads().items() if chains is None or c in chains}
     v = _Verifier(service_keys, agent_keys, {}, project=None, env=None, local=True, local_heads=heads, drand=drand)
-    return Report(v.run(records, [], chain_ids), records=len(records), independent={"service_keys": not service_keys_plain_http, "agent_keys": True},
-                  sources=(PLAIN_HTTP if service_keys_plain_http else INDEPENDENT, INDEPENDENT))
+    checks = v.run(records, [], chain_ids)
+    return Report(checks, records=len(records), independent={"service_keys": not service_keys_plain_http, "agent_keys": True},
+                  sources=(PLAIN_HTTP if service_keys_plain_http else INDEPENDENT, INDEPENDENT), nothing_cosigned=v.nothing_cosigned)
 
 
 def _signed_head_errors(sh: Any) -> str:
@@ -592,6 +634,7 @@ class _Verifier:
             f = _epoch_ms(k.get("valid_from"))
             if f is not None and isinstance(k.get("agent"), str):
                 self.first_key[k["agent"]] = min(self.first_key.get(k["agent"], f), f)
+        self.nothing_cosigned = False
         self.drafts = 0  # local drafts waiting for the project (§8): not a reason for "no records"
         self.chain_of: Dict[int, str] = {}  # id(record) -> chain id (local state)
         self.acc = [_Acc() for _ in CHECKS]
@@ -654,6 +697,7 @@ class _Verifier:
         self.anchors(anchors, batches)
         self.content(recs)
         if self.local and not shipped and recs:
+            self.nothing_cosigned = True
             # Local records no witness has co-signed yet: the checks of the witness's part are not passes.
             for i in (1, 4, 5, 6, 7):
                 if a[i].checked or a[i].failures:
@@ -1098,16 +1142,19 @@ class _Verifier:
     def content(self, recs: list) -> None:
         acc = self.acc[11]
         for label, r, h in recs:
-            c = r.get("content") if isinstance(r.get("content"), dict) else self.contents.get(h)
-            if c is None:
+            c, salt = r.get("content"), r.get("salt")
+            local = self.contents.get(h)
+            if c is None and salt is None and local is not None:
+                c, salt = local["content"], local["salt"]
+            if c is None and salt is None:
                 continue
             acc.checked += 1
             try:
-                ch = hash_json(c)
+                ch = check_content(c, salt, r["envelope"]["content_hash"])
             except (ValueError, TypeError) as e:
                 acc.fail(label, str(e))
                 continue
-            if ch != r["envelope"]["content_hash"]:
+            if ch is not None:
                 acc.fail(label, f"content hashes to {ch}, envelope says {r['envelope']['content_hash']}")
         if not acc.checked:
             acc.not_checked = True

@@ -15,6 +15,10 @@ import { sha256 } from "@noble/hashes/sha2";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import { target } from "../src/timestamps.js";
 
+/** The result line without its check counts (§7), to compare the rest. */
+const noCounts = (line: string | undefined): string => (line ?? "").replace(/: \d+ of 12 checks [^;]*; /, ": ").replace(/: \d+ of 12 checks [^;]*$/, "");
+
+
 const SCOPE = ": export of agent claims-project, all records, generated ";
 /** What only the service can do: sign a changed pack's export statement again (§7). */
 const resign = (p: any) => ctx.service.signExport(p);
@@ -69,7 +73,7 @@ describe("pack verifier", () => {
     expect(lines[0]).toMatch(/^signafAIde pack prj_\w+ \(test\), 5 records$/);
     expect(lines[1]).toMatch(/^ 1\. Envelope schema +PASS +5 records$/);
     expect(lines).toHaveLength(14);
-    expect(lines.at(-1)).toBe(`PASS${SCOPE}${pack.generated}`);
+    expect(noCounts(lines.at(-1))).toBe(`PASS${SCOPE}${pack.generated}`);
   });
 
   it("checks content from the local chain", () => {
@@ -82,7 +86,7 @@ describe("pack verifier", () => {
     const r = verifyPack(pack, keys);
     expect(r.firstFailed()).toBe("record_hash");
     expect(failed(r)).toEqual(expect.arrayContaining(["record_hash", "record_sig", "chain", "merkle"]));
-    expect(String(r).split("\n").at(-1)).toBe(`FAIL${SCOPE}${pack.generated}`);
+    expect(noCounts(String(r).split("\n").at(-1))).toBe(`FAIL${SCOPE}${pack.generated}`);
   });
 
   it("catches edited content", () => {
@@ -129,7 +133,7 @@ describe("pack verifier", () => {
     expect(String(r)).toContain("NOT INDEPENDENT");
     const t = verifyPackRaw(pack, keys, { trustEmbeddedAgentKeys: true });
     expect(t.ok).toBe(true);
-    expect(String(t).split("\n").at(-1)).toBe(`PASS (agent keys taken from the pack, not independent)${SCOPE}${pack.generated}`);
+    expect(noCounts(String(t).split("\n").at(-1))).toBe(`PASS (agent keys taken from the pack, not independent)${SCOPE}${pack.generated}`);
   });
 
   it("fails a fork", () => {

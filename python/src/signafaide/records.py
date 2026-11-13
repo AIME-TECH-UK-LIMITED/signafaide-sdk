@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from .crypto import HEX64, SigningKey, b64url, b64url_decode, hash_json, key_id, verify_sig
+from .crypto import HEX64, SALT_RE, SigningKey, b64url, b64url_decode, content_hash, hash_json, key_id, new_salt, verify_sig
 from .jcs import assert_portable_numbers
 
 KINDS = ("decision", "outcome", "note")
@@ -160,7 +160,7 @@ def record_errors(rec: Any) -> list:
     if not isinstance(rec, dict):
         return ["record is not an object"]
     errs = envelope_errors(rec.get("envelope"))
-    extra = sorted(set(rec) - {"envelope", "key_id", "sig", "content", "receipt"})
+    extra = sorted(set(rec) - {"envelope", "key_id", "sig", "content", "salt", "receipt"})
     if extra:
         errs.append("unknown record field " + ", ".join(extra))
     if not isinstance(rec.get("key_id"), str) or not KEY_ID_RE.match(rec["key_id"]):
@@ -172,6 +172,8 @@ def record_errors(rec: Any) -> list:
         errs.append("sig must be a base64url Ed25519 signature")
     if "content" in rec and not isinstance(rec["content"], dict):
         errs.append("content must be a JSON object")
+    if "salt" in rec and not (isinstance(rec["salt"], str) and SALT_RE.match(rec["salt"])):
+        errs.append("salt must be 32 lowercase hex")
     return errs
 
 
@@ -188,10 +190,13 @@ def make_record(
     content: dict,
     ref: Optional[str] = None,
     time: Optional[str] = None,
+    salt: Optional[str] = None,
 ) -> dict:
-    """Build and sign ``{envelope, key_id, sig, content}``. Raises ValueError on a bad
-    envelope or on content numbers other implementations could not re-read (SPEC §1)."""
+    """Build and sign ``{envelope, key_id, sig, content, salt}``: the content hash is salted with
+    ``salt``, a fresh random one unless given (SPEC §2.1). Raises ValueError on a bad envelope or
+    on content numbers other implementations could not re-read (SPEC §1)."""
     assert_portable_numbers(content)
+    salt = salt or new_salt()
     envelope = {
         "v": 1,
         "kind": kind,
@@ -202,27 +207,28 @@ def make_record(
         "prev": prev,
         "time": time or now(),
         "name": name,
-        "content_hash": hash_json(content),
+        "content_hash": content_hash(content, salt),
         "ref": ref,
     }
     errs = envelope_errors(envelope)
     if errs:
         raise ValueError("invalid record: " + "; ".join(errs))
-    return {"envelope": envelope, "key_id": key.key_id, "sig": key.sign("record", hash_json(envelope)), "content": content}
+    return {"envelope": envelope, "key_id": key.key_id, "sig": key.sign("record", hash_json(envelope)), "content": content, "salt": salt}
 
 
 def make_draft(key: SigningKey, *, kind: str, agent: str, seq: int, prev: Optional[str], name: str, content: dict, ref: Optional[str] = None,
-               time: Optional[str] = None, store_content: bool = False) -> dict:
+               time: Optional[str] = None, store_content: bool = False, salt: Optional[str] = None) -> dict:
     """A draft (§8) for a chain whose project is not known yet (no API key, or the key's
     project not learned): the envelope without project and env, signed by the agent's key
     over domain ``draft``, so a local chain verifies before anything is sent.
     ``record_hash`` of a draft is its draft hash."""
     assert_portable_numbers(content)
-    d = {"v": 1, "kind": kind, "agent": agent, "seq": seq, "prev": prev, "time": time or now(), "name": name, "content_hash": hash_json(content), "ref": ref}
+    salt = salt or new_salt()
+    d = {"v": 1, "kind": kind, "agent": agent, "seq": seq, "prev": prev, "time": time or now(), "name": name, "content_hash": content_hash(content, salt), "ref": ref}
     errs = envelope_errors(d, DRAFT_FIELDS)
     if errs:
         raise ValueError("invalid record: " + "; ".join(errs))
-    return {"draft": True, "envelope": d, "key_id": key.key_id, "sig": key.sign("draft", hash_json(d)), "content": content, "store_content": store_content}
+    return {"draft": True, "envelope": d, "key_id": key.key_id, "sig": key.sign("draft", hash_json(d)), "content": content, "salt": salt, "store_content": store_content}
 
 
 def draft_errors(rec: Any) -> list:
@@ -230,7 +236,7 @@ def draft_errors(rec: Any) -> list:
     if not isinstance(rec, dict):
         return ["draft is not an object"]
     errs = envelope_errors(rec.get("envelope"), DRAFT_FIELDS)
-    extra = sorted(set(rec) - {"draft", "envelope", "key_id", "sig", "content", "store_content"})
+    extra = sorted(set(rec) - {"draft", "envelope", "key_id", "sig", "content", "salt", "store_content"})
     if extra:
         errs.append("unknown draft field " + ", ".join(extra))
     if rec.get("draft") is not True:
@@ -244,6 +250,8 @@ def draft_errors(rec: Any) -> list:
         errs.append("sig must be a base64url Ed25519 signature")
     if "content" in rec and not isinstance(rec["content"], dict):
         errs.append("content must be a JSON object")
+    if "salt" in rec and not (isinstance(rec["salt"], str) and SALT_RE.match(rec["salt"])):
+        errs.append("salt must be 32 lowercase hex")
     if "store_content" in rec and not isinstance(rec["store_content"], bool):
         errs.append("store_content must be true or false")
     return errs
@@ -253,7 +261,7 @@ def sign_draft(key: SigningKey, draft: dict, *, project: str, env: str, prev: Op
     """The signed record for a draft once its project is known (§8)."""
     d = draft["envelope"]
     return make_record(key, kind=d["kind"], project=project, env=env, agent=d["agent"], seq=d["seq"], prev=prev, name=d["name"],
-                       content=draft["content"], ref=ref, time=d["time"])
+                       content=draft["content"], ref=ref, time=d["time"], salt=draft.get("salt"))
 
 
 # --- keys (§2.4, §2.5) ------------------------------------------------------------

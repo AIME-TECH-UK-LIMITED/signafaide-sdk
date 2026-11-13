@@ -10,6 +10,11 @@ from signafaide import runtime
 from signafaide.cli import COMMANDS, main
 
 
+def no_counts(line: str) -> str:
+    """The result line without its check counts (§7), to compare the rest."""
+    return re.sub(r": \d+ of 12 checks [^;]*; ", ": ", re.sub(r": \d+ of 12 checks [^;]*$", "", line))
+
+
 @pytest.fixture
 def cli(project, service, monkeypatch, capsys):
     monkeypatch.setenv("SIGNAFAIDE_URL", service.url)
@@ -49,7 +54,7 @@ def test_no_key_status_flush_verify_send_nothing(cli, service):
     assert (code, out.strip()) == (0, "no API key: nothing was sent; 2 records stay local. Run `signafaide init` (or set SIGNAFAIDE_API_KEY) to send hashes")
     code, out, _ = cli("verify")
     lines = out.strip().splitlines()
-    assert code == 0 and lines[-1] == "PASS"
+    assert code == 0 and lines[-1] == "PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)"
     assert lines[-2] == "co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, or self-host (SIGNAFAIDE_URL)"
     assert re.search(r"^ 3\. Client signatures +PASS +2 records", out, re.M)
     assert service.calls == []
@@ -89,14 +94,14 @@ def test_status_flush_verify_export(cli, project, service, tmp_path):
 
     code, out, _ = cli("verify")
     # The test service is plain http on this machine: accepted, and said not to be independent.
-    assert code == 0 and out.strip().endswith("PASS (service keys fetched over plain http, not independent)")
+    assert code == 0 and no_counts(out.strip().splitlines()[-1]) == "PASS (service keys fetched over plain http, not independent)"
 
     pack = tmp_path / "pack.json"
     code, out, _ = cli("export", "-o", str(pack))
     assert code == 0 and "2 records" in out and f"signafaide verify {pack}" in out
 
     code, out, _ = cli("verify", str(pack))
-    assert code == 0 and out.strip().splitlines()[-1].startswith("PASS (service keys fetched over plain http, not independent): export of every agent, all records, generated ")
+    assert code == 0 and no_counts(out.strip().splitlines()[-1]).startswith("PASS (service keys fetched over plain http, not independent): export of every agent, all records, generated ")
     assert any(line.startswith("head: this project's own") for line in out.splitlines())  # the local head.json, with no flag
     assert any(line.startswith("12. Content hashes") and " PASS " in line and "2 records" in line for line in out.splitlines())
 
@@ -109,7 +114,7 @@ def test_status_flush_verify_export(cli, project, service, tmp_path):
     data["records"][0]["envelope"]["name"] = "other"
     pack.write_text(json.dumps(data))
     code, out, _ = cli("verify", str(pack), "--keys", str(keys))
-    assert code == 1 and out.strip().splitlines()[-1].startswith("FAIL: export of every agent")
+    assert code == 1 and no_counts(out.strip().splitlines()[-1]).startswith("FAIL: export of every agent")
     code, out, err = cli("verify", str(pack), "--keys", "http://192.0.2.1/keys.json")
     assert code == 2 and "plain http" in err
 
@@ -131,7 +136,7 @@ def test_export_takes_every_agent_unless_narrowed_and_empty_pack_fails(cli, tmp_
     assert code == 0 and "(0 records)" in out
     assert "agent 'nobody' has no records in this range; leave out --agent to export every agent" in err
     code, out, _ = cli("verify", str(empty))
-    assert code == 1 and "pack: no records" in out and out.strip().splitlines()[-1].startswith("FAIL: export of agent nobody")
+    assert code == 1 and "pack: no records" in out and out.strip().splitlines()[-1].startswith("FAIL: 1 of 12 checks failed (envelope schema)") and "; export of agent nobody" in out
 
 
 def test_verify_embedded_keys_warning(cli, tmp_path, service):
@@ -194,9 +199,9 @@ def test_keys_export_then_pack_verify_with_agent_keys_and_head(cli, project, ser
     keys.write_text(json.dumps({"keys": [service.key_doc]}))
     code, out, err = cli("verify", str(tmp_path / "pack.json"), "--keys", str(keys), "--agent-keys", str(tmp_path / "agent-keys.json"), "--head", str(head), "--offline")
     last = out.rstrip().splitlines()[-1]
-    assert code == 0 and last.startswith("PASS: export of every agent, all records, generated "), out + err
+    assert code == 0 and no_counts(last).startswith("PASS: export of every agent, all records, generated "), out + err
     code, out, err = cli("verify", str(tmp_path / "pack.json"), "--keys", str(keys), "--trust-embedded-agent-keys", "--offline")
-    assert code == 0 and out.rstrip().splitlines()[-1].startswith("PASS (agent keys taken from the pack, not independent): export of ")
+    assert code == 0 and no_counts(out.rstrip().splitlines()[-1]).startswith("PASS (agent keys taken from the pack, not independent): export of ")
     # Keys over plain http only from this machine.
     code, out, err = cli("verify", str(tmp_path / "pack.json"), "--keys", "http://192.0.2.1/keys.json", "--offline")
     assert code == 2 and "plain http" in err

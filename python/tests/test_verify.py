@@ -1,3 +1,4 @@
+import re
 import base64
 import copy
 import json
@@ -12,6 +13,11 @@ from signafaide.records import now
 from signafaide.verifier import KeysRequired, service_keys_hash, verify_local, verify_pack as _verify_pack
 
 AGENTS: list = []
+
+
+def no_counts(line: str) -> str:
+    """The result line without its check counts (§7), to compare the rest."""
+    return re.sub(r": \d+ of 12 checks [^;]*; ", ": ", re.sub(r": \d+ of 12 checks [^;]*$", "", line))
 
 
 def verify_pack(pack, keys, **kw):
@@ -62,7 +68,7 @@ def test_clean_pack_passes(pack, keys):
     assert [s[i] for i in ("schema", "record_hash", "record_sig", "chain", "merkle", "batch_sig", "batch_chain", "head_sig")] == ["pass"] * 8
     assert s["drand"] == s["anchor"] == s["ots"] == s["content"] == "not_checked"
     lines = str(r).splitlines()
-    assert lines[0].startswith("signafAIde pack prj_") and lines[-1].startswith("PASS" + SCOPE) and len(lines) == 14
+    assert lines[0].startswith("signafAIde pack prj_") and no_counts(lines[-1]).startswith("PASS" + SCOPE) and len(lines) == 14
     assert lines[-1].endswith(pack["generated"])
     assert lines[1].startswith(" 1. Envelope schema") and "PASS" in lines[1]
     assert "no anchors in the pack yet" in r.check("anchor").detail
@@ -72,7 +78,7 @@ def test_agent_keys_must_be_independent(pack, keys):
     r = _verify_pack(pack, keys)
     assert failed(r) == ["record_sig"] and "NOT INDEPENDENT" in str(r)
     r = _verify_pack(pack, keys, trust_embedded_agent_keys=True)
-    assert r.ok and str(r).splitlines()[-1].startswith("PASS (agent keys taken from the pack, not independent)" + SCOPE)
+    assert r.ok and no_counts(str(r).splitlines()[-1]).startswith("PASS (agent keys taken from the pack, not independent)" + SCOPE)
     stranger = [dict(AGENTS[0], key_id="0" * 16)]
     assert failed(_verify_pack(pack, keys, agent_keys=stranger)) == ["record_sig"]
 
@@ -86,7 +92,7 @@ def test_content_from_local_chain(pack, keys, recorder):
 def test_tampered_envelope(pack, keys):
     pack["records"][1]["envelope"]["name"] = "deny_payout"
     r = verify_pack(pack, keys)
-    assert not r.ok and str(r).splitlines()[-1].startswith("FAIL" + SCOPE)
+    assert not r.ok and no_counts(str(r).splitlines()[-1]).startswith("FAIL" + SCOPE)
     assert r.first_failed() == "record_hash"
     assert {"record_hash", "record_sig", "chain", "merkle"} <= set(failed(r))
 

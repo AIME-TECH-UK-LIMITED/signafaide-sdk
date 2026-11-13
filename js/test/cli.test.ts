@@ -7,6 +7,10 @@ import { makeDraft } from "../src/records.js";
 import { getRecorder } from "../src/runtime.js";
 import { deadUrl, useProject } from "./helpers.js";
 
+/** The result line without its check counts (§7), to compare the rest. */
+const noCounts = (line: string | undefined): string => (line ?? "").replace(/: \d+ of 12 checks [^;]*; /, ": ").replace(/: \d+ of 12 checks [^;]*$/, "");
+
+
 const ctx = useProject();
 
 async function cli(...args: string[]): Promise<[number, string, string]> {
@@ -53,7 +57,7 @@ describe("cli", () => {
     [code, out] = await cli("verify");
     expect(code).toBe(0);
     const lines = out.split("\n");
-    expect(lines.at(-1)).toBe("PASS");
+    expect(lines.at(-1)).toBe("PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)");
     expect(lines.at(-2)).toBe("co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, or self-host (SIGNAFAIDE_URL)");
     expect(out).toMatch(/^ 3\. Client signatures +PASS +2 records/m);
     expect(ctx.service.calls).toEqual([]);
@@ -83,7 +87,7 @@ describe("cli", () => {
     [code, out] = await cli("verify");
     expect(code).toBe(0);
     // The test service is plain http on this machine: accepted, and said not to be independent.
-    expect(out.split("\n").at(-1)).toBe("PASS (service keys fetched over plain http, not independent)");
+    expect(noCounts(out.split("\n").at(-1))).toBe("PASS (service keys fetched over plain http, not independent)");
 
     const pack = path.join(ctx.root, "pack.json");
     [code, out] = await cli("export", "-o", pack);
@@ -93,7 +97,7 @@ describe("cli", () => {
     [code, out] = await cli("verify", pack);
     expect(code).toBe(0);
     expect(out).toMatch(/^12\. Content hashes +PASS +2 records/m);
-    expect(out.split("\n").at(-1)).toMatch(/^PASS \(service keys fetched over plain http, not independent\): export of every agent, all records, generated /);
+    expect(noCounts(out.split("\n").at(-1))).toMatch(/^PASS \(service keys fetched over plain http, not independent\): export of every agent, all records, generated /);
     expect(out).toMatch(/^head: this project's own/m); // the local head.json, with no flag
     [code, out] = await cli("verify", pack, "--json");
     expect(JSON.parse(out).result).toBe("PASS");
@@ -105,7 +109,7 @@ describe("cli", () => {
     fs.writeFileSync(pack, JSON.stringify(data));
     [code, out] = await cli("verify", pack, "--keys", keys);
     expect(code).toBe(1);
-    expect(out.split("\n").at(-1)).toMatch(/^FAIL: export of every agent/);
+    expect(noCounts(out.split("\n").at(-1))).toMatch(/^FAIL: export of every agent/);
     const [c2, , e2] = await cli("verify", pack, "--keys", "http://192.0.2.1/keys.json");
     expect(c2).toBe(2);
     expect(e2).toContain("plain http");
@@ -132,7 +136,7 @@ describe("cli", () => {
     [code, out] = await cli("verify", empty);
     expect(code).toBe(1);
     expect(out).toContain("pack: no records");
-    expect(out.split("\n").at(-1)).toMatch(/^FAIL: export of agent nobody/);
+    expect(out.split("\n").at(-1)).toMatch(/^FAIL: 1 of 12 checks failed \(envelope schema\).*; export of agent nobody/);
   });
 
   it("--help on a command prints its usage", async () => {

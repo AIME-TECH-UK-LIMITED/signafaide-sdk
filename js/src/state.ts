@@ -718,6 +718,9 @@ export function appendEnvFile(p: string, key: string, value: string): void {
 
 function wireOf(rec: SignedRecord, store: boolean): SignedRecord {
   const out: SignedRecord = { envelope: rec.envelope, key_id: rec.key_id, sig: rec.sig };
-  if (store && rec.content !== undefined) out.content = rec.content;
+  if (store && rec.content !== undefined) {
+    out.content = rec.content;
+    if (rec.salt !== undefined) out.salt = rec.salt;
+  }
   return out;
 }

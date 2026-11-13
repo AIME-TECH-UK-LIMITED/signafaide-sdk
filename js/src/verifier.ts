@@ -8,7 +8,7 @@
  */
 
 import { hexToBytes } from "@noble/hashes/utils";
-import { HEX64, b64urlDecode, hashJson, keyId, sha256Hex, verifyInclusion, verifySig } from "./crypto.js";
+import { HEX64, b64urlDecode, checkContent, hashJson, keyId, sha256Hex, verifyInclusion, verifySig } from "./crypto.js";
 import { parseJson } from "./jcs.js";
 import { base64Decode, blockAttestations, otsStatus } from "./ots.js";
 import { AGENT_RE, MAX_CLOCK_SKEW_MS, draftErrors, keyEntryErrors, manifestErrors, receiptErrors, recordErrors, validProjectId, validTime, type AgentKeyEntry } from "./records.js";
@@ -110,8 +110,49 @@ export function scopeText(filter: PackFilter, generated: string): string {
   return `export of ${who}, ${window}, generated ${generated}`;
 }
 
-/** `PASS` or `FAIL`; on PASS, why keys were not independent; then what the pack covers (§7). */
-export function resultLine(result: string, service: KeySource = "independent", agent: KeySource = "independent", byService = false, scope: string | null = null): string {
+/** The short name of each check in the result line (§7). */
+export const SHORT_NAMES: Record<string, string> = {
+  schema: "envelope schema", record_hash: "record hashes", record_sig: "client signatures", chain: "agent chains",
+  merkle: "Merkle proofs", batch_sig: "batch signatures", batch_chain: "batch chain", head_sig: "signed heads",
+  drand: "drand rounds", anchor: "anchors", ots: "public timestamp", content: "content hashes",
+};
+/** The checks of the witness's part: locally, while nothing is co-signed, they are named together (§7). */
+const WITNESS_CHECKS = ["record_hash", "merkle", "batch_sig", "batch_chain", "head_sig", "drand", "anchor", "ots"];
+export const NOTHING_COSIGNED = "nothing co-signed yet";
+
+/** How many checks passed, failed and were not checked (§7 result line). */
+export function countsText(checks: { id: string; status: Status }[], nothingCosigned = false): string {
+  const total = checks.length;
+  const failed = checks.filter((c) => c.status === "fail").map((c) => SHORT_NAMES[c.id]);
+  const unchecked = checks.filter((c) => c.status === "not_checked").map((c) => c.id);
+  const passed = total - failed.length - unchecked.length;
+  if (failed.length) {
+    let out = `${failed.length} of ${total} checks failed (${failed.join(", ")})`;
+    if (passed) out += `, ${passed} passed`;
+    if (unchecked.length) out += `, ${unchecked.length} not checked`;
+    return out;
+  }
+  let out = `${passed} of ${total} checks passed`;
+  if (unchecked.length) {
+    let names = unchecked.map((i) => SHORT_NAMES[i]);
+    if (nothingCosigned && unchecked.some((i) => WITNESS_CHECKS.includes(i))) {
+      names = [NOTHING_COSIGNED, ...unchecked.filter((i) => !WITNESS_CHECKS.includes(i)).map((i) => SHORT_NAMES[i])];
+    }
+    out += `, ${unchecked.length} not checked (${names.join(", ")})`;
+  }
+  return out;
+}
+
+/** `PASS` or `FAIL`; on PASS, why keys were not independent; then how many checks ran and what
+ * the pack covers (§7). */
+export function resultLine(
+  result: string,
+  service: KeySource = "independent",
+  agent: KeySource = "independent",
+  byService = false,
+  scope: string | null = null,
+  counts = "",
+): string {
   let out = result;
   if (result === "PASS") {
     if (byService) out += " (checked by the service with its own key registry; not independent)";
@@ -120,8 +161,15 @@ export function resultLine(result: string, service: KeySource = "independent", a
       if (r) out += ` (${r}, not independent)`;
     }
   }
-  if (scope) out += `: ${scope}`;
+  if (counts) out += `: ${counts}`;
+  if (scope) out += counts ? `; ${scope}` : `: ${scope}`;
   return out;
+}
+
+/** A record's content held locally (`--content`), with its salt when the file has one. */
+export interface LocalContent {
+  content: Record<string, unknown>;
+  salt: string | undefined;
 }
 
 export interface ReportScope {
@@ -135,6 +183,8 @@ export class Report {
   /** Lines shown after the checks, before the result line: for local state, what still needs
    * the witness (co-signature, public timestamp). */
   readonly after: string[] = [];
+  /** Local state with no record co-signed yet: the result line says so (§7). */
+  nothingCosigned = false;
 
   constructor(
     readonly checks: Check[],
@@ -151,9 +201,10 @@ export class Report {
    * `PASS (agent keys taken from the pack, not independent): export of ...` (§7). */
   get resultLine(): string {
     const s = this.scope;
+    const counts = countsText(this.checks, this.nothingCosigned);
     // Local state: the only way keys are not independent there is plain http on this machine.
-    if (!s) return resultLine(this.result, this.independent.service_keys ? "independent" : "fetched over plain http", "independent");
-    return resultLine(this.result, s.sources[0], s.sources[1], s.byService, scopeText(s.filter, s.generated));
+    if (!s) return resultLine(this.result, this.independent.service_keys ? "independent" : "fetched over plain http", "independent", false, null, counts);
+    return resultLine(this.result, s.sources[0], s.sources[1], s.byService, scopeText(s.filter, s.generated), counts);
   }
 
   get ok(): boolean {
@@ -250,7 +301,7 @@ export function parseHeadFile(doc: unknown): SignedHeadDoc[] {
 }
 
 /** record_hash -> content from JSON lines, or a JSON array, of `{envelope, content}` (§7). */
-export function contentFromText(text: string, into = new Map<string, Record<string, unknown>>()): Map<string, Record<string, unknown>> {
+export function contentFromText(text: string, into = new Map<string, LocalContent>()): Map<string, LocalContent> {
   let items: any[];
   try {
     const doc = parseJson(text);
@@ -263,7 +314,7 @@ export function contentFromText(text: string, into = new Map<string, Record<stri
   }
   for (const it of items) {
     if (it?.envelope && typeof it.envelope === "object" && it.content && typeof it.content === "object" && !Array.isArray(it.content) && !it.draft) {
-      into.set(hashJson(it.envelope), it.content);
+      into.set(hashJson(it.envelope), { content: it.content, salt: typeof it.salt === "string" ? it.salt : undefined });
     }
   }
   return into;
@@ -292,7 +343,7 @@ export interface PackOptions {
   /** Block headers looked up for the public timestamps; null/undefined: offline. */
   timestamps?: BlockRoots | null;
   /** record_hash -> content, e.g. from the local chain. */
-  contents?: Map<string, Record<string, unknown>>;
+  contents?: Map<string, LocalContent>;
   drand?: DrandVerifier | null;
   /** The service keys came over plain http from this machine (warned; not independent). */
   serviceKeysPlainHttp?: boolean;
@@ -405,7 +456,9 @@ export function verifyLocalState(local: LocalInput, serviceKeys: KeyDoc[], drand
   const v = new Verifier(serviceKeys, local.agentKeys, new Map(), null, null, true, local.heads, drand);
   v.drafts = local.drafts ?? 0;
   const checks = v.run(local.records, [], local.chainIds);
-  return new Report(checks, null, null, local.records.length, [], [], { service_keys: !serviceKeysPlainHttp, agent_keys: true });
+  const report = new Report(checks, null, null, local.records.length, [], [], { service_keys: !serviceKeysPlainHttp, agent_keys: true });
+  report.nothingCosigned = v.nothingCosigned;
+  return report;
 }
 
 const isU64 = (x: unknown): boolean => typeof x === "number" && Number.isInteger(x) && x >= 0;
@@ -533,11 +586,12 @@ class Verifier {
   /** The earliest any key of each agent was valid: no record of that agent is older. */
   private firstKey = new Map<string, number>();
   drafts = 0;
+  nothingCosigned = false;
 
   constructor(
     private serviceKeys: KeyDoc[],
     private agentKeys: KeyDoc[],
-    private contents: Map<string, Record<string, unknown>>,
+    private contents: Map<string, LocalContent>,
     private project: string | null,
     private env: string | null,
     private local: boolean,
@@ -621,6 +675,7 @@ class Verifier {
     this.anchors(anchors, batches);
     this.content(recs);
     if (this.local && !shipped.length && recs.length) {
+      this.nothingCosigned = true;
       // Local records no witness has co-signed yet: the checks of the witness's part are not passes.
       for (const i of [1, 4, 5, 6, 7]) {
         if (a[i].checked || a[i].failures.length) continue;
@@ -1038,17 +1093,20 @@ class Verifier {
   private content(recs: Rec[]): void {
     const acc = this.acc[11];
     for (const { label, r, h } of recs) {
-      const c = r.content && typeof r.content === "object" && !Array.isArray(r.content) ? r.content : this.contents.get(h);
-      if (c === undefined) continue;
+      let c: unknown = r.content;
+      let salt: unknown = r.salt;
+      const local = this.contents.get(h);
+      if (c === undefined && salt === undefined && local) ({ content: c, salt } = local);
+      if (c === undefined && salt === undefined) continue;
       acc.checked++;
-      let ch: string;
+      let ch: string | null;
       try {
-        ch = hashJson(c);
+        ch = checkContent(c, salt, r.envelope.content_hash);
       } catch (e) {
         acc.fail(label, (e as Error).message);
         continue;
       }
-      if (ch !== r.envelope.content_hash) acc.fail(label, `content hashes to ${ch}, envelope says ${r.envelope.content_hash}`);
+      if (ch !== null) acc.fail(label, `content hashes to ${ch}, envelope says ${r.envelope.content_hash}`);
     }
     if (!acc.checked) {
       acc.notChecked = true;

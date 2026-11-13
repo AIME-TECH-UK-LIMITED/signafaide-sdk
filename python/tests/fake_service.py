@@ -12,7 +12,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from signafaide.crypto import SigningKey, audit_path, b64url, b64url_decode, hash_json, key_id, merkle_root, verify_sig
+from signafaide.crypto import SigningKey, audit_path, b64url, b64url_decode, content_hash, hash_json, key_id, merkle_root, verify_sig
 from signafaide.records import now, record_errors, record_hash, registration
 
 
@@ -138,7 +138,7 @@ class FakeService:
                 return err(400, "bad_signature", f"key {r['key_id']} was retired or revoked at {key['valid_to']}; it cannot add records.")
             if not verify_sig(key["public_key"], "record", h, r["sig"]):
                 return err(400, "bad_signature", "The record signature does not verify; sign record_hash with domain 'record'.")
-            if "content" in r and hash_json(r["content"]) != env["content_hash"]:
+            if ("content" in r) != ("salt" in r) or ("content" in r and content_hash(r["content"], r["salt"]) != env["content_hash"]):
                 return err(400, "content_mismatch", "content does not match content_hash; send the exact content you hashed.")
             seq, last = tips.get(env["agent"], (0, None))
             if env["seq"] != seq + 1 or env["prev"] != last:

@@ -6,7 +6,7 @@
 
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
-import { SigningKey, auditPath, b64url, b64urlDecode, hashJson, keyId, merkleRoot, verifySig } from "../src/crypto.js";
+import { SigningKey, auditPath, b64url, b64urlDecode, contentHash, hashJson, keyId, merkleRoot, verifySig } from "../src/crypto.js";
 import { now, recordErrors, recordHash, registration } from "../src/records.js";
 import { exportStatement } from "../src/verifier.js";
 
@@ -131,7 +131,7 @@ export class FakeService {
       if (!key) return err(400, "bad_signature", `key ${r.key_id} is not registered for agent '${env.agent}'; register it with POST /v1/agents.`);
       if (key.valid_to !== null) return err(400, "bad_signature", `key ${r.key_id} was retired or revoked at ${key.valid_to}; it cannot add records.`);
       if (!verifySig(key.public_key, "record", h, r.sig)) return err(400, "bad_signature", "The record signature does not verify.");
-      if (r.content && hashJson(r.content) !== env.content_hash) return err(400, "content_mismatch", "content does not match content_hash.");
+      if ((r.content === undefined) !== (r.salt === undefined) || (r.content && contentHash(r.content, r.salt) !== env.content_hash)) return err(400, "content_mismatch", "content does not match content_hash.");
       const [seq, last] = tips.get(env.agent) ?? [0, null];
       if (env.seq !== seq + 1 || env.prev !== last) return err(409, "chain_conflict", "This record does not extend the service chain; the head is attached.", { head: { agent: env.agent, seq, record_hash: last } });
       tips.set(env.agent, [env.seq, h]);

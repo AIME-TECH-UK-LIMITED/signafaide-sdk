@@ -10,7 +10,7 @@ import pytest
 
 import signafaide
 from signafaide import runtime
-from signafaide.crypto import hash_json
+from signafaide.crypto import content_hash, hash_json
 from signafaide.records import make_draft, record_hash
 from helpers import chain_of, chain_path, error_for, records
 
@@ -30,7 +30,7 @@ def test_sync_decision_then_outcome(recorder):
     assert d["envelope"]["agent"] == "claims-project"  # folder "Claims Project"
     assert d["content"]["input"] == {"claim_id": "c-1", "amount": 12.5, "note": "ok"}
     assert d["content"]["meta"]["sdk"].startswith("signafaide-python/")
-    assert d["envelope"]["content_hash"] == hash_json(d["content"])
+    assert d["envelope"]["content_hash"] == content_hash(d["content"], d["salt"])
     assert o["envelope"]["kind"] == "outcome" and o["envelope"]["ref"] == record_hash(d)
     assert o["envelope"]["prev"] == record_hash(d)
     assert o["content"] == {"output": {"approved": True, "amount": 12.5}}

@@ -543,10 +543,12 @@ def key_fingerprint(api_key: str) -> str:
 
 
 def wire_record(rec: dict, store_content: bool) -> dict:
-    """The record as sent to the service: content only when stored there."""
+    """The record as sent to the service: content and its salt only when stored there (§2.3)."""
     out = {k: rec[k] for k in ("envelope", "key_id", "sig")}
     if store_content and "content" in rec:
         out["content"] = rec["content"]
+        if "salt" in rec:
+            out["salt"] = rec["salt"]
     return out
 
 

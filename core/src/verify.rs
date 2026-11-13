@@ -177,9 +177,56 @@ pub fn scope_text(filter: &PackFilter, generated: &str) -> String {
     format!("export of {agents}, {window}, generated {generated}")
 }
 
+/// The short name of a check in the result line (§7).
+pub fn check_short_name(id: &str) -> &'static str {
+    match id {
+        "schema" => "envelope schema",
+        "record_hash" => "record hashes",
+        "record_sig" => "client signatures",
+        "chain" => "agent chains",
+        "merkle" => "Merkle proofs",
+        "batch_sig" => "batch signatures",
+        "batch_chain" => "batch chain",
+        "head_sig" => "signed heads",
+        "drand" => "drand rounds",
+        "anchor" => "anchors",
+        "ots" => "public timestamp",
+        "content" => "content hashes",
+        _ => "unknown check",
+    }
+}
+
+/// How many checks passed, failed and were not checked (§7 result line): `12 of 12 checks
+/// passed`, `10 of 12 checks passed, 2 not checked (public timestamp, content hashes)`, or
+/// `1 of 12 checks failed (record hashes), 9 passed, 2 not checked`.
+pub fn counts_text(checks: &[(&str, Status)]) -> String {
+    let total = checks.len();
+    let names = |st: Status| checks.iter().filter(|c| c.1 == st).map(|c| check_short_name(c.0)).collect::<Vec<_>>();
+    let (failed, unchecked) = (names(Status::Fail), names(Status::NotChecked));
+    let passed = total - failed.len() - unchecked.len();
+    if failed.is_empty() {
+        let mut out = format!("{passed} of {total} checks passed");
+        if !unchecked.is_empty() {
+            out += &format!(", {} not checked ({})", unchecked.len(), unchecked.join(", "));
+        }
+        out
+    } else {
+        let mut out = format!("{} of {total} checks failed ({})", failed.len(), failed.join(", "));
+        if passed > 0 {
+            out += &format!(", {passed} passed");
+        }
+        if !unchecked.is_empty() {
+            out += &format!(", {} not checked", unchecked.len());
+        }
+        out
+    }
+}
+
 /// The final line of the text output (shared wording for every verifier): `PASS` or `FAIL`; on
-/// PASS, why keys were not independent; then what the pack covers, when known.
-pub fn result_line(result: &str, service: KeySource, agent: KeySource, by_service: bool, scope: Option<&str>) -> String {
+/// PASS, why keys were not independent; then how many checks ran (`counts`), and what the pack
+/// covers, when known. For example `PASS: 10 of 12 checks passed, 2 not checked (public
+/// timestamp, content hashes); export of every agent, all records, generated <t>`.
+pub fn result_line(result: &str, service: KeySource, agent: KeySource, by_service: bool, counts: &str, scope: Option<&str>) -> String {
     let mut out = result.to_string();
     if result == "PASS" {
         if by_service {
@@ -188,8 +235,9 @@ pub fn result_line(result: &str, service: KeySource, agent: KeySource, by_servic
             out += &format!(" ({r}, not independent)");
         }
     }
+    out += &format!(": {counts}");
     if let Some(s) = scope {
-        out += &format!(": {s}");
+        out += &format!("; {s}");
     }
     out
 }
@@ -204,6 +252,13 @@ pub const MAX_CLOCK_SKEW_MS: i64 = 300_000;
 /// A batch is anchored within this time of its `server_time` (§4); an older batch that no anchor
 /// in the pack covers is reported as not timestamped.
 pub const ANCHOR_WINDOW_MS: i64 = 7_200_000;
+
+/// A record's content held locally (`--content`), with its salt when the file has one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LocalContent {
+    pub content: Value,
+    pub salt: Option<String>,
+}
 
 /// Bitcoin block headers for check 11, fetched by the caller (this crate does no I/O).
 #[derive(Clone, Debug, Default)]
@@ -229,8 +284,8 @@ pub struct Options {
     /// The client's newest signed heads (`--head`, §8 head.json).
     pub heads: Option<Vec<SignedHead>>,
     pub bitcoin: Bitcoin,
-    /// Locally held content, by `record_hash`.
-    pub contents: HashMap<Hash, Value>,
+    /// Locally held content and its salt (§2.1), by `record_hash`.
+    pub contents: HashMap<Hash, LocalContent>,
     /// `service_keys` were fetched over plain http from a local address: warned, not independent.
     pub service_keys_plain_http: bool,
     /// `agent_keys` were fetched over plain http from a local address: warned, not independent.
@@ -790,14 +845,19 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
 
     // 12. content
     for x in &recs {
-        let content = x.r.content.as_ref().or_else(|| opts.contents.get(&x.hash));
-        if let Some(c) = content {
-            acc[11].checked += 1;
-            match content_hash(c) {
-                Ok(h) if h == x.r.envelope.content_hash => {}
-                Ok(h) => acc[11].fail(&x.label, format!("content hashes to {h}, envelope says {}", x.r.envelope.content_hash)),
-                Err(e) => acc[11].fail(&x.label, e),
-            }
+        let local = opts.contents.get(&x.hash);
+        let (content, salt) = match (&x.r.content, &x.r.salt, local) {
+            (None, None, Some(l)) => (Some(&l.content), l.salt.as_deref()),
+            (c, s, _) => (c.as_ref(), s.as_deref()),
+        };
+        if content.is_none() && salt.is_none() {
+            continue;
+        }
+        acc[11].checked += 1;
+        match check_content(content, salt, &x.r.envelope.content_hash) {
+            Ok(None) => {}
+            Ok(Some(h)) => acc[11].fail(&x.label, format!("content hashes to {h}, envelope says {}", x.r.envelope.content_hash)),
+            Err(e) => acc[11].fail(&x.label, e),
         }
     }
     if acc[11].checked == 0 {
@@ -827,9 +887,10 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
     let ok = checks.iter().all(|c| c.status != Status::Fail);
     let result = if ok { "PASS" } else { "FAIL" };
     let scope = scope_text(&pack.filter, &pack.generated);
+    let counts = counts_text(&checks.iter().map(|c| (c.id, c.status)).collect::<Vec<_>>());
     Ok(Report {
         result,
-        result_line: result_line(result, service_src, agent_src, opts.by_service, Some(&scope)),
+        result_line: result_line(result, service_src, agent_src, opts.by_service, &counts, Some(&scope)),
         project: Some(pack.project),
         env: Some(pack.env),
         records: pack.records.len(),
@@ -994,7 +1055,7 @@ fn malformed(why: String, independent: Independent) -> Report {
         .collect();
     Report {
         result: "FAIL",
-        result_line: "FAIL".into(),
+        result_line: format!("FAIL: {}", counts_text(&CHECKS.iter().enumerate().map(|(i, c)| (c.0, if i == 0 { Status::Fail } else { Status::NotChecked })).collect::<Vec<_>>())),
         project: None,
         env: None,
         records: 0,
@@ -1006,9 +1067,9 @@ fn malformed(why: String, independent: Independent) -> Report {
     }
 }
 
-/// Local content (`--content`): JSON lines, or a JSON array, of objects holding `envelope`
-/// and `content`, such as the SDK's `.signafaide/chain/<agent>.jsonl`. Keyed by record_hash.
-pub fn contents_from_text(text: &str) -> Result<HashMap<Hash, Value>> {
+/// Local content (`--content`): JSON lines, or a JSON array, of objects holding `envelope`,
+/// `content` and `salt`, such as the SDK's `.signafaide/chain/<agent>.jsonl`. Keyed by record_hash.
+pub fn contents_from_text(text: &str) -> Result<HashMap<Hash, LocalContent>> {
     let items: Vec<Value> = match serde_json::from_str::<Value>(text) {
         Ok(Value::Array(a)) => a,
         Ok(v @ Value::Object(_)) => vec![v],
@@ -1025,7 +1086,8 @@ pub fn contents_from_text(text: &str) -> Result<HashMap<Hash, Value>> {
                 continue;
             }
             let e: Envelope = from_value(env)?;
-            out.insert(e.record_hash()?, content.clone());
+            let salt = item.get("salt").and_then(Value::as_str).map(String::from);
+            out.insert(e.record_hash()?, LocalContent { content: content.clone(), salt });
         }
     }
     Ok(out)

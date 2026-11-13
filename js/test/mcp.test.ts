@@ -9,6 +9,10 @@ import { installCommand, pythonInstall } from "../src/project.js";
 import { SKILL_BODY } from "../src/skill.js";
 import { deadUrl, useProject } from "./helpers.js";
 
+/** The result line without its check counts (§7), to compare the rest. */
+const noCounts = (line: string | undefined): string => (line ?? "").replace(/: \d+ of 12 checks [^;]*; /, ": ").replace(/: \d+ of 12 checks [^;]*$/, "");
+
+
 const ctx = useProject();
 let client: Client;
 
@@ -207,13 +211,13 @@ describe("mcp server", () => {
     expect(out).toMatch(/Client signatures +PASS +3 records/);
     expect(out).toMatch(/Merkle proofs +NOT CHECKED +0 records; nothing co-signed yet/);
     expect(out).toContain("co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, or self-host");
-    expect(out.split("\n").at(-1)).toBe("PASS");
+    expect(out.split("\n").at(-1)).toBe("PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)");
     expect(ctx.service.calls).toEqual([]);
     await call("signafaide_init");
     [out] = await call("signafaide_verify");
     expect(out).toContain("shipped 3 waiting records first");
     expect(out).toMatch(/Client signatures +PASS/);
-    expect(out.split("\n").at(-1)).toBe("PASS (service keys fetched over plain http, not independent)");
+    expect(noCounts(out.split("\n").at(-1))).toBe("PASS (service keys fetched over plain http, not independent)");
     expect(ctx.service.events).toContain("verify");
 
     const chain = path.join(ctx.root, ".signafaide", "chain");

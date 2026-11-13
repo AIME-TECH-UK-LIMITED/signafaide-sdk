@@ -28,6 +28,7 @@ import {
   verifyLocalState,
   verifyPack,
   type KeyDoc,
+  type LocalContent,
   type Report,
 } from "./verifier.js";
 
@@ -115,9 +116,9 @@ export function notYet(unsent: number, total: number, hasKey: boolean): string[]
   ];
 }
 
-/** record_hash -> content from a chain .jsonl file or every *.jsonl below a folder (§7). */
-export function loadContent(src: string): Map<string, Record<string, unknown>> {
-  const out = new Map<string, Record<string, unknown>>();
+/** record_hash -> {content, salt} from a chain .jsonl file or every *.jsonl below a folder (§7). */
+export function loadContent(src: string): Map<string, LocalContent> {
+  const out = new Map<string, LocalContent>();
   const walk = (p: string): void => {
     if (fs.statSync(p).isDirectory()) for (const f of fs.readdirSync(p).sort()) walk(path.join(p, f));
     else if (p === src || p.endsWith(".jsonl")) contentFromText(fs.readFileSync(p, "utf8"), out);

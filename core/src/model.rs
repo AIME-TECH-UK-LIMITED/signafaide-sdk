@@ -1,4 +1,4 @@
-//! Typed protocol objects (§2–§7). Every object rejects unknown fields and requires every
+//! Typed protocol objects (§2 to §7). Every object rejects unknown fields and requires every
 //! field, so a parsed object re-serializes to exactly the JSON it came from.
 
 use crate::hash::hash_json;
@@ -152,12 +152,25 @@ impl Envelope {
     }
 }
 
-/// `sha256(JCS(content))`; content must be a JSON object.
-pub fn content_hash(content: &Value) -> Result<Hash> {
+/// A content salt (§2.1): 16 random bytes, written as 32 lowercase hex characters.
+pub fn parse_salt(salt: &str) -> Result<[u8; 16]> {
+    if salt.len() != 32 || !salt.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        bail!("salt must be 32 lowercase hex characters (16 bytes)");
+    }
+    let mut out = [0u8; 16];
+    hex::decode_to_slice(salt, &mut out).map_err(|e| Error::new(format!("salt: {e}")))?;
+    Ok(out)
+}
+
+/// `sha256(salt || JCS(content))` (§2.1): `salt` is the record's 16-byte salt as 32 lowercase
+/// hex characters; content must be a JSON object.
+pub fn content_hash(content: &Value, salt: &str) -> Result<Hash> {
     if !content.is_object() {
         bail!("content must be a JSON object");
     }
-    Ok(sha256(jcs::canonicalize(content)?.as_bytes()))
+    let mut bytes = parse_salt(salt)?.to_vec();
+    bytes.extend_from_slice(jcs::canonicalize(content)?.as_bytes());
+    Ok(sha256(&bytes))
 }
 
 /// §2.3 signed record, as sent by a client.
@@ -169,6 +182,30 @@ pub struct SignedRecord {
     pub sig: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<Value>,
+    /// The content's salt (§2.1), sent only together with `content`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub salt: Option<String>,
+}
+
+impl SignedRecord {
+    /// `content` and `salt` come together or not at all (§2.3); when present they must hash to
+    /// `envelope.content_hash`. `Ok(Some(h))` is a mismatch: the content hashes to `h`.
+    pub fn check_content(&self) -> Result<Option<Hash>> {
+        check_content(self.content.as_ref(), self.salt.as_deref(), &self.envelope.content_hash)
+    }
+}
+
+/// The §2.3 content rule shared by signed records and pack records.
+pub fn check_content(content: Option<&Value>, salt: Option<&str>, expected: &Hash) -> Result<Option<Hash>> {
+    match (content, salt) {
+        (None, None) => Ok(None),
+        (Some(_), None) => bail!("content is present without its salt"),
+        (None, Some(_)) => bail!("salt is present without content"),
+        (Some(c), Some(s)) => {
+            let h = content_hash(c, s)?;
+            Ok((h != *expected).then_some(h))
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -466,6 +503,8 @@ pub struct PackRecord {
     pub sig: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub salt: Option<String>,
     pub receipt: Receipt,
 }
 

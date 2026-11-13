@@ -2,7 +2,7 @@
 
 Signed, chained records of what your AI agents decided. Each record is signed with the agent's own key and chained on your machine; once you opt in, a witness (the signafAIde service, or one you host) co-signs and publicly timestamps it, so neither side can forge or edit a record alone.
 
-- Nothing is sent until a person runs `npx signafaide init` or sets `SIGNAFAIDE_API_KEY`. After that each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them.
+- Nothing is sent until a person runs `npx signafaide init` or sets `SIGNAFAIDE_API_KEY`. After that each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them. Each content hash is salted with 16 random bytes that stay on your machine with the content, so the hash alone cannot be used to guess the content, even when it has only a few possible values.
 - The sandbox `init` creates needs no account, email or card.
 - To keep the evidence in your environment, self-host the witness and set `SIGNAFAIDE_URL` ([self-host](https://signafaide.com/docs/self-host)).
 - Apache-2.0, with a public protocol spec and an independent verifier.
@@ -21,7 +21,7 @@ const approvePayout = record(async (claimId: string, amount: number) => { /* ...
 npx signafaide verify
 ```
 
-That's it. With no API key, records are signed, chained and kept in `.signafaide/`, and nothing is sent. `signafaide verify` checks every signature, chain link and content hash and ends with `PASS` or `FAIL`; it also says what still needs the witness:
+That's it. With no API key, records are signed, chained and kept in `.signafaide/`, and nothing is sent. `signafaide verify` checks every signature, chain link and content hash and ends with a result line that says how many of the 12 checks ran, for example `PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)`. A check that was not run is never counted as passed. It also says what still needs the witness:
 
 ```
 co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, or self-host (SIGNAFAIDE_URL)
@@ -31,7 +31,7 @@ co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, o
 
 Co-signature and the public timestamp need a witness. A person opts in once:
 
-- `npx signafaide init` creates a free sandbox (no account, email or card), saves `SIGNAFAIDE_API_KEY` to `.env` (added to `.gitignore`) and prints a link to claim it; or
+- `npx signafaide init` creates a free sandbox (no account, email or card), saves `SIGNAFAIDE_API_KEY` to `.env`, adds `.env` to `.gitignore` and prints a link to claim it; or
 - set `SIGNAFAIDE_API_KEY` (a live key from the console), with `SIGNAFAIDE_URL` for a self-hosted witness. `SIGNAFAIDE_URL` alone sends nothing.
 
 Records written before the opt-in ship afterwards with their original times. The service accepts records up to 7 days old (an agent key's `valid_from` is at most 7 days before its registration); a local chain that starts earlier stays local, still verifies, and `signafaide flush` reports it as `too_old`. The SDK's `init()` only configures: it never creates a sandbox.
@@ -84,7 +84,7 @@ The decision is shipped first, and the function runs only after the service has 
 
 ## Hash-only
 
-By default the service receives only the envelope: the name, the time, the chain links and `content_hash`. Your inputs and outputs stay in `.signafaide/chain/<project>/<env>/<agent>.jsonl` (`.signafaide/chain/_pending/nokey/<agent>.jsonl` before the opt-in), which is your evidence store. To send the content too (encrypted at rest; live records need the Team plan):
+By default the service receives only the envelope: the name, the time, the chain links and `content_hash`. The hash is `sha256(salt || JCS(content))` with a random 16-byte salt per record, kept next to the content in the local chain, so the service cannot confirm a guess of the content from the hash. When you store content with the service, the salt goes with it, so anyone holding the pack can check the content against the hash. Your inputs and outputs stay in `.signafaide/chain/<project>/<env>/<agent>.jsonl` (`.signafaide/chain/_pending/nokey/<agent>.jsonl` before the opt-in), which is your evidence store. To send the content too (encrypted at rest; live records need the Team plan):
 
 ```ts
 await init({ storeContent: true });           // everything
@@ -107,7 +107,7 @@ signafaide verify pack.json           # a pack from `signafaide export`
 signafaide verify pack.json --keys keys.json --json
 ```
 
-There is one line per check, then `PASS` or `FAIL`. The exit code is 0 for PASS, 1 for FAIL and 2 when an input can't be read. Locally, before anything was co-signed, the witness's checks show `NOT CHECKED` ("nothing co-signed yet") and no request is made. Service keys come from `--keys <file|url>`, or by default from the service's `/.well-known/signafaide-keys.json`. `--trust-embedded-keys` uses the keys inside the pack and prints a warning. The drand BLS signature is checked too (through `@noble/curves`, a dependency).
+There is one line per check, then the result line: `PASS` or `FAIL` and how many checks ran, for example `PASS: 11 of 12 checks passed, 1 not checked (public timestamp)`. The exit code is 0 for PASS, 1 for FAIL and 2 when an input can't be read. Locally, before anything was co-signed, the witness's checks show `NOT CHECKED` ("nothing co-signed yet") and no request is made. Service keys come from `--keys <file|url>`, or by default from the service's `/.well-known/signafaide-keys.json`. `--trust-embedded-keys` uses the keys inside the pack and prints a warning. The drand BLS signature is checked too (through `@noble/curves`, a dependency).
 
 ```ts
 import { verify } from "signafaide";

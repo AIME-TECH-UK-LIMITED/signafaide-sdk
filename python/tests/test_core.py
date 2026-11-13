@@ -5,6 +5,7 @@ import pytest
 
 from signafaide import jcs
 from signafaide.crypto import (
+    content_hash,
     SigningKey,
     audit_path,
     b64url,
@@ -189,7 +190,7 @@ def test_make_record_is_valid_and_signed():
     r = _rec()
     assert record_errors(r) == []
     assert set(r["envelope"]) == {"v", "kind", "project", "env", "agent", "seq", "prev", "time", "name", "content_hash", "ref"}
-    assert r["envelope"]["content_hash"] == hash_json({"input": {}})
+    assert r["envelope"]["content_hash"] == content_hash({"input": {}}, r["salt"]) != hash_json({"input": {}})
     assert len(r["envelope"]["time"]) == 24 and r["envelope"]["time"].endswith("Z")
     assert record_hash(r) == hash_json(r["envelope"])
 

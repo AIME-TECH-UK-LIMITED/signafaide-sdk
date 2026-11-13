@@ -1,6 +1,6 @@
 /** Envelopes and signed records (SPEC §2). */
 
-import { HEX64, b64url, b64urlDecode, hashJson, keyId, verifySig, type SigningKey } from "./crypto.js";
+import { HEX64, SALT_RE, b64url, b64urlDecode, contentHash, hashJson, keyId, newSalt, verifySig, type SigningKey } from "./crypto.js";
 import { assertPortableNumbers } from "./jcs.js";
 
 export type Kind = "decision" | "outcome" | "note";
@@ -45,6 +45,8 @@ export interface SignedRecord {
   draft?: true;
   store_content?: boolean;
   content?: Record<string, unknown>;
+  /** The content's salt (§2.1): kept with the content, sent only with stored content. */
+  salt?: string;
   receipt?: Receipt;
 }
 
@@ -164,7 +166,7 @@ export function recordErrors(rec: unknown): string[] {
   const r = rec as Record<string, unknown>;
   const errs = envelopeErrors(r.envelope);
   const extra = Object.keys(r)
-    .filter((k) => !["envelope", "key_id", "sig", "content", "receipt"].includes(k))
+    .filter((k) => !["envelope", "key_id", "sig", "content", "salt", "receipt"].includes(k))
     .sort();
   if (extra.length) errs.push("unknown record field " + extra.join(", "));
   if (typeof r.key_id !== "string" || !KEY_ID_RE.test(r.key_id)) errs.push("key_id must be 16 lowercase hex");
@@ -176,6 +178,7 @@ export function recordErrors(rec: unknown): string[] {
   }
   if (!sigOk) errs.push("sig must be a base64url Ed25519 signature");
   if ("content" in r && (!r.content || typeof r.content !== "object" || Array.isArray(r.content))) errs.push("content must be a JSON object");
+  if ("salt" in r && (typeof r.salt !== "string" || !SALT_RE.test(r.salt))) errs.push("salt must be 32 lowercase hex");
   return errs;
 }
 
@@ -190,12 +193,16 @@ export interface RecordFields {
   content: Record<string, unknown>;
   ref?: string | null;
   time?: string;
+  /** The content salt (§2.1); a fresh random one when not given. */
+  salt?: string;
 }
 
-/** Build and sign `{envelope, key_id, sig, content}`. Throws on a bad envelope or on
- * content numbers other implementations could not re-read (SPEC §1). */
+/** Build and sign `{envelope, key_id, sig, content, salt}`: the content hash is salted (SPEC
+ * §2.1). Throws on a bad envelope or on content numbers other implementations could not re-read
+ * (SPEC §1). */
 export function makeRecord(key: SigningKey, f: RecordFields): SignedRecord {
   assertPortableNumbers(f.content);
+  const salt = f.salt ?? newSalt();
   const envelope: Envelope = {
     v: 1,
     kind: f.kind,
@@ -206,22 +213,25 @@ export function makeRecord(key: SigningKey, f: RecordFields): SignedRecord {
     prev: f.prev,
     time: f.time ?? now(),
     name: f.name,
-    content_hash: hashJson(f.content),
+    content_hash: contentHash(f.content, salt),
     ref: f.ref ?? null,
   };
   const errs = envelopeErrors(envelope);
   if (errs.length) throw new Error("invalid record: " + errs.join("; "));
-  return { envelope, key_id: key.keyId, sig: key.sign("record", hashJson(envelope)), content: f.content };
+  return { envelope, key_id: key.keyId, sig: key.sign("record", hashJson(envelope)), content: f.content, salt };
 }
 
 export function recordHash(rec: { envelope: unknown }): string {
   return hashJson(rec.envelope);
 }
 
-/** The record as sent to the service: content only when stored there. */
+/** The record as sent to the service: content and its salt only when stored there (§2.3). */
 export function wireRecord(rec: SignedRecord, storeContent: boolean): SignedRecord {
   const out: SignedRecord = { envelope: rec.envelope, key_id: rec.key_id, sig: rec.sig };
-  if (storeContent && rec.content !== undefined) out.content = rec.content;
+  if (storeContent && rec.content !== undefined) {
+    out.content = rec.content;
+    if (rec.salt !== undefined) out.salt = rec.salt;
+  }
   return out;
 }
 
@@ -231,10 +241,11 @@ export function wireRecord(rec: SignedRecord, storeContent: boolean): SignedReco
  * draft hash. */
 export function makeDraft(key: SigningKey, f: Omit<RecordFields, "project" | "env">, storeContent: boolean): SignedRecord {
   assertPortableNumbers(f.content);
-  const d = { v: 1, kind: f.kind, agent: f.agent, seq: f.seq, prev: f.prev, time: f.time ?? now(), name: f.name, content_hash: hashJson(f.content), ref: f.ref ?? null };
+  const salt = f.salt ?? newSalt();
+  const d = { v: 1, kind: f.kind, agent: f.agent, seq: f.seq, prev: f.prev, time: f.time ?? now(), name: f.name, content_hash: contentHash(f.content, salt), ref: f.ref ?? null };
   const errs = envelopeErrors(d, DRAFT_FIELDS);
   if (errs.length) throw new Error("invalid record: " + errs.join("; "));
-  return { draft: true, envelope: d as unknown as Envelope, key_id: key.keyId, sig: key.sign("draft", hashJson(d)), content: f.content, store_content: storeContent };
+  return { draft: true, envelope: d as unknown as Envelope, key_id: key.keyId, sig: key.sign("draft", hashJson(d)), content: f.content, salt, store_content: storeContent };
 }
 
 /** Schema problems with a draft line (§8); empty when valid. */
@@ -243,7 +254,7 @@ export function draftErrors(rec: unknown): string[] {
   const r = rec as Record<string, unknown>;
   const errs = envelopeErrors(r.envelope, DRAFT_FIELDS);
   const extra = Object.keys(r)
-    .filter((k) => !["draft", "envelope", "key_id", "sig", "content", "store_content"].includes(k))
+    .filter((k) => !["draft", "envelope", "key_id", "sig", "content", "salt", "store_content"].includes(k))
     .sort();
   if (extra.length) errs.push("unknown draft field " + extra.join(", "));
   if (r.draft !== true) errs.push("draft must be true");
@@ -256,6 +267,7 @@ export function draftErrors(rec: unknown): string[] {
   }
   if (!sigOk) errs.push("sig must be a base64url Ed25519 signature");
   if ("content" in r && (!r.content || typeof r.content !== "object" || Array.isArray(r.content))) errs.push("content must be a JSON object");
+  if ("salt" in r && (typeof r.salt !== "string" || !SALT_RE.test(r.salt))) errs.push("salt must be 32 lowercase hex");
   if ("store_content" in r && typeof r.store_content !== "boolean") errs.push("store_content must be true or false");
   return errs;
 }
@@ -263,7 +275,7 @@ export function draftErrors(rec: unknown): string[] {
 /** The signed record for a draft once its project is known (§8). */
 export function signDraft(key: SigningKey, draft: SignedRecord, project: string, env: "test" | "live", prev: string | null, ref: string | null): SignedRecord {
   const d = draft.envelope;
-  return makeRecord(key, { kind: d.kind, project, env, agent: d.agent, seq: d.seq, prev, name: d.name, content: draft.content ?? {}, ref, time: d.time });
+  return makeRecord(key, { kind: d.kind, project, env, agent: d.agent, seq: d.seq, prev, name: d.name, content: draft.content ?? {}, ref, time: d.time, salt: draft.salt });
 }
 
 /** A service key (§5) or, with `agent`, a pack's agent key: exact fields, valid times. */

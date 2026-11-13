@@ -195,6 +195,11 @@ pub struct Fixture {
     pub pack: Value,
 }
 
+/// Record `i`'s content salt: the first 16 bytes of sha256("salt-<i>"), as 32 hex characters.
+pub fn sample_salt(i: usize) -> String {
+    hex::encode(&sha256(format!("salt-{i}").as_bytes()).0[..16])
+}
+
 fn sample_contents() -> Vec<(Kind, &'static str, &'static str, Value, bool)> {
     vec![
         (
@@ -233,7 +238,7 @@ fn build(mode: Build) -> Fixture {
             prev: if second { None } else { prev },
             time: time.into(),
             name: name.into(),
-            content_hash: content_hash(&content).unwrap(),
+            content_hash: content_hash(&content, &sample_salt(i)).unwrap(),
             reference: (kind == Kind::Outcome).then(|| records[0].1),
         };
         if mode == Build::ForkedPrev && i == 3 {
@@ -241,7 +246,7 @@ fn build(mode: Build) -> Fixture {
         }
         let hash = envelope.record_hash().unwrap();
         let sig = ak.sign(Domain::Record, &hash);
-        records.push((SignedRecord { envelope, key_id: ak.key_id(), sig, content: store.then_some(content) }, hash));
+        records.push((SignedRecord { envelope, key_id: ak.key_id(), sig, content: store.then_some(content), salt: store.then(|| sample_salt(i)) }, hash));
         prev = Some(hash);
     }
 
@@ -342,6 +347,7 @@ fn build(mode: Build) -> Fixture {
                 key_id: r.key_id.clone(),
                 sig: r.sig.clone(),
                 content: r.content.clone(),
+                salt: r.salt.clone(),
                 receipt: rc.clone(),
             })
             .unwrap()
@@ -570,6 +576,10 @@ pub fn tampered_packs() -> Vec<(&'static str, &'static str, Value, Inputs)> {
             p["heads"] = json!([]);
         }), none()),
         ("content", "stored content was edited after the record was signed", edit(&|p| p["records"][0]["content"]["reason"] = json!("Edited later.")), none()),
+        ("content", "the stored content's salt was replaced", edit(&|p| p["records"][0]["salt"] = json!(sample_salt(9))), none()),
+        ("content", "stored content without its salt", edit(&|p| {
+            p["records"][0].as_object_mut().unwrap().remove("salt");
+        }), none()),
         // H2: completeness games by anyone who hands the pack on (the export statement is not re-signed).
         ("head_sig", "the last record was dropped and the export head swapped for the receipt head of the last kept record", edit(&|p| {
             pop(p);
@@ -817,11 +827,13 @@ pub fn generate() -> Value {
         .records
         .iter()
         .zip(sample_contents())
-        .map(|((r, h), (_, _, _, content, store))| {
+        .enumerate()
+        .map(|(i, ((r, h), (_, _, _, content, store)))| {
             let ev = serde_json::to_value(&r.envelope).unwrap();
             json!({
                 "content": content,
                 "content_jcs": jcs::canonicalize(&content).unwrap(),
+                "salt": sample_salt(i),
                 "content_hash": r.envelope.content_hash,
                 "stored": store,
                 "envelope": ev,

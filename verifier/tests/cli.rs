@@ -24,7 +24,7 @@ fn run(args: &[&str]) -> (i32, String) {
     (out.status.code().unwrap(), String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr))
 }
 
-const SCOPE: &str = ": export of every agent, all records, generated 2026-11-13T12:00:00.000Z";
+const SCOPE: &str = ": 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z";
 
 /// A one-thread fake server: `path` answers `body`, anything else 404. Counts the requests.
 fn serve(path: &'static str, body: String) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
@@ -202,6 +202,7 @@ fn content_from_a_chain_directory() {
     let mut pack = v["pack"]["pack"].clone();
     for r in pack["records"].as_array_mut().unwrap() {
         r.as_object_mut().unwrap().remove("content");
+        r.as_object_mut().unwrap().remove("salt");
     }
     let pack = tmp("pack4.json", &pack);
     let keys = tmp("keys4.json", &v["keys_document"]);
@@ -209,7 +210,7 @@ fn content_from_a_chain_directory() {
     let dir = std::env::temp_dir().join(format!("signafaide-verify-chain-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("chain")).unwrap();
     let lines: Vec<String> = v["records"].as_array().unwrap().iter()
-        .map(|r| serde_json::json!({"envelope": r["envelope"], "key_id": r["key_id"], "sig": r["sig"], "content": r["content"]}).to_string())
+        .map(|r| serde_json::json!({"envelope": r["envelope"], "key_id": r["key_id"], "sig": r["sig"], "content": r["content"], "salt": r["salt"]}).to_string())
         .collect();
     std::fs::write(dir.join("chain/agent-a.jsonl"), lines.join("\n")).unwrap();
     let (code, out) = run(&[&pack, "--keys", &keys, "--agent-keys", &agents, "--offline", "--content", &dir.to_string_lossy(), "--json"]);

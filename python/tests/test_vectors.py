@@ -13,7 +13,7 @@ import pytest
 
 import signafaide
 from signafaide import jcs, ots
-from signafaide.crypto import SigningKey, audit_path, b64url, hash_json, leaf_hash, merkle_root, signed_message, verify_inclusion, verify_sig
+from signafaide.crypto import SigningKey, audit_path, b64url, content_hash, hash_json, leaf_hash, sha256_hex, merkle_root, signed_message, verify_inclusion, verify_sig
 from signafaide.records import AGENT_RE, envelope_errors, parse_time, valid_project_id
 from signafaide.drand import load_verifier as load_drand_verifier
 from signafaide.bitcoin import check_header, roots_from_vector
@@ -81,7 +81,8 @@ def test_merkle(v):
 def test_records(v, keys):
     for r in v["records"]:
         assert jcs.dumps(r["content"]) == r["content_jcs"]
-        assert hash_json(r["content"]) == r["content_hash"] == r["envelope"]["content_hash"]
+        assert content_hash(r["content"], r["salt"]) == r["content_hash"] == r["envelope"]["content_hash"]
+        assert sha256_hex(bytes.fromhex(r["salt"]) + r["content_jcs"].encode()) == r["content_hash"]
         assert jcs.dumps(r["envelope"]) == r["envelope_jcs"]
         assert hash_json(r["envelope"]) == r["record_hash"]
         assert envelope_errors(r["envelope"]) == []
@@ -227,7 +228,7 @@ def test_pack_without_bls_says_not_checked(v):
 
 
 def test_tampered_packs(v, bls):
-    assert len(v["tampered"]) == 46
+    assert len(v["tampered"]) == 48
     for case in v["tampered"]:
         keys, o = options(case, v, drand=bls)
         r = verify_pack(case["pack"], keys, **o)

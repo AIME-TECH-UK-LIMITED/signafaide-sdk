@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils";
 import { describe, expect, it } from "vitest";
-import { SigningKey, auditPath, b64url, b64urlDecode, hashJson, keyId, leafHash, merkleRoot, signedMessage, verifyInclusion, verifySig } from "../src/crypto.js";
+import { SigningKey, auditPath, b64url, b64urlDecode, contentHash, hashJson, keyId, leafHash, merkleRoot, signedMessage, verifyInclusion, verifySig } from "../src/crypto.js";
 import { assertPortableNumbers, canonicalize } from "../src/jcs.js";
 import { agentName, envelopeErrors, makeRecord, recordErrors, recordHash } from "../src/records.js";
 
@@ -125,7 +125,8 @@ describe("envelopes", () => {
   it("builds valid signed records", () => {
     const r = rec();
     expect(recordErrors(r)).toEqual([]);
-    expect(r.envelope.content_hash).toBe(hashJson({ input: {} }));
+    expect(r.envelope.content_hash).toBe(contentHash({ input: {} }, r.salt!));
+    expect(r.envelope.content_hash).not.toBe(hashJson({ input: {} }));
     expect(r.envelope.time).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     expect(recordHash(r)).toBe(hashJson(r.envelope));
   });

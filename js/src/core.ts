@@ -5,7 +5,7 @@
  */
 
 export { JsonNumber, assertPortableNumbers, canonicalize, canonicalBytes, parseJson } from "./jcs.js";
-export { SigningKey, auditPath, b64url, b64urlDecode, hashJson, keyId, leafHash, merkleRoot, sha256Hex, signedMessage, verifyInclusion, verifySig, type Domain } from "./crypto.js";
+export { SigningKey, auditPath, b64url, b64urlDecode, checkContent, contentHash, hashJson, keyId, leafHash, merkleRoot, newSalt, sha256Hex, signedMessage, verifyInclusion, verifySig, type Domain } from "./crypto.js";
 export {
   AGENT_RE,
   agentName,
@@ -44,6 +44,7 @@ export {
   Report,
   checkRoundTime,
   contentFromText,
+  countsText,
   exportStatement,
   isLoopbackUrl,
   loadDrandVerifier,
