@@ -1,0 +1,10 @@
+target/
+node_modules/
+.venv/
+dist/
+__pycache__/
+*.pyc
+.signafaide/
+.env
+data/
+*.key

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "signafaide"
+version = "0.1.0"
+description = "Signed, chained records of what your AI agents decided. Hash-only by default."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+dependencies = ["cryptography>=41"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[project.optional-dependencies]
+bls = ["py_ecc>=7"]
+
+[project.scripts]
+signafaide = "signafaide.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=7", "langchain-core>=0.3", "openai-agents>=0.2", "py_ecc>=7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/signafaide"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
