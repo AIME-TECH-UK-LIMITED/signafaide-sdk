@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import contextvars
+import json
 import logging
 import os
 import re
@@ -15,6 +16,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 from datetime import datetime, timedelta, timezone
 
 from ._plural import plural
+from .coverage import TOOLS, declared_name, tool_note_name
 from .crypto import SigningKey, b64url, hash_json
 from .http import DEFAULT_URL, Client, SignafaideError
 from .records import (API_KEY_RE, AGENT_RE, INSTANCE_STOP, MAX_CLOCK_SKEW_MS, instance_stop_content, is_stop_note, agent_name, clamp_time, make_draft, make_record, now, parse_time, record_hash,
@@ -98,6 +100,8 @@ class Recorder:
         self.instance_stop = False if env_stop == "0" else (instance_stop if instance_stop is not None else (env_stop == "1" or bool(self.state.head_file)))
         self._wrote: Set[str] = set()  # agents this process wrote records for since its last stop note
         self._told_strict = False
+        #: (agent, source) -> the tool set this recorder last declared for it (§2.6), and the header's hash.
+        self._declared: Dict[Tuple[str, str], Tuple[str, str]] = {}
         self._url = url
         self._api_key = api_key
         self.store_content = store_content
@@ -327,9 +331,15 @@ class Recorder:
         """Sign and chain one record locally (synchronous, no network) and queue it for
         shipping. The chain is this API key's ``<project>/<env>/<agent>`` (§8); while the key's
         project is not known yet, the record is a signed draft."""
+        return self.write_run([(kind, name, content, ref)], agent=agent, store_content=store_content)[0]
+
+    def write_run(self, items: List[Tuple[str, str, dict, Optional[str]]], *, agent: Optional[str] = None, store_content: Optional[bool] = None) -> List[dict]:
+        """:meth:`write` for records that must follow each other with nothing between them (a
+        tool declaration, §2.6): ``(kind, name, content, ref)`` each, signed and appended under
+        one hold of the chain lock."""
         why = NO_WRITES.get()
         if why:
-            raise SignafaideError(f"{why} must not write records: candidate functions must be side-effect free (it tried to record {name!r})", code="no_writes")
+            raise SignafaideError(f"{why} must not write records: candidate functions must be side-effect free (it tried to record {items[0][1]!r})", code="no_writes")
         agent = agent or self.default_agent
         if not AGENT_RE.match(agent):
             raise ValueError(f"agent {agent!r} is invalid: use lowercase letters, digits, '.', '_' or '-' (max 64)")
@@ -343,24 +353,27 @@ class Recorder:
             if not self.state.chain_path(chain).exists():
                 for e in self._adopt_into(bucket, api_key).values():
                     self._report(f"signafaide: {e}")
-            if bucket.startswith(PENDING + "/"):
-                # The project is not known yet, and an envelope names it: keep a draft, signed later (§8).
-                def build(seq, prev, prev_time, scope=scope, key=key):
-                    t, c = self._timed(content, prev_time, agent, scope)
-                    return make_draft(key, kind=kind, agent=agent, seq=seq, prev=prev, name=name, content=c, ref=ref, store_content=sc, time=t)
-            else:
-                project, env = bucket.split("/")
+            builds = []
+            for kind, name, content, ref in items:
+                if bucket.startswith(PENDING + "/"):
+                    # The project is not known yet, and an envelope names it: keep a draft, signed later (§8).
+                    def build(seq, prev, prev_time, scope=scope, key=key, kind=kind, name=name, content=content, ref=ref):
+                        t, c = self._timed(content, prev_time, agent, scope)
+                        return make_draft(key, kind=kind, agent=agent, seq=seq, prev=prev, name=name, content=c, ref=ref, store_content=sc, time=t)
+                else:
+                    project, env = bucket.split("/")
 
-                def build(seq, prev, prev_time, chain=chain, project=project, env=env, scope=scope, key=key):
-                    r = self.state.translate_ref(chain, ref)
-                    t, c = self._timed(content, prev_time, agent, scope)
-                    return make_record(key, kind=kind, project=project, env=env, agent=agent, seq=seq, prev=prev, name=name, content=c, ref=r, time=t)
+                    def build(seq, prev, prev_time, chain=chain, project=project, env=env, scope=scope, key=key, kind=kind, name=name, content=content, ref=ref):
+                        r = self.state.translate_ref(chain, ref)
+                        t, c = self._timed(content, prev_time, agent, scope)
+                        return make_record(key, kind=kind, project=project, env=env, agent=agent, seq=seq, prev=prev, name=name, content=c, ref=r, time=t)
 
-            rec = self.state.append(chain, build, lambda r: wire_record(r, sc), still_valid=lambda b=bucket: self._write_bucket(api_key, agent) == b)
-            if rec is not None:
+                builds.append(build)
+            recs = self.state.append_run(chain, builds, lambda r: wire_record(r, sc), still_valid=lambda b=bucket: self._write_bucket(api_key, agent) == b)
+            if recs is not None:
                 break
-        self._pending += 1
-        if name != INSTANCE_STOP:
+        self._pending += len(recs)
+        if any(name != INSTANCE_STOP for _, name, _, _ in items):
             self._wrote.add(agent)
         if not api_key and not self._told_local and not self.quiet and not self.test:
             self._told_local = True
@@ -372,7 +385,46 @@ class Recorder:
         self._start()
         if self._pending >= self.flush_size:
             self._wake.set()  # the shipper still honours its backoff
-        return rec
+        return recs
+
+    def declare_tools(self, tools: Dict[str, bool], *, source: str, origin: str, agent: Optional[str] = None, store_content: Optional[bool] = None) -> str:
+        """Declare the tools one source knows for an agent (§2.6): a ``signafaide.tools`` note
+        followed by one note per tool, written as one run. *source* names who declares (``sdk``:
+        the SDK in this program); *origin* is ``wrap_tools`` or ``declared``. The notes list the
+        agent's whole tool list, the union over every source that declared on this machine (§8
+        ``tools/<agent>.json``), a tool recorded when any source records it. Written at most once
+        per recorder for the same set: the first time, and again when the set changes. Returns the
+        header's record hash."""
+        agent = agent or self.default_agent
+        if not AGENT_RE.match(agent):
+            raise ValueError(f"agent {agent!r} is invalid: use lowercase letters, digits, '.', '_' or '-' (max 64)")
+        names = sorted(tools)
+        for n in names:
+            if not isinstance(n, str) or not n or any(ord(c) < 0x20 or ord(c) == 0x7F for c in n):
+                raise TypeError(f"a tool name must be a non-empty string without control characters (got {n!r})")
+        sig = json.dumps([[n, bool(tools[n])] for n in names])
+        held = self._declared.get((agent, source))
+        if held and held[0] == sig:
+            return held[1]
+
+        def write(union: Dict[str, bool]) -> str:
+            # By declared name (a long name is cut, §2.6); two names cut to the same one keep the recorded form.
+            by_name: Dict[str, Tuple[str, bool]] = {}
+            for tool, recorded in union.items():
+                d = declared_name(tool)
+                if d not in by_name or (recorded and not by_name[d][1]):
+                    by_name[d] = (tool, recorded)
+            listed = [by_name[d] for d in sorted(by_name)]
+            n_recorded = sum(1 for _, r in listed if r)
+            items: List[Tuple[str, str, dict, Optional[str]]] = [
+                ("note", TOOLS, {"source": origin, "tools": len(listed), "recorded": n_recorded, "unrecorded": len(listed) - n_recorded}, None)
+            ]
+            items += [("note", tool_note_name(tool, recorded), {"tool": tool, "recorded": recorded}, None) for tool, recorded in listed]
+            return record_hash(self.write_run(items, agent=agent, store_content=store_content)[0])
+
+        h = self.state.declare_tools(agent, source, {n: bool(tools[n]) for n in names}, write)
+        self._declared[(agent, source)] = (sig, h)
+        return h
 
     def _write_bucket(self, api_key: Optional[str], agent: str) -> str:
         """Where *agent*'s next record goes. A known project whose chain for *agent* is not on

@@ -22,7 +22,7 @@ from ._plural import plural
 from . import runtime
 from ._version import __version__
 from .drand import load_verifier as load_drand_verifier
-from .decorator import NotRecorded, note, record, to_jsonable, wrap_tool, wrap_tools
+from .decorator import NotRecorded, auto_declare_tools, declare_tools, note, record, to_jsonable, wrap_tool, wrap_tools
 from .experiments import ExperimentReport, VerificationFailed, compare
 from .http import SignafaideError
 from .replay import Replay, replay
@@ -40,6 +40,8 @@ __all__ = [
     "record",
     "wrap_tools",
     "wrap_tool",
+    "declare_tools",
+    "auto_declare_tools",
     "note",
     "flush",
     "stop",

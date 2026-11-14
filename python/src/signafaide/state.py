@@ -10,6 +10,7 @@ sandbox response or a receipt names it.
                                          live chains use their own key, ``agents/live/<agent>.key``
 - ``agents/retired/<agent>.<key_id>.key`` keys replaced by ``signafaide keys rotate`` (``agents/live/retired/`` for live)
 - ``held/<chain>/<from>-<to>.jsonl``     records ``signafaide repair`` set aside (kept, verifiable)
+- ``tools/<agent>.json``                 the tools each source last declared for the agent (§2.6)
 - ``blocked.json``                       chains the witness refused, with why (status, verify, replay)
 - ``chain/<chain>.jsonl``                one JCS line per record ``{envelope, key_id, sig, content, receipt?}``;
                                          in a ``_pending`` chain, unsigned drafts ``{draft, envelope, content, store_content}``
@@ -653,20 +654,84 @@ class State:
         to the chain and put ``wire(record)`` in the outbox. Returns the record, or
         None when ``still_valid()`` is false once the lock is held (the chain was
         just moved under its project; the caller resolves the chain again)."""
+        recs = self.append_run(chain, [build], wire, still_valid)
+        return recs[0] if recs else None
+
+    def append_run(
+        self,
+        chain: str,
+        builds: List[Callable[[int, Optional[str], Optional[str]], dict]],
+        wire: Callable[[dict], dict],
+        still_valid: Callable[[], bool] = lambda: True,
+    ) -> Optional[List[dict]]:
+        """:meth:`append` for several records that must follow each other with nothing between
+        them (a tool declaration, §2.6): all of them are built and written under one hold of the
+        chain lock, in one write, so no other writer's record lands inside the run."""
         self.ensure()
         with self.lock(chain):
             if not still_valid():
                 return None
             seq, prev, prev_time = self.tail(chain)
-            rec = build(seq + 1, prev, prev_time)
+            recs: List[dict] = []
+            for build in builds:
+                rec = build(seq + 1, prev, prev_time)
+                recs.append(rec)
+                seq, prev, prev_time = rec["envelope"]["seq"], record_hash(rec), rec["envelope"]["time"]
             try:
                 with open(self.chain_path(chain), "ab") as f:
-                    f.write((jcs.dumps(rec) + "\n").encode())
+                    f.write("".join(jcs.dumps(r) + "\n" for r in recs).encode())
             except OSError as e:
                 raise fs_error(e, self.home) from None
-            if not rec.get("draft"):  # a draft ships once it is signed (adopt)
-                self._write_outbox(chain, wire(rec))
-        return rec
+            for rec in recs:
+                if not rec.get("draft"):  # a draft ships once it is signed (adopt)
+                    self._write_outbox(chain, wire(rec))
+        return recs
+
+    # --- tool declarations ------------------------------------------------------
+
+    def tools_path(self, agent: str) -> Path:
+        """``tools/<agent>.json`` (§8): the tools each source (the SDK in an application, each
+        gateway) last declared for the agent."""
+        return self.home / "tools" / f"{agent}.json"
+
+    def tool_sources(self, agent: str) -> Dict[str, Dict[str, bool]]:
+        """The tools every source last declared for *agent*: source -> {tool name: recorded}."""
+        doc = _read_json(self.tools_path(agent)) or {}
+        sources = doc.get("sources") if isinstance(doc, dict) else None
+        out: Dict[str, Dict[str, bool]] = {}
+        if not isinstance(sources, dict):
+            return out
+        for src, entry in sources.items():
+            tools = entry.get("tools") if isinstance(entry, dict) else None
+            if isinstance(tools, dict):
+                out[src] = {k: v for k, v in tools.items() if isinstance(v, bool)}
+        return out
+
+    def declare_tools(self, agent: str, source: str, tools: Dict[str, bool], write: Callable[[Dict[str, bool]], Any]) -> Any:
+        """Set the tools *source* declares for *agent* and call ``write`` with the agent's whole
+        tool list: the union over every source, a tool recorded when any source records it (§8).
+        Held under ``tools/<agent>.lock``, so two sources never write declarations that miss each
+        other's tools. The file is updated only when ``write`` returns."""
+        self.ensure()
+        path = self.tools_path(agent)
+        with self._lock_at(self.home / "tools" / f"{agent}.lock"):
+            sources = {**self.tool_sources(agent), source: dict(tools)}
+            union: Dict[str, bool] = {}
+            for src in sorted(sources):
+                for name, recorded in sources[src].items():
+                    union[name] = union.get(name) is True or recorded
+            out = write(union)
+            at = now()
+            doc = _read_json(path) or {}
+            old = doc.get("sources") if isinstance(doc.get("sources"), dict) else {}
+            try:
+                _write_json(path, {"sources": {
+                    src: {"at": at if src == source else ((old.get(src) or {}).get("at") if isinstance(old.get(src), dict) else None) or at, "tools": t}
+                    for src, t in sources.items()
+                }})
+            except OSError as e:
+                raise fs_error(e, self.home) from None
+            return out
 
     def _write_outbox(self, chain: str, rec: dict) -> None:
         d = self.outbox_dir(chain)

@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach } from "vitest";
 import { configure, getRecorder, type Recorder } from "../src/runtime.js";
 import { ADAPTERS } from "../src/telemetry.js";
+import { resetToolRegistry } from "../src/record.js";
 import { FakeService } from "./fake-service.js";
 
 const AGENT_ENV = ["SIGNAFAIDE_", "CLAUDE", "CODEX_", "CURSOR_", "GEMINI_CLI", "COPILOT_", "GITHUB_COPILOT_", "WINDSURF_"];
@@ -28,6 +29,7 @@ export function useProject(opts: { optIn?: boolean } = {}): Ctx {
     // The SDK turns test mode on by itself under Vitest; these tests exercise the real recorder.
     process.env.SIGNAFAIDE_TEST = "0";
     ADAPTERS.clear();
+    resetToolRegistry(); // tools wrapped by an earlier test are not this test's tool list
     ctx.root = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfa-js-")), "Claims Project");
     fs.mkdirSync(path.join(ctx.root, ".git"), { recursive: true });
     process.chdir(ctx.root);

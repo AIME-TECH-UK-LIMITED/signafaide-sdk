@@ -3,11 +3,18 @@ import asyncio
 import pytest
 
 import signafaide
-from helpers import records
+from helpers import records as all_records
+from signafaide.coverage import tool_note
+
+
+def records(recorder, agent="claims-project"):
+    """The agent's chain without its tool-declaration notes (SPEC §2.6): ``wrap_tools`` writes them
+    before the first call; test_tools.py covers them."""
+    return [r for r in all_records(recorder, agent) if not tool_note(r["envelope"]["kind"], r["envelope"]["name"])]
 
 
 def names(recorder, agent="claims-project"):
-    return [(r["envelope"]["kind"], r["envelope"]["name"]) for r in records(recorder, agent)]
+    return [(r["envelope"]["kind"], r["envelope"]["name"]) for r in all_records(recorder, agent)]
 
 
 def test_wrap_tools_dict_and_list(recorder):
@@ -22,11 +29,19 @@ def test_wrap_tools_dict_and_list(recorder):
     assert asyncio.run(tools["refund"]("o1", 5)) == 5
     listed = signafaide.wrap_tools([lookup], agent="support-bot")
     assert isinstance(listed, list) and listed[0]("o2") == {"order": "o2"}
+    # The wrapped tools declare themselves with the first call, and again when the list grows (SPEC §2.6).
     assert names(recorder, "support-bot") == [
+        ("note", "signafaide.tools"),
+        ("note", "signafaide.tool/lookup_order"),
+        ("note", "signafaide.tool/refund"),
         ("decision", "lookup_order"),
         ("outcome", "lookup_order"),
         ("decision", "refund"),
         ("outcome", "refund"),
+        ("note", "signafaide.tools"),
+        ("note", "signafaide.tool/lookup"),
+        ("note", "signafaide.tool/lookup_order"),
+        ("note", "signafaide.tool/refund"),
         ("decision", "lookup"),
         ("outcome", "lookup"),
     ]
@@ -93,7 +108,7 @@ def test_langchain_basetool_subclass_and_errors(recorder, lc_tools):
         wrapped.invoke("boom")
     assert asyncio.run(wrapped.ainvoke("async")) == "async"
     recs = records(recorder)
-    assert names(recorder) == [("decision", "echo"), ("outcome", "echo")] * 3
+    assert names(recorder) == [("note", "signafaide.tools"), ("note", "signafaide.tool/echo")] + [("decision", "echo"), ("outcome", "echo")] * 3
     assert recs[3]["content"]["error"] == {"type": "RuntimeError", "message": "echo failed"}
 
 

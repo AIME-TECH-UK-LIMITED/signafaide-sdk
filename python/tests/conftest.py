@@ -5,7 +5,7 @@ import socket
 import pytest
 
 from fake_service import FakeService
-from signafaide import runtime, telemetry
+from signafaide import decorator, runtime, telemetry
 
 AGENT_ENV = ("SIGNAFAIDE_", "CLAUDE", "CODEX_", "CURSOR_", "GEMINI_CLI", "COPILOT_", "GITHUB_COPILOT_", "WINDSURF_")
 
@@ -24,6 +24,7 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("SIGNAFAIDE_TEST", "0")
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
     monkeypatch.setattr(telemetry, "ADAPTERS", set())
+    decorator._reset_tool_registry()  # tools wrapped by an earlier test are not this test's tool list
     return root
 
 

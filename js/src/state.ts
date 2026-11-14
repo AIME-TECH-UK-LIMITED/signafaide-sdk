@@ -14,6 +14,7 @@
  * - `blocked.json`               chains the witness refused, with why (status, verify, replay)
  * - `outbox/<chain>/<seq>.json`  signed records not yet accepted by the service
  * - `head.json`                  newest signed head, `{project: {env: {agent: {head, head_sig}}}}`
+ * - `tools/<agent>.json`         the tools each source last declared for the agent (§2.6)
  * - `config.json`                coding agent; API key fingerprint -> {project, env}
  * - `sandbox.json`               the sandbox project and claim link
  *
@@ -778,18 +779,80 @@ export class State {
     wire: (r: SignedRecord) => SignedRecord,
     stillValid: () => boolean = () => true,
   ): SignedRecord | null {
+    return this.appendRun(chain, [build], wire, stillValid)?.[0] ?? null;
+  }
+
+  /** `append` for several records that must follow each other with nothing between them (a tool
+   * declaration, §2.6): all of them are built and written under one hold of the chain lock, in
+   * one write, so no other writer's record lands inside the run. */
+  appendRun(
+    chain: string,
+    builds: ((seq: number, prev: string | null, prevTime: string | null) => SignedRecord)[],
+    wire: (r: SignedRecord) => SignedRecord,
+    stillValid: () => boolean = () => true,
+  ): SignedRecord[] | null {
     this.ensure();
     return this.lock(chain, () => {
       if (!stillValid()) return null;
-      const [seq, prev, prevTime] = this.tail(chain);
-      const rec = build(seq + 1, prev, prevTime);
+      let [seq, prev, prevTime] = this.tail(chain);
+      const recs: SignedRecord[] = [];
+      for (const build of builds) {
+        const rec = build(seq + 1, prev, prevTime);
+        recs.push(rec);
+        [seq, prev, prevTime] = [rec.envelope.seq, recordHash(rec), rec.envelope.time];
+      }
       try {
-        fs.appendFileSync(this.chainPath(chain), canonicalize(rec) + "\n");
+        fs.appendFileSync(this.chainPath(chain), recs.map((r) => canonicalize(r) + "\n").join(""));
       } catch (e) {
         throw fsError(e, this.home);
       }
-      if (!rec.draft) this.writeOutbox(chain, wire(rec)); // a draft ships once it is signed (adopt)
-      return rec;
+      for (const rec of recs) if (!rec.draft) this.writeOutbox(chain, wire(rec)); // a draft ships once it is signed (adopt)
+      return recs;
+    });
+  }
+
+  // --- tool declarations --------------------------------------------------------
+
+  /** `tools/<agent>.json` (§8): the tools each source (the SDK in an application, each gateway)
+   * last declared for the agent. */
+  toolsPath(agent: string): string {
+    return path.join(this.home, "tools", `${agent}.json`);
+  }
+
+  /** The tools every source last declared for `agent`: source -> {tool name: recorded}. */
+  toolSources(agent: string): Record<string, Record<string, boolean>> {
+    const doc = readJson<{ sources?: unknown }>(this.toolsPath(agent));
+    const out: Record<string, Record<string, boolean>> = {};
+    const sources = doc?.sources;
+    if (!sources || typeof sources !== "object" || Array.isArray(sources)) return out;
+    for (const [src, entry] of Object.entries(sources as Record<string, any>)) {
+      const tools = entry?.tools;
+      if (!tools || typeof tools !== "object" || Array.isArray(tools)) continue;
+      out[src] = Object.fromEntries(Object.entries(tools).filter(([, v]) => typeof v === "boolean")) as Record<string, boolean>;
+    }
+    return out;
+  }
+
+  /** Set the tools `source` declares for `agent` and call `write` with the agent's whole tool
+   * list: the union over every source, a tool recorded when any source records it (§8). Held
+   * under `tools/<agent>.lock`, so two sources never write declarations that miss each other's
+   * tools. The file is updated only when `write` returns. */
+  declareTools<T>(agent: string, source: string, tools: Record<string, boolean>, write: (all: Record<string, boolean>) => T): T {
+    this.ensure();
+    const file = this.toolsPath(agent);
+    return this.lockAt(path.join(this.home, "tools", `${agent}.lock`), () => {
+      const sources = { ...this.toolSources(agent), [source]: tools };
+      const all: Record<string, boolean> = {};
+      for (const src of Object.keys(sources).sort()) for (const [name, recorded] of Object.entries(sources[src])) all[name] = all[name] === true || recorded;
+      const out = write(all);
+      const at = now();
+      const old = (readJson<{ sources?: Record<string, { at?: string }> }>(file)?.sources ?? {}) as Record<string, { at?: string }>;
+      try {
+        writeJson(file, { sources: Object.fromEntries(Object.entries(sources).map(([src, t]) => [src, { at: src === source ? at : (old[src]?.at ?? at), tools: t }])) });
+      } catch (e) {
+        throw fsError(e, this.home);
+      }
+      return out;
     });
   }
 

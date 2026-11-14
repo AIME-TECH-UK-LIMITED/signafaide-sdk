@@ -40,7 +40,7 @@ import {
 export * from "./core.js";
 
 installNodeCrypto();
-export { NotRecorded, note, record, toJsonable, wrapTool, wrapTools, type RecordOptions, type WrapOptions } from "./record.js";
+export { NotRecorded, autoDeclareTools, declareTools, note, record, toJsonable, wrapTool, wrapTools, type DeclareOptions, type RecordOptions, type WrapOptions } from "./record.js";
 export { Recorder, configure, getRecorder, recordingDisabled, testMode, type Blocked, type FlushResult, type RecorderOptions, type StopResult } from "./runtime.js";
 export { State, StateError } from "./state.js";
 export { Entry, Replay, loadServiceKeys, replay, type ReplayOptions } from "./replay.js";

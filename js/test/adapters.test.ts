@@ -4,11 +4,13 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { NotRecorded, wrapTool, wrapTools } from "../src/index.js";
 import { getRecorder } from "../src/runtime.js";
+import { toolNote } from "../src/coverage.js";
 import { deadUrl, records, useProject } from "./helpers.js";
 
 useProject();
 const names = (agent = "claims-project") => records(agent).map((r) => `${r.envelope.kind}:${r.envelope.name}`);
-const chain = (agent = "claims-project") => records(agent);
+/** The agent's chain without its tool-declaration notes (SPEC §2.6): `wrapTools` writes them before the first call; tools.test.ts covers them. */
+const chain = (agent = "claims-project") => records(agent).filter((r) => !toolNote(r.envelope.kind, r.envelope.name));
 
 describe("wrapTools", () => {
   it("wraps an object of functions (key = name) and an array", async () => {
@@ -20,7 +22,22 @@ describe("wrapTools", () => {
     }
     const [wrapped] = wrapTools([escalate], { agent: "support-bot" });
     expect(wrapped("late")).toBe("late");
-    expect(names("support-bot")).toEqual(["decision:lookupOrder", "outcome:lookupOrder", "decision:refund", "outcome:refund", "decision:escalate", "outcome:escalate"]);
+    // The wrapped tools declare themselves with the first call, and again when the list grows (SPEC §2.6).
+    expect(names("support-bot")).toEqual([
+      "note:signafaide.tools",
+      "note:signafaide.tool/lookupOrder",
+      "note:signafaide.tool/refund",
+      "decision:lookupOrder",
+      "outcome:lookupOrder",
+      "decision:refund",
+      "outcome:refund",
+      "note:signafaide.tools",
+      "note:signafaide.tool/escalate",
+      "note:signafaide.tool/lookupOrder",
+      "note:signafaide.tool/refund",
+      "decision:escalate",
+      "outcome:escalate",
+    ]);
   });
 
   it("rejects things that are not tools", () => {
@@ -109,7 +126,7 @@ describe("LangChain.js", () => {
     const wrapped = wrapTool(new Echo());
     expect(await wrapped.invoke({ text: "hi" })).toBe("hi");
     await expect(wrapped.invoke({ text: "boom" })).rejects.toThrow("echo failed");
-    expect(names()).toEqual(["decision:echo", "outcome:echo", "decision:echo", "outcome:echo"]);
+    expect(names()).toEqual(["note:signafaide.tools", "note:signafaide.tool/echo", "decision:echo", "outcome:echo", "decision:echo", "outcome:echo"]);
     expect(chain()[3].content).toEqual({ error: { type: "Error", message: "echo failed" } });
   });
 });

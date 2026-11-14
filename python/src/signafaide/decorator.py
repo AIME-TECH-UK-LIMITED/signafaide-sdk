@@ -1,4 +1,5 @@
-"""``record``, ``note`` and ``wrap_tools``: the decision -> run -> outcome cycle."""
+"""``record``, ``note``, ``wrap_tools`` and ``declare_tools``: the decision -> run -> outcome
+cycle, and the agent's tool list (SPEC §2.6)."""
 
 from __future__ import annotations
 
@@ -15,9 +16,13 @@ import inspect
 import json
 import logging
 import math
+import os
+import sys
+import threading
 import uuid
+import weakref
 from pathlib import PurePath
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple
 
 from . import jcs, runtime, telemetry
 from ._version import __version__
@@ -33,6 +38,121 @@ class NotRecorded(SignafaideError):
     """Strict mode: the decision got no receipt, so the tool did not run."""
 
 
+# --- the agent's tool list (§2.6) -------------------------------------------------
+
+#: Tool names the SDK has wrapped in this process, by agent ("" is the default agent).
+_WRAPPED: Dict[str, Set[str]] = {}
+#: Of those, the ones wrapped by ``wrap_tools`` / ``wrap_tool``, which declare themselves.
+_LISTED: Dict[str, Set[str]] = {}
+#: The full tool list given to ``declare_tools``, by agent: (names, unrecorded).
+_EXPLICIT: Dict[str, Tuple[list, Set[str]]] = {}
+#: Bumped whenever one of the three changes, so a recorder looks again only then.
+_tools_version = 0
+#: recorder -> agent -> the ``_tools_version`` its declaration was last checked at.
+_checked: "weakref.WeakKeyDictionary[runtime.Recorder, Dict[str, int]]" = weakref.WeakKeyDictionary()
+_tools_lock = threading.RLock()
+_told_declare = False
+
+
+def auto_declare_tools() -> bool:
+    """``SIGNAFAIDE_DECLARE_TOOLS=0`` turns off the declarations ``wrap_tools`` writes by itself."""
+    return os.environ.get("SIGNAFAIDE_DECLARE_TOOLS", "").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _remember(registry: Dict[str, Set[str]], agent: Optional[str], name: str) -> None:
+    global _tools_version
+    with _tools_lock:
+        names = registry.setdefault(agent or "", set())
+        if name not in names:
+            names.add(name)
+            _tools_version += 1
+
+
+def _names_for(registry: Dict[str, Set[str]], agent: str, is_default: bool) -> Set[str]:
+    """The names in *registry* for *agent*: its own, and the default agent's when it is that one."""
+    return set(registry.get(agent, ())) | (set(registry.get("", ())) if is_default else set())
+
+
+def _own_tools(rec: runtime.Recorder, agent: str) -> Optional[Tuple[Dict[str, bool], str]]:
+    """What this program declares for *agent*: the list given to ``declare_tools`` (a tool
+    recorded when the SDK wrapped it here and it was not named unrecorded), else the tools
+    ``wrap_tools`` wrapped, or None when there is nothing to declare."""
+    is_default = agent == rec.default_agent
+    explicit = _EXPLICIT.get(agent) or (_EXPLICIT.get("") if is_default else None)
+    if explicit:
+        wrapped = _names_for(_WRAPPED, agent, is_default)
+        tools = {n: n in wrapped and n not in explicit[1] for n in explicit[0]}
+        tools.update({n: False for n in explicit[1]})
+        return tools, "declared"
+    listed = _names_for(_LISTED, agent, is_default)
+    if not listed or not auto_declare_tools():
+        return None
+    return {n: True for n in listed}, "wrap_tools"
+
+
+def _declare_own(rec: runtime.Recorder, agent_opt: Optional[str]) -> str:
+    """Write the agent's tool declaration when this program has one the recorder has not written
+    yet. Returns the header's hash, or "" when there is nothing to declare."""
+    agent = agent_opt or rec.default_agent
+    own = _own_tools(rec, agent)
+    if own is None:
+        return ""
+    return rec.declare_tools(own[0], source="sdk", origin=own[1], agent=agent)
+
+
+def _declare_before_call(rec: runtime.Recorder, agent_opt: Optional[str]) -> None:
+    """Before a decision: declare the tools, once per change. Never fails the tool call."""
+    global _told_declare
+    agent = agent_opt or rec.default_agent
+    with _tools_lock:
+        seen = _checked.setdefault(rec, {})
+        if seen.get(agent) == _tools_version or runtime.NO_WRITES.get():
+            return
+        version = _tools_version
+        try:
+            _declare_own(rec, agent_opt)
+        except Exception as e:  # tried once for this list; the tool call goes on
+            if not _told_declare:
+                _told_declare = True
+                print(f"signafaide: could not write the tool declaration for {agent}: {e}", file=sys.stderr)
+        seen[agent] = version
+
+
+def declare_tools(names: Iterable[str], *, agent: Optional[str] = None, unrecorded: Iterable[str] = ()) -> str:
+    """Declare the agent's full tool list (SPEC §2.6), so a verifier can say which of the agent's
+    tools are recorded. A name is declared recorded when the SDK wrapped a tool of that name in
+    this process (``record``, ``wrap_tools``, ``wrap_tool``), otherwise not recorded;
+    ``unrecorded`` names tools that are not wrapped. The declaration is a signed note per tool in
+    the agent's chain: it is evidence of what the program said its tools were, not proof that the
+    list is complete. Written now, and again by itself when a tool of the list is wrapped later.
+    Returns the hash of the ``signafaide.tools`` note ("" when recording is turned off)."""
+    global _tools_version
+    listed, skipped = list(names), list(unrecorded)
+    for n in listed + skipped:
+        if not isinstance(n, str) or not n:
+            raise TypeError("declare_tools needs tool names: non-empty strings")
+    with _tools_lock:
+        _EXPLICIT[agent or ""] = (listed, set(skipped))
+        _tools_version += 1
+        if runtime.recording_disabled():
+            return ""
+        rec = runtime.get()
+        h = _declare_own(rec, agent)
+        _checked.setdefault(rec, {})[agent or rec.default_agent] = _tools_version
+        return h
+
+
+def _reset_tool_registry() -> None:
+    """Forget every wrapped and declared tool (tests)."""
+    global _tools_version, _told_declare
+    with _tools_lock:
+        _WRAPPED.clear()
+        _LISTED.clear()
+        _EXPLICIT.clear()
+        _tools_version += 1
+        _told_declare = False
+
+
 @dataclasses.dataclass(frozen=True)
 class _Spec:
     name: str
@@ -40,9 +160,17 @@ class _Spec:
     strict: bool = False
     store_content: Optional[bool] = None
     meta: Optional[dict] = None
+    #: Wrapped by ``wrap_tools`` / ``wrap_tool``: part of the tool list it declares.
+    listed: bool = False
+
+    def __post_init__(self) -> None:
+        _remember(_WRAPPED, self.agent, self.name)
+        if self.listed:
+            _remember(_LISTED, self.agent, self.name)
 
     def decide(self, args: Any) -> tuple:
         rec = runtime.get()
+        _declare_before_call(rec, self.agent)
         meta = {"sdk": f"signafaide-python/{__version__}", **(self.meta or {})}
         d = rec.write("decision", self.name, {"input": to_jsonable(args), "meta": to_jsonable(meta)}, agent=self.agent, store_content=self.store_content)
         return rec, d
@@ -114,7 +242,10 @@ def record(
     """
     if fn is None:
         return lambda f: record(f, agent=agent, name=name, strict=strict, store_content=store_content, meta=meta)
-    spec = _Spec(name or fn.__name__, agent, strict, store_content, meta)
+    return _record_with(_Spec(name or fn.__name__, agent, strict, store_content, meta), fn)
+
+
+def _record_with(spec: _Spec, fn: Callable) -> Any:
     try:
         sig: Optional[inspect.Signature] = inspect.signature(fn)
     except (TypeError, ValueError):
@@ -144,13 +275,15 @@ def note(name: str, content: dict, *, agent: Optional[str] = None, store_content
     return record_hash(rec)
 
 
-def wrap_tools(tools: Any, *, agent: Optional[str] = None, strict: bool = False, store_content: Optional[bool] = None) -> Any:
+def wrap_tools(tools: Any, *, agent: Optional[str] = None, strict: bool = False, store_content: Optional[bool] = None, declare_tools: bool = True) -> Any:
     """Record every tool in a dict (key = tool name) or a list.
 
     Accepts plain functions, LangChain tools (``BaseTool`` / ``@tool``) and
-    OpenAI Agents SDK ``FunctionTool``s. Returns the same shape.
+    OpenAI Agents SDK ``FunctionTool``s. Returns the same shape. The wrapped tools are declared
+    as the agent's recorded tools (SPEC §2.6, see :func:`declare_tools`) with the first recorded
+    call, unless ``declare_tools=False``; ``SIGNAFAIDE_DECLARE_TOOLS=0`` turns it off everywhere.
     """
-    opts = {"agent": agent, "strict": strict, "store_content": store_content}
+    opts = {"agent": agent, "strict": strict, "store_content": store_content, "declare_tools": declare_tools}
     if isinstance(tools, dict):
         return {k: wrap_tool(v, name=k, **opts) for k, v in tools.items()}
     if isinstance(tools, (list, tuple)):
@@ -158,14 +291,16 @@ def wrap_tools(tools: Any, *, agent: Optional[str] = None, strict: bool = False,
     return wrap_tool(tools, **opts)
 
 
-def wrap_tool(tool: Any, *, name: Optional[str] = None, agent: Optional[str] = None, strict: bool = False, store_content: Optional[bool] = None) -> Any:
+def wrap_tool(
+    tool: Any, *, name: Optional[str] = None, agent: Optional[str] = None, strict: bool = False, store_content: Optional[bool] = None, declare_tools: bool = True
+) -> Any:
     """Record one tool. See :func:`wrap_tools`."""
     if _is_openai_agents_tool(tool):
-        return _wrap_openai_agents(tool, _Spec(name or tool.name, agent, strict, store_content))
+        return _wrap_openai_agents(tool, _Spec(name or tool.name, agent, strict, store_content, listed=declare_tools))
     if _is_langchain_tool(tool):
-        return _wrap_langchain(tool, _Spec(name or tool.name, agent, strict, store_content))
+        return _wrap_langchain(tool, _Spec(name or tool.name, agent, strict, store_content, listed=declare_tools))
     if callable(tool):
-        return record(tool, agent=agent, name=name, strict=strict, store_content=store_content)
+        return _record_with(_Spec(name or tool.__name__, agent, strict, store_content, listed=declare_tools), tool)
     raise TypeError(f"wrap_tools cannot record {type(tool).__name__}: pass a function, a LangChain tool or an OpenAI Agents FunctionTool")
 
 

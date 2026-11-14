@@ -31,6 +31,7 @@ import {
 } from "./records.js";
 import { PENDING, State, StateError, agentKeyEnvName, monotonicMs, appendEnvFile, keyFingerprint, readEnvFile, scopeOf, type Base, type KeyProvider, type KeyScope } from "./state.js";
 import { adapterField, clientHeader, detectAgent, telemetryEnabled } from "./telemetry.js";
+import { TOOLS, byCodePoint, declaredName, toolNoteName } from "./coverage.js";
 
 const BATCH_MAX = 1000; // §6: at most 1000 records per POST /v1/records
 /** §2.4: a registration's valid_from is at most 7 days old; keep an hour of margin. */
@@ -138,6 +139,8 @@ export class Recorder {
   /** Agents this process wrote records for since its last stop note. */
   private wrote = new Set<string>();
   private toldStrict = false;
+  /** `<agent>\n<source>` -> the tool set this recorder last declared for it (§2.6), and the header's hash. */
+  private declared = new Map<string, { sig: string; hash: string }>();
   /** @internal */ _url?: string;
   /** @internal */ _apiKey?: string;
   /** `<agent>\n<scope>` -> [key, the key file's identity when loaded] */
@@ -385,14 +388,20 @@ export class Recorder {
   /** Sign and chain one record locally (synchronous) and queue it for shipping.
    * The chain is this API key's `<project>/<env>/<agent>` (§8). */
   write(kind: Kind, name: string, content: Record<string, unknown>, opts: { agent?: string; ref?: string | null; storeContent?: boolean } = {}): SignedRecord {
+    return this.writeRun([{ kind, name, content, ref: opts.ref }], opts)[0];
+  }
+
+  /** `write` for records that must follow each other with nothing between them (a tool
+   * declaration, §2.6): they are signed and appended under one hold of the chain lock. */
+  writeRun(items: { kind: Kind; name: string; content: Record<string, unknown>; ref?: string | null }[], opts: { agent?: string; storeContent?: boolean } = {}): SignedRecord[] {
     const why = noWrites.getStore();
-    if (why) throw new SignafaideError(`${why} must not write records: candidate functions must be side-effect free (it tried to record "${name}")`, { code: "no_writes" });
+    if (why) throw new SignafaideError(`${why} must not write records: candidate functions must be side-effect free (it tried to record "${items[0]?.name}")`, { code: "no_writes" });
     const agent = opts.agent || this.defaultAgent;
     if (!AGENT_RE.test(agent)) throw new Error(`agent "${agent}" is invalid: use lowercase letters, digits, '.', '_' or '-' (max 64)`);
     const sc = opts.storeContent ?? this.storeContent;
     const apiKey = this.apiKey;
-    let rec: SignedRecord | null = null;
-    while (!rec) {
+    let recs: SignedRecord[] | null = null;
+    while (!recs) {
       const bucket = this.writeBucket(apiKey, agent);
       const scope = scopeOf(bucket);
       const key = this.key(agent, scope);
@@ -400,20 +409,22 @@ export class Recorder {
       if (!fs.existsSync(this.state.chainPath(chain))) for (const e of Object.values(this.adoptInto(bucket, apiKey))) this.report(`signafaide: ${e.message}`);
       const [project, env] = bucket.split("/") as [string, "test" | "live"];
       // Before the project is known, an envelope cannot name it: keep a draft, signed when it is (§8).
-      const build = bucket.startsWith(PENDING + "/")
-        ? (seq: number, prev: string | null, prevTime: string | null) => {
-            const [time, c] = this.timed(content, prevTime, agent, scope);
-            return makeDraft(key, { kind, agent, seq, prev, name, content: c, ref: opts.ref ?? null, time }, sc);
-          }
-        : (seq: number, prev: string | null, prevTime: string | null) => {
-            const [time, c] = this.timed(content, prevTime, agent, scope);
-            return makeRecord(key, { kind, project, env, agent, seq, prev, name, content: c, ref: this.state.translateRef(chain, opts.ref), time });
-          };
-      rec = this.state.append(chain, build, (r) => wireRecord(r, sc), () => this.writeBucket(apiKey, agent) === bucket);
+      const builds = items.map(({ kind, name, content, ref }) =>
+        bucket.startsWith(PENDING + "/")
+          ? (seq: number, prev: string | null, prevTime: string | null) => {
+              const [time, c] = this.timed(content, prevTime, agent, scope);
+              return makeDraft(key, { kind, agent, seq, prev, name, content: c, ref: ref ?? null, time }, sc);
+            }
+          : (seq: number, prev: string | null, prevTime: string | null) => {
+              const [time, c] = this.timed(content, prevTime, agent, scope);
+              return makeRecord(key, { kind, project, env, agent, seq, prev, name, content: c, ref: this.state.translateRef(chain, ref), time });
+            },
+      );
+      recs = this.state.appendRun(chain, builds, (r) => wireRecord(r, sc), () => this.writeBucket(apiKey, agent) === bucket);
     }
-    this.pending++;
+    this.pending += recs.length;
     this.exitFlushed = false;
-    if (name !== INSTANCE_STOP) this.wrote.add(agent);
+    if (items.some((i) => i.name !== INSTANCE_STOP)) this.wrote.add(agent);
     if (!apiKey && !this.toldLocal && !this.quiet && !this.test) {
       this.toldLocal = true;
       console.error(
@@ -423,7 +434,43 @@ export class Recorder {
     }
     this.start();
     if (this.pending >= this.flushSize) void this.tick(); // honours the backoff and the one flush in flight
-    return rec;
+    return recs;
+  }
+
+  /** Declare the tools one source knows for an agent (§2.6): a `signafaide.tools` note followed
+   * by one note per tool, written as one run. `source` names who declares (the SDK in this
+   * program, or one gateway); the notes list the agent's whole tool list, the union over every
+   * source that declared on this machine (§8 `tools/<agent>.json`), a tool recorded when any
+   * source records it. Written at most once per recorder for the same set: the first time, and
+   * again when the set changes. Returns the header's record hash. */
+  declareTools(tools: Record<string, boolean>, opts: { agent?: string; source: string; origin: "gateway" | "wrap_tools" | "declared"; storeContent?: boolean }): string {
+    const agent = opts.agent || this.defaultAgent;
+    if (!AGENT_RE.test(agent)) throw new Error(`agent "${agent}" is invalid: use lowercase letters, digits, '.', '_' or '-' (max 64)`);
+    const names = Object.keys(tools).sort(byCodePoint);
+    const bad = names.find((n) => !n || /[\u0000-\u001f\u007f]/.test(n));
+    if (bad !== undefined) throw new TypeError(`a tool name must be a non-empty string without control characters (got ${JSON.stringify(bad)})`);
+    const id = `${agent}\n${opts.source}`;
+    const sig = JSON.stringify(names.map((n) => [n, tools[n]]));
+    const held = this.declared.get(id);
+    if (held?.sig === sig) return held.hash;
+    const hash = this.state.declareTools(agent, opts.source, tools, (all) => {
+      // By declared name (a long name is cut, §2.6); two names cut to the same one keep the recorded form.
+      const byName = new Map<string, { tool: string; recorded: boolean }>();
+      for (const [tool, recorded] of Object.entries(all)) {
+        const d = declaredName(tool);
+        const prev = byName.get(d);
+        if (!prev || (recorded && !prev.recorded)) byName.set(d, { tool, recorded });
+      }
+      const list = [...byName.keys()].sort(byCodePoint).map((d) => byName.get(d)!);
+      const recorded = list.filter((t) => t.recorded).length;
+      const items = [
+        { kind: "note" as Kind, name: TOOLS, content: { source: opts.origin, tools: list.length, recorded, unrecorded: list.length - recorded } as Record<string, unknown> },
+        ...list.map((t) => ({ kind: "note" as Kind, name: toolNoteName(t.tool, t.recorded), content: { tool: t.tool, recorded: t.recorded } as Record<string, unknown> })),
+      ];
+      return recordHash(this.writeRun(items, { agent, storeContent: opts.storeContent })[0]);
+    });
+    this.declared.set(id, { sig, hash });
+    return hash;
   }
 
   /** Where `agent`'s next record goes. A known project whose chain for `agent` is not on this
@@ -889,10 +936,23 @@ export class Recorder {
   /** The program has nothing left to do: one last attempt, held open at most `exitFlushMs`.
    * Background requests never keep the process alive, so they are cut off here. */
   private onBeforeExit = (): void => {
+    void this.exitAttempt();
+  };
+
+  /** The last attempt of a program that ends on its own schedule (the gateway, once its server
+   * has exited): what happens by itself when a program runs out of work. Ships what is left and,
+   * when stop notes are on, writes the signed stop note, all within `exitFlushMs`; then stops the
+   * background timer. Never throws. */
+  async shutdown(): Promise<void> {
+    await this.exitAttempt();
+    this.close();
+  }
+
+  private exitAttempt(): Promise<void> | undefined {
     const stop = this.instanceStop && this.wrote.size > 0 && !this.test;
-    if (this.exitFlushed || !this.exitFlushMs || !this.apiKey || (!this.waiting() && !stop)) return;
+    if (this.exitFlushed || !this.exitFlushMs || !this.apiKey || (!this.waiting() && !stop)) return undefined;
     this.exitFlushed = true; // one attempt; beforeExit fires again once it settles
-    if (this.halted && this.halted.fp === this.configFp()) return;
+    if (this.halted && this.halted.fp === this.configFp()) return undefined;
     this.bgAbort.abort();
     this.bgAbort = new AbortController();
     const ctrl = new AbortController();
@@ -902,15 +962,15 @@ export class Recorder {
       clearTimeout(timer);
       this.exitFlushed = true; // a stop note written here does not ask for another attempt
     };
-    if (!stop) void this.flushLogged(this.exitFlushMs, "exit").finally(done);
+    if (!stop) return this.flushLogged(this.exitFlushMs, "exit").then(done, done);
     // A clean exit of an ephemeral instance: the stop note, when everything else was sent.
-    else void this.stop(this.exitFlushMs, "exit").then((r) => {
+    return this.stop(this.exitFlushMs, "exit").then((r) => {
       const errs = Object.entries(r.errors);
       if (errs.length && !ctrl.signal.aborted) this.report("signafaide: " + errs.map(([a, e]) => (e.message.includes(a) ? e.message : `${a}: ${e.message}`)).join("; "));
     }, (e) => {
       if (!ctrl.signal.aborted) this.report(`signafaide: ${(e as Error).message}`);
-    }).finally(done);
-  };
+    }).then(done, done);
+  }
 
   private onExit = (): void => {
     const left = this.waiting();
