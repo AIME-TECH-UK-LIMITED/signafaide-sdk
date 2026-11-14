@@ -6,8 +6,12 @@
  * `_pending/<key fingerprint>/<agent>` (or `_pending/nokey/<agent>` without a key) and the
  * whole chain moves under its project once a sandbox response or a receipt names it.
  *
- * - `agents/<agent>.key`         private key (JSON with its `created` time, mode 0600)
- * - `chain/<chain>.jsonl`        one JCS line per record `{envelope, key_id, sig, content, receipt?}`
+ * - `agents/<agent>.key`         private key (JSON with its `created` time, mode 0600); live
+ *                                chains use their own key, `agents/live/<agent>.key`
+ * - `chain/<chain>.jsonl`        one JCS line per record `{envelope, key_id, sig, content, receipt?}`;
+ *                                a shipped chain over SIGNAFAIDE_SEGMENT_BYTES rolls into `<chain>.segments/`
+ * - `held/<chain>/<from>-<to>.jsonl` records `signafaide repair` set aside (kept, verifiable)
+ * - `blocked.json`               chains the witness refused, with why (status, verify, replay)
  * - `outbox/<chain>/<seq>.json`  signed records not yet accepted by the service
  * - `head.json`                  newest signed head, `{project: {env: {agent: {head, head_sig}}}}`
  * - `config.json`                coding agent; API key fingerprint -> {project, env}
@@ -27,6 +31,33 @@ import { canonicalize } from "./jcs.js";
 import { AGENT_KEYS_FORMAT, AGENT_RE, manifestEntry, now, recordHash, signDraft, validProjectId, validTime, type AgentKeyEntry, type Receipt, type SignedRecord } from "./records.js";
 
 const MARKERS = [".git", "pyproject.toml", "package.json"];
+/** A shipped chain file larger than this rolls into a sealed segment (SIGNAFAIDE_SEGMENT_BYTES). */
+const SEGMENT_BYTES = (): number => Number(process.env.SIGNAFAIDE_SEGMENT_BYTES) || 64 * 1024 * 1024;
+/** Which agent key a chain uses: live chains have their own key (§8), everything else the default. */
+export type KeyScope = "" | "live";
+export const scopeOf = (bucket: string): KeyScope => (bucket.endsWith("/live") ? "live" : "");
+/** `SIGNAFAIDE_AGENT_KEY_<NAME>`: an agent's key file content from the environment or a secret store. */
+export const agentKeyEnvName = (agent: string, scope: KeyScope = ""): string =>
+  `SIGNAFAIDE_AGENT_KEY_${scope ? "LIVE_" : ""}${agent.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+/** A key handed to the SDK (environment, secret store): the key file's JSON fields. */
+export interface ProvidedKey {
+  private_key: string;
+  created: string;
+}
+/** Returns an agent's key from a secret store, or undefined to use the key file. */
+export type KeyProvider = (agent: string, scope: KeyScope) => ProvidedKey | string | undefined;
+
+/** A file-system error, said plainly: what could not be written, and how to fix it. */
+export function fsError(e: unknown, home: string): Error {
+  const code = (e as NodeJS.ErrnoException)?.code;
+  if (code === "EACCES" || code === "EROFS" || code === "EPERM") {
+    return new StateError(
+      `cannot write signafAIde's local state in ${home} (${code === "EROFS" ? "read-only file system" : "permission denied"}). ` +
+        "Set SIGNAFAIDE_HOME to a writable folder (for example a mounted volume, or /tmp/signafaide on serverless) or SIGNAFAIDE_DISABLED=1 to turn recording off; see https://signafaide.com/docs/production",
+    );
+  }
+  return e as Error;
+}
 const LOCK_STALE_MS = 10_000;
 const LOCK_WAIT_MS = 15_000;
 export const PENDING = "_pending";
@@ -82,6 +113,9 @@ export class State {
     readonly root: string,
   ) {}
 
+  /** Agent keys from a secret store, before the key files (`RecorderOptions.keyProvider`). */
+  keyProvider?: KeyProvider;
+
   /** `root`: the project folder (default: found from the cwd). */
   static discover(home?: string, root?: string): State {
     root = root ? path.resolve(root) : findRoot();
@@ -91,13 +125,50 @@ export class State {
 
   // --- layout -----------------------------------------------------------------
 
+  /** Create the folders. `.gitignore` is never edited here: only `signafaide init` and
+   * `agent setup` do that, so a CI checkout stays clean (§8). */
   ensure(): void {
-    for (const sub of ["agents", "chain", "outbox"]) fs.mkdirSync(path.join(this.home, sub), { recursive: true });
-    if (this.home === path.join(this.root, ".signafaide")) ensureGitignore(path.join(this.root, ".gitignore"), ".signafaide/");
+    try {
+      for (const sub of ["agents", "chain", "outbox"]) fs.mkdirSync(path.join(this.home, sub), { recursive: true });
+    } catch (e) {
+      throw fsError(e, this.home);
+    }
   }
 
-  keyPath(agent: string): string {
-    return path.join(this.home, "agents", `${agent}.key`);
+  /** Add `.signafaide/` (and `.env` when asked) to the project's .gitignore (init and agent setup only). */
+  ignoreInGit(...extra: string[]): void {
+    const gi = path.join(this.root, ".gitignore");
+    if (this.home === path.join(this.root, ".signafaide")) ensureGitignore(gi, ".signafaide/");
+    for (const e of extra) ensureGitignore(gi, e);
+  }
+
+  keyDir(scope: KeyScope = ""): string {
+    return scope ? path.join(this.home, "agents", scope) : path.join(this.home, "agents");
+  }
+
+  keyPath(agent: string, scope: KeyScope = ""): string {
+    return path.join(this.keyDir(scope), `${agent}.key`);
+  }
+
+  /** The key handed in for this agent (provider, then SIGNAFAIDE_AGENT_KEY_<NAME>), or null. */
+  providedKey(agent: string, scope: KeyScope = ""): ProvidedKey | null {
+    let v: ProvidedKey | string | undefined = this.keyProvider?.(agent, scope);
+    // A live chain looks for SIGNAFAIDE_AGENT_KEY_LIVE_<NAME> first, then the plain name (a
+    // deployment usually holds one key, for the env of its one API key).
+    if (v === undefined) v = process.env[agentKeyEnvName(agent, scope)] || (scope ? process.env[agentKeyEnvName(agent)] : undefined);
+    if (v === undefined || v === "") return null;
+    let doc: any = v;
+    if (typeof v === "string") {
+      try {
+        doc = JSON.parse(v);
+      } catch {
+        throw new StateError(`${agentKeyEnvName(agent, scope)} must hold the agent's key file (JSON with private_key and created), as \`cat .signafaide/agents/${agent}.key\` shows it`);
+      }
+    }
+    if (!doc || typeof doc.private_key !== "string" || !validTime(doc.created) || (doc.agent !== undefined && doc.agent !== agent)) {
+      throw new StateError(`the key given for agent ${agent} must be the agent's key file: {"agent", "private_key", "created", ...}`);
+    }
+    return { private_key: doc.private_key, created: doc.created };
   }
 
   chainPath(chain: string): string {
@@ -118,8 +189,21 @@ export class State {
 
   agents(): string[] {
     const names = new Set<string>(this.chains().map((c) => c.split("/")[2]));
-    for (const f of readdir(path.join(this.home, "agents"))) if (f.endsWith(".key")) names.add(f.slice(0, -4));
-    for (const f of readdir(this.retiredDir())) if (f.endsWith(".key")) names.add(f.split(".")[0]);
+    for (const scope of ["", "live"] as KeyScope[]) {
+      for (const f of readdir(this.keyDir(scope))) if (f.endsWith(".key")) names.add(f.slice(0, -4));
+      for (const f of readdir(this.retiredDir(scope))) if (f.endsWith(".key")) names.add(f.split(".")[0]);
+    }
+    for (const k of Object.keys(process.env)) {
+      const m = k.match(/^SIGNAFAIDE_AGENT_KEY_(?:LIVE_)?([A-Z0-9_]+)$/);
+      if (m && process.env[k]) {
+        try {
+          const a = JSON.parse(process.env[k]!).agent;
+          if (typeof a === "string") names.add(a);
+        } catch {
+          /* reported when the key is used */
+        }
+      }
+    }
     return [...names].filter((n) => AGENT_RE.test(n)).sort();
   }
 
@@ -146,7 +230,14 @@ export class State {
    * (§8), keeping each record's time. Returns the chains left pending, with why: `exists` (that
    * agent already has a chain under `dst`) or the first draft's time when it is before
    * `notBefore` (the service would refuse it, §2.4). */
-  adopt(src: string, dst: string, key: (agent: string) => SigningKey, wire: (r: SignedRecord) => SignedRecord, notBefore?: string): [string, string][] {
+  adopt(
+    src: string,
+    dst: string,
+    key: (agent: string, firstTime?: string) => SigningKey,
+    wire: (r: SignedRecord) => SignedRecord,
+    notBefore?: string,
+    bases: Record<string, { seq: number; record_hash: string }> = {},
+  ): [string, string][] {
     const [project, env] = dst.split("/") as [string, "test" | "live"];
     const conflicts: [string, string][] = [];
     for (const f of readdir(path.join(this.home, "chain", src)).filter((f) => f.endsWith(".jsonl")).sort()) {
@@ -167,12 +258,16 @@ export class State {
             conflicts.push([`${src}/${agent}`, first]);
             return;
           }
-          let prev: string | null = null;
+          // The service already holds a chain for this agent that is not on this disk (an ephemeral
+          // disk lost it): the drafts continue after the service's head instead of conflicting (§8).
+          const base = bases[agent];
+          let prev: string | null = base ? base.record_hash : null;
+          const offset = base ? base.seq : 0;
           const out: [SignedRecord, boolean | undefined][] = [];
           for (const d of lines) {
             if (!d.draft) throw new StateError(`${this.chainPath(`${src}/${agent}`)} holds a signed record; pending chains hold drafts only. Move it aside and run \`signafaide verify\``);
             const ref = d.envelope.ref;
-            const rec: SignedRecord = signDraft(key(agent), d, project, env, prev, ref ? (mapping[ref] ?? ref) : null);
+            const rec: SignedRecord = signDraft(key(agent, first), d, project, env, prev, ref ? (mapping[ref] ?? ref) : null, d.envelope.seq + offset);
             mapping[recordHash(d)] = prev = recordHash(rec);
             out.push([rec, d.store_content]);
           }
@@ -205,6 +300,82 @@ export class State {
     return this.draftMap(chain)[ref] ?? ref;
   }
 
+  // --- blocked chains, held segments ---------------------------------------------
+
+  /** Chains the witness refused, with why: `{chain: {code, message, at, seq}}` (blocked.json). */
+  blocked(): Record<string, { code: string; message: string; at: string; seq: number | null }> {
+    return readJson(path.join(this.home, "blocked.json")) ?? {};
+  }
+
+  /** Record (or, with null, clear) why the witness refuses a chain. Never throws (read-only disks). */
+  setBlocked(chain: string, info: { code: string; message: string; seq: number | null } | null): void {
+    try {
+      const all = this.blocked();
+      if (info === null) {
+        if (!(chain in all)) return;
+        delete all[chain];
+      } else {
+        const old = all[chain];
+        if (old && old.code === info.code && old.message === info.message && old.seq === info.seq) return;
+        all[chain] = { ...info, at: now() };
+      }
+      writeJson(path.join(this.home, "blocked.json"), all);
+    } catch {
+      /* status shows it from the next refusal */
+    }
+  }
+
+  heldDir(chain: string): string {
+    return path.join(this.home, "held", chain);
+  }
+
+  /** Every held segment: [chain, file, records]. */
+  heldSegments(): [string, string, SignedRecord[]][] {
+    const out: [string, string, SignedRecord[]][] = [];
+    for (const chain of depth3(path.join(this.home, "held"))) {
+      for (const f of readdir(this.heldDir(chain)).filter((x) => x.endsWith(".jsonl")).sort()) {
+        const p = path.join(this.heldDir(chain), f);
+        out.push([chain, p, fs.readFileSync(p, "utf8").split("\n").filter((l) => l.trim()).map((l) => parseLine(p, l))]);
+      }
+    }
+    return out;
+  }
+
+  /** `signafaide repair`: move the chain's records from `fromSeq` to the end (none of them
+   * co-signed) into `held/<chain>/<from>-<to>.jsonl`, and drop them from the outbox. The held
+   * file is written and flushed before the chain file is cut, so a crash never loses a line. */
+  holdTail(chain: string, fromSeq: number): { file: string; records: SignedRecord[] } {
+    return this.lock(chain, () => {
+      const p = this.chainPath(chain);
+      const cut: [number, SignedRecord][] = [];
+      for (const item of this.reverse(chain)) {
+        if (item[1].envelope.seq < fromSeq) break;
+        if (item[1].receipt) throw new StateError(`${chain} seq ${item[1].envelope.seq} has a receipt: co-signed records are never set aside`);
+        cut.push(item);
+      }
+      cut.reverse();
+      if (!cut.length) throw new StateError(`${chain} has no records from seq ${fromSeq}`);
+      const recs = cut.map((c) => c[1]);
+      const dir = this.heldDir(chain);
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${pad(recs[0].envelope.seq)}-${pad(recs[recs.length - 1].envelope.seq)}.jsonl`);
+      const fd = fs.openSync(file + ".tmp", "w", 0o600);
+      fs.writeSync(fd, recs.map((r) => canonicalize(r) + "\n").join(""));
+      fs.fsyncSync(fd);
+      fs.closeSync(fd);
+      fs.renameSync(file + ".tmp", file);
+      const cfd = fs.openSync(p, "r+");
+      try {
+        fs.ftruncateSync(cfd, cut[0][0]);
+        fs.fsyncSync(cfd);
+      } finally {
+        fs.closeSync(cfd);
+      }
+      this.dropOutbox(chain, recs.map((r) => r.envelope.seq));
+      return { file, records: recs };
+    });
+  }
+
   hasDrafts(): boolean {
     return this.chains().some((c) => c.startsWith(PENDING + "/"));
   }
@@ -217,37 +388,39 @@ export class State {
 
   /** When the key was generated: the `valid_from` sent at registration, so records
    * signed offline before registering still verify (§2.4). */
-  keyCreated(agent: string): string | undefined {
+  keyCreated(agent: string, scope: KeyScope = ""): string | undefined {
+    const given = this.providedKey(agent, scope);
+    if (given) return given.created;
     try {
-      return JSON.parse(fs.readFileSync(this.keyPath(agent), "utf8")).created;
+      return JSON.parse(fs.readFileSync(this.keyPath(agent, scope), "utf8")).created;
     } catch {
       return undefined;
     }
   }
 
-  retiredDir(): string {
-    return path.join(this.home, "agents", "retired");
+  retiredDir(scope: KeyScope = ""): string {
+    return path.join(this.keyDir(scope), "retired");
   }
 
   /** [key, created] of the agent's retired keys, newest first. */
-  retiredKeys(agent: string): [SigningKey, string][] {
+  retiredKeys(agent: string, scope: KeyScope = ""): [SigningKey, string][] {
     const out: [SigningKey, string][] = [];
-    for (const f of readdir(this.retiredDir())) {
+    for (const f of readdir(this.retiredDir(scope))) {
       if (!f.startsWith(agent + ".") || !f.endsWith(".key") || f.split(".").length !== 3) continue;
       try {
-        const doc = JSON.parse(fs.readFileSync(path.join(this.retiredDir(), f), "utf8"));
+        const doc = JSON.parse(fs.readFileSync(path.join(this.retiredDir(scope), f), "utf8"));
         if (doc.agent === agent) out.push([new SigningKey(b64urlDecode(doc.private_key)), doc.created]);
       } catch {
-        throw new StateError(`${path.join(this.retiredDir(), f)} is not a valid signafaide key file; restore it from backup`);
+        throw new StateError(`${path.join(this.retiredDir(scope), f)} is not a valid signafaide key file; restore it from backup`);
       }
     }
     return out.sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0));
   }
 
   /** When the service retired this key (§2.4 rotation), once it said so; null before. */
-  retiredAt(agent: string, keyId: string): string | null {
+  retiredAt(agent: string, keyId: string, scope: KeyScope = ""): string | null {
     try {
-      const v = JSON.parse(fs.readFileSync(path.join(this.retiredDir(), `${agent}.${keyId}.key`), "utf8")).retired;
+      const v = JSON.parse(fs.readFileSync(path.join(this.retiredDir(scope), `${agent}.${keyId}.key`), "utf8")).retired;
       return typeof v === "string" && validTime(v) ? v : null;
     } catch {
       return null;
@@ -255,8 +428,8 @@ export class State {
   }
 
   /** Record the service's retirement time in a retired key's file (kept for keys export). */
-  markRetired(agent: string, keyId: string, validTo: string): boolean {
-    const p = path.join(this.retiredDir(), `${agent}.${keyId}.key`);
+  markRetired(agent: string, keyId: string, validTo: string, scope: KeyScope = ""): boolean {
+    const p = path.join(this.retiredDir(scope), `${agent}.${keyId}.key`);
     if (!AGENT_RE.test(agent) || !validTime(validTo) || !/^[0-9a-f]{16}$/.test(keyId) || !fs.existsSync(p)) return false;
     const doc = JSON.parse(fs.readFileSync(p, "utf8"));
     if (doc.retired === validTo) return false;
@@ -269,23 +442,36 @@ export class State {
 
   /** Retire the agent's key and make a new one: [old, new]. The next registration is
    * signed by the old key (§2.4 rotation). */
-  rotateKey(agent: string): [SigningKey, SigningKey] {
+  rotateKey(agent: string, scope: KeyScope = ""): [SigningKey, SigningKey] {
     if (!AGENT_RE.test(agent)) throw new StateError(`agent "${agent}" is invalid`);
-    const old = this.loadKey(agent, false);
+    if (this.providedKey(agent, scope)) {
+      throw new StateError(`agent ${agent}'s key comes from ${agentKeyEnvName(agent, scope)} (or a key provider): make a new key with \`signafaide keys rotate\` on a machine with the key file, store the new file in your secret store, and keep the old one as ${agent}.<key id>.key in .signafaide/agents/${scope ? scope + "/" : ""}retired/`);
+    }
+    const old = this.loadKey(agent, false, scope);
     if (!old) throw new StateError(`agent ${agent} has no key to rotate; it gets one with its first record`);
-    fs.mkdirSync(this.retiredDir(), { recursive: true });
-    fs.renameSync(this.keyPath(agent), path.join(this.retiredDir(), `${agent}.${old.keyId}.key`));
-    return [old, this.loadKey(agent)];
+    fs.mkdirSync(this.retiredDir(scope), { recursive: true });
+    fs.renameSync(this.keyPath(agent, scope), path.join(this.retiredDir(scope), `${agent}.${old.keyId}.key`));
+    return [old, this.loadKey(agent, true, scope)];
   }
 
   /** Every current and retired agent key: `{agent, key_id, public_key, created, retired}`
    * (`retired`: when the service retired it, or null). */
   agentPublicKeys(): { agent: string; key_id: string; public_key: string; created: string; retired: string | null }[] {
     const out: { agent: string; key_id: string; public_key: string; created: string; retired: string | null }[] = [];
+    const seen = new Set<string>();
     for (const agent of this.agents()) {
-      const k = this.loadKey(agent, false);
-      if (k) out.push({ agent, key_id: k.keyId, public_key: b64url(k.publicKey), created: this.keyCreated(agent) ?? now(), retired: null });
-      for (const [rk, created] of this.retiredKeys(agent)) out.push({ agent, key_id: rk.keyId, public_key: b64url(rk.publicKey), created, retired: this.retiredAt(agent, rk.keyId) });
+      for (const scope of ["", "live"] as KeyScope[]) {
+        const k = this.loadKey(agent, false, scope);
+        if (k && !seen.has(k.keyId)) {
+          seen.add(k.keyId);
+          out.push({ agent, key_id: k.keyId, public_key: b64url(k.publicKey), created: this.keyCreated(agent, scope) ?? now(), retired: null });
+        }
+        for (const [rk, created] of this.retiredKeys(agent, scope)) {
+          if (seen.has(rk.keyId)) continue;
+          seen.add(rk.keyId);
+          out.push({ agent, key_id: rk.keyId, public_key: b64url(rk.publicKey), created, retired: this.retiredAt(agent, rk.keyId, scope) });
+        }
+      }
     }
     return out;
   }
@@ -293,30 +479,52 @@ export class State {
   /** The §2.5 manifest of every current and retired key, each entry self-signed. */
   exportAgentKeys(): { format: string; keys: AgentKeyEntry[] } {
     const keys: AgentKeyEntry[] = [];
+    const seen = new Set<string>();
     for (const agent of this.agents()) {
-      const k = this.loadKey(agent, false);
-      if (k) keys.push(manifestEntry(agent, k, this.keyCreated(agent) ?? now()));
-      // A retired key carries the time the service retired it, signed by that key (§2.5).
-      for (const [rk, created] of this.retiredKeys(agent)) keys.push(manifestEntry(agent, rk, created, this.retiredAt(agent, rk.keyId)));
+      for (const scope of ["", "live"] as KeyScope[]) {
+        const k = this.loadKey(agent, false, scope);
+        if (k && !seen.has(k.keyId)) {
+          seen.add(k.keyId);
+          keys.push(manifestEntry(agent, k, this.keyCreated(agent, scope) ?? now()));
+        }
+        // A retired key carries the time the service retired it, signed by that key (§2.5).
+        for (const [rk, created] of this.retiredKeys(agent, scope)) {
+          if (seen.has(rk.keyId)) continue;
+          seen.add(rk.keyId);
+          keys.push(manifestEntry(agent, rk, created, this.retiredAt(agent, rk.keyId, scope)));
+        }
+      }
     }
     return { format: AGENT_KEYS_FORMAT, keys };
   }
 
-  loadKey(agent: string, create?: true): SigningKey;
-  loadKey(agent: string, create: boolean): SigningKey | null;
-  loadKey(agent: string, create = true): SigningKey | null {
-    const p = this.keyPath(agent);
+  loadKey(agent: string, create?: true, scope?: KeyScope, createdAt?: string): SigningKey;
+  loadKey(agent: string, create: boolean, scope?: KeyScope, createdAt?: string): SigningKey | null;
+  /** `createdAt`: for a key made now to sign records written earlier (drafts signed into a live
+   * chain), its creation time, so it is valid from the first of them (§2.4). */
+  loadKey(agent: string, create = true, scope: KeyScope = "", createdAt?: string): SigningKey | null {
+    const given = this.providedKey(agent, scope);
+    if (given) {
+      try {
+        return new SigningKey(b64urlDecode(given.private_key));
+      } catch (e) {
+        throw new StateError(`the key given for agent ${agent} (${agentKeyEnvName(agent, scope)}) is not a valid key (${(e as Error).message})`);
+      }
+    }
+    const p = this.keyPath(agent, scope);
     if (!fs.existsSync(p)) {
       if (!create) return null;
       this.ensure();
       const key = SigningKey.generate((n) => new Uint8Array(randomBytes(n)));
-      const doc = { agent, key_id: key.keyId, public_key: b64url(key.publicKey), private_key: b64url(key.seed()), created: now() };
+      const t = now();
+      const doc = { agent, key_id: key.keyId, public_key: b64url(key.publicKey), private_key: b64url(key.seed()), created: createdAt && validTime(createdAt) && createdAt < t ? createdAt : t };
       let fd: number;
       try {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
         fd = fs.openSync(p, "wx", 0o600);
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "EEXIST") return this.loadKey(agent, false);
-        throw e;
+        if ((e as NodeJS.ErrnoException).code === "EEXIST") return this.loadKey(agent, false, scope);
+        throw fsError(e, this.home);
       }
       fs.writeSync(fd, canonicalize(doc) + "\n");
       fs.closeSync(fd);
@@ -333,7 +541,11 @@ export class State {
 
   lock<T>(chain: string, fn: () => T): T {
     const p = path.join(this.home, "chain", `${chain}.lock`);
-    fs.mkdirSync(path.dirname(p), { recursive: true });
+    try {
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+    } catch (e) {
+      throw fsError(e, this.home);
+    }
     const deadline = Date.now() + LOCK_WAIT_MS;
     for (;;) {
       try {
@@ -342,7 +554,7 @@ export class State {
         fs.closeSync(fd);
         break;
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw fsError(e, this.home);
         try {
           if (Date.now() - fs.statSync(p).mtimeMs > LOCK_STALE_MS) {
             fs.unlinkSync(p);
@@ -388,10 +600,56 @@ export class State {
 
   // --- chain ------------------------------------------------------------------
 
-  /** [seq, record_hash] of the last record in the local chain, [0, null] if empty. */
-  tail(chain: string): [number, string | null] {
-    for (const [, rec] of this.reverse(chain)) return [rec.envelope.seq, recordHash(rec)];
-    return [0, null];
+  /** [seq, record_hash, time] of the last record in the local chain (the last sealed segment's
+   * when the chain file was just rolled), [0, null, null] if empty. */
+  tail(chain: string): [number, string | null, string | null] {
+    for (const [, rec] of this.reverse(chain)) return [rec.envelope.seq, recordHash(rec), rec.envelope.time];
+    const segs = this.segments(chain);
+    if (segs.length) {
+      const lines = fs.readFileSync(segs[segs.length - 1], "utf8").split("\n").filter((l) => l.trim());
+      if (lines.length) {
+        const rec = parseLine(segs[segs.length - 1], lines[lines.length - 1]);
+        return [rec.envelope.seq, recordHash(rec), rec.envelope.time];
+      }
+    }
+    return [0, null, null];
+  }
+
+  segmentDir(chain: string): string {
+    return path.join(this.home, "chain", `${chain}.segments`);
+  }
+
+  /** Sealed segments of a chain, oldest first. */
+  segments(chain: string): string[] {
+    const d = this.segmentDir(chain);
+    return readdir(d)
+      .filter((f) => f.endsWith(".jsonl"))
+      .sort()
+      .map((f) => path.join(d, f));
+  }
+
+  /** Roll a large chain file into a sealed segment, under the chain lock. Only a fully shipped
+   * file rolls (its last line has a receipt), so receipts are never written into a segment. */
+  private maybeRoll(chain: string): void {
+    const p = this.chainPath(chain);
+    let size = 0;
+    try {
+      size = fs.statSync(p).size;
+    } catch {
+      return;
+    }
+    if (size < SEGMENT_BYTES()) return;
+    let last: SignedRecord | undefined;
+    for (const [, rec] of this.reverse(chain)) {
+      last = rec;
+      break;
+    }
+    if (!last?.receipt) return;
+    const firstLine = fs.readFileSync(p, "utf8").split("\n", 1)[0];
+    const first = parseLine(p, firstLine);
+    fs.mkdirSync(this.segmentDir(chain), { recursive: true });
+    fs.renameSync(p, path.join(this.segmentDir(chain), `${pad(first.envelope.seq)}-${pad(last.envelope.seq)}.jsonl`));
+    fs.writeFileSync(p, "");
   }
 
   /** Under the chain lock: build the next record from (seq, prev), append it to the chain
@@ -399,16 +657,20 @@ export class State {
    * the lock is held (the chain was just moved under its project; resolve it again). */
   append(
     chain: string,
-    build: (seq: number, prev: string | null) => SignedRecord,
+    build: (seq: number, prev: string | null, prevTime: string | null) => SignedRecord,
     wire: (r: SignedRecord) => SignedRecord,
     stillValid: () => boolean = () => true,
   ): SignedRecord | null {
     this.ensure();
     return this.lock(chain, () => {
       if (!stillValid()) return null;
-      const [seq, prev] = this.tail(chain);
-      const rec = build(seq + 1, prev);
-      fs.appendFileSync(this.chainPath(chain), canonicalize(rec) + "\n");
+      const [seq, prev, prevTime] = this.tail(chain);
+      const rec = build(seq + 1, prev, prevTime);
+      try {
+        fs.appendFileSync(this.chainPath(chain), canonicalize(rec) + "\n");
+      } catch (e) {
+        throw fsError(e, this.home);
+      }
       if (!rec.draft) this.writeOutbox(chain, wire(rec)); // a draft ships once it is signed (adopt)
       return rec;
     });
@@ -423,13 +685,12 @@ export class State {
   }
 
   private lines(chain: string): SignedRecord[] {
-    const p = this.chainPath(chain);
-    if (!fs.existsSync(p)) return [];
-    return fs
-      .readFileSync(p, "utf8")
-      .split("\n")
-      .filter((l) => l.trim())
-      .map((l) => parseLine(p, l));
+    const out: SignedRecord[] = [];
+    for (const p of [...this.segments(chain), this.chainPath(chain)]) {
+      if (!fs.existsSync(p)) continue;
+      for (const l of fs.readFileSync(p, "utf8").split("\n")) if (l.trim()) out.push(parseLine(p, l));
+    }
+    return out;
   }
 
   /** Every line of a chain, drafts included (§8). */
@@ -512,6 +773,7 @@ export class State {
         fs.closeSync(fd);
         fs.renameSync(tmp, journal);
         this.recover(chain);
+        this.maybeRoll(chain);
       }
       return filled;
     });
@@ -612,10 +874,14 @@ export class State {
 
   saveConfig(values: Record<string, unknown>): void {
     this.ensure();
-    writeJson(path.join(this.home, "config.json"), { ...this.config(), ...values });
+    try {
+      writeJson(path.join(this.home, "config.json"), { ...this.config(), ...values });
+    } catch (e) {
+      throw fsError(e, this.home);
+    }
   }
 
-  sandbox(): { project?: string; claim_url?: string; free_quota?: number; url?: string; created?: string; terms_url?: string; privacy_url?: string } | null {
+  sandbox(): { project?: string; claim_url?: string; free_quota?: number; url?: string; created?: string; terms_url?: string; privacy_url?: string; claimed?: boolean } | null {
     return readJson(path.join(this.home, "sandbox.json"));
   }
 
@@ -635,9 +901,9 @@ function parseLine(p: string, line: string): SignedRecord {
   }
 }
 
-/** Relative paths three levels below `d` (`a/b/c`). */
+/** Relative paths three levels below `d` (`a/b/c`); sealed segment folders are not chains. */
 function depth3(d: string): string[] {
-  return readdir(d).flatMap((a) => readdir(path.join(d, a)).flatMap((b) => readdir(path.join(d, a, b)).map((c) => `${a}/${b}/${c}`)));
+  return readdir(d).flatMap((a) => readdir(path.join(d, a)).flatMap((b) => readdir(path.join(d, a, b)).filter((c) => !c.endsWith(".segments")).map((c) => `${a}/${b}/${c}`)));
 }
 
 function readdir(d: string): string[] {

@@ -9,14 +9,15 @@ description = "Signed, chained records of what your AI agents decided. Hash-only
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
-dependencies = ["cryptography>=41"]
+dependencies = ["cryptography>=41", "py_ecc>=7"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Operating System :: OS Independent",
 ]
 
 [project.optional-dependencies]
-bls = ["py_ecc>=7"]
+# Kept so `pip install "signafaide[bls]"` still works; BLS is now a regular dependency.
+bls = []
 
 [project.scripts]
 signafaide = "signafaide.cli:main"

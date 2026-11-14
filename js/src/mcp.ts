@@ -1,5 +1,5 @@
 /**
- * `signafaide mcp`: an MCP server over stdio for coding agents. Every tool returns short
+ * `signafaide-mcp` (the separate package): an MCP server over stdio for coding agents. Every tool returns short
  * text the agent can act on. Tools work on the project in `directory`, else the server's cwd.
  */
 

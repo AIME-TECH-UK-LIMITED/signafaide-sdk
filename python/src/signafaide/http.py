@@ -9,9 +9,15 @@ import urllib.request
 from typing import Any, Optional
 
 from ._version import __version__
-from .telemetry import HEADER, client_header, detect_agent
+from .telemetry import HEADER, client_header
 
-DEFAULT_URL = "http://127.0.0.1:7474"
+#: The hosted witness. Configurable with SIGNAFAIDE_URL (a self-hosted witness, or a local dev
+#: server such as http://127.0.0.1:7474); a release test fails if this is ever a loopback address.
+DEFAULT_URL = "https://api.signafaide.com"
+
+#: Errors the SDK cannot fix by retrying: shipping stops until the configuration changes.
+NON_RETRYABLE = frozenset({"quota_exceeded", "invalid_key", "plan_required", "bad_signature", "invalid_record", "content_mismatch",
+                           "chain_conflict", "unknown_agent", "key_mismatch", "bad_response"})
 
 
 class SignafaideError(Exception):
@@ -33,13 +39,19 @@ class SignafaideError(Exception):
     def retryable(self) -> bool:
         return self.code in ("network", "rate_limited") or self.status >= 500
 
+    @property
+    def permanent(self) -> bool:
+        """The service refused for a reason retrying cannot change (quota, key, revoked agent key...)."""
+        return not self.retryable and self.code in NON_RETRYABLE
+
 
 class Client:
     def __init__(self, url: str = DEFAULT_URL, api_key: Optional[str] = None, timeout: float = 10.0, client_id: Optional[str] = None):
         self.url = url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
-        self.client_id = client_id or client_header(agent=detect_agent())
+        # The coding agent is detected only at set-up time (init, agent setup), never per request.
+        self.client_id = client_id or client_header()
 
     def request(self, method: str, path: str, body: Any = None, auth: bool = True, query: Optional[dict] = None) -> Any:
         url = self.url + path
@@ -65,8 +77,10 @@ class Client:
             raise _service_error(e.code, e.read()) from None
         except (urllib.error.URLError, OSError) as e:
             reason = getattr(e, "reason", e)
+            if "timed out" in str(reason):
+                reason = f"no answer within {self.timeout:g} s"
             raise SignafaideError(
-                f"Cannot reach the signafAIde service at {self.url} ({reason}); start it or set SIGNAFAIDE_URL.",
+                f"Cannot reach the signafAIde service at {self.url} ({reason}); check the network or SIGNAFAIDE_URL.",
                 code="network",
             ) from None
         if "json" in ctype or raw[:1] in (b"{", b"["):

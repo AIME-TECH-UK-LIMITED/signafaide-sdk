@@ -26,6 +26,10 @@ export class FakeService {
   events: string[] = [];
   experiments: any[] = [];
   fail: Reply | null = null;
+  /** Answer every POST /v1/records with this until cleared (a refusal that persists). */
+  failAlways: Reply | null = null;
+  /** Monthly allowance per project; null: unlimited. */
+  quota: number | null = null;
   url = "";
   private server = http.createServer((req, res) => void this.handle(req, res));
   private n = 0;
@@ -76,10 +80,15 @@ export class FakeService {
     }
     const prj = this.projects.get((auth ?? "").replace(/^Bearer /, ""));
     if (!prj) return err(401, "invalid_key", "The API key is not valid; run `signafaide init` for a new sandbox key.");
-    if (method === "GET" && path === "/v1/project") return [200, { project: prj.project, env: prj.env }];
+    if (method === "GET" && path === "/v1/project") return [200, { project: prj.project, env: prj.env, claimed: !!prj.claimed }];
+    if (method === "GET" && path.startsWith("/v1/heads/")) {
+      const sh = prj.heads.get(decodeURIComponent(path.slice("/v1/heads/".length)));
+      return sh ? [200, sh] : err(404, "not_found", "This agent has no records.");
+    }
     if (method === "POST" && path === "/v1/agents") {
       const kid = keyId(b64urlDecode(body.public_key));
       for (const [name, keys] of prj.agents) if (name !== body.name && keys.has(kid)) return err(400, "invalid_record", "This key is registered to another agent.");
+      if (Date.parse(body.valid_from) > Date.now() + 60_000) return err(400, "invalid_record", `valid_from ${body.valid_from} is ahead of the service clock (${now()}): the client's clock is ahead.`);
       const h = hashJson(registration(prj.project, prj.env, body.name, body.public_key, body.valid_from ?? ""));
       if (!verifySig(body.public_key, "register", h, body.proof ?? "")) return err(400, "bad_signature", "proof must be the new key's signature over the registration (domain register).");
       const keys = prj.agents.get(body.name) ?? new Map();
@@ -98,6 +107,7 @@ export class FakeService {
       return [200, { agent: body.name, key_id: kid, retired }];
     }
     if (method === "POST" && path === "/v1/records") {
+      if (this.failAlways) return this.failAlways;
       if (this.fail) {
         const f = this.fail;
         this.fail = null;
@@ -130,13 +140,18 @@ export class FakeService {
       const key = keys.get(r.key_id);
       if (!key) return err(400, "bad_signature", `key ${r.key_id} is not registered for agent '${env.agent}'; register it with POST /v1/agents.`);
       if (key.valid_to !== null) return err(400, "bad_signature", `key ${r.key_id} was retired or revoked at ${key.valid_to}; it cannot add records.`);
+      if (Date.parse(env.time) > Date.now() + 300_000) return err(400, "invalid_record", `time ${env.time} is more than 300 s ahead of the service clock (${now()}); check the client clock.`);
+      if (env.time < key.valid_from) return err(400, "bad_signature", `time ${env.time} is before key ${r.key_id} was made (valid from ${key.valid_from}).`);
       if (!verifySig(key.public_key, "record", h, r.sig)) return err(400, "bad_signature", "The record signature does not verify.");
       if ((r.content === undefined) !== (r.salt === undefined) || (r.content && contentHash(r.content, r.salt) !== env.content_hash)) return err(400, "content_mismatch", "content does not match content_hash.");
       const [seq, last] = tips.get(env.agent) ?? [0, null];
       if (env.seq !== seq + 1 || env.prev !== last) return err(409, "chain_conflict", "This record does not extend the service chain; the head is attached.", { head: { agent: env.agent, seq, record_hash: last } });
+      const lastTime = seq ? (prj.records.get(last)?.[0].envelope.time ?? fresh.find((x) => recordHash(x) === last)?.envelope.time) : null;
+      if (lastTime && env.time < lastTime) return err(400, "invalid_record", `time ${env.time} is earlier than the time of seq ${seq}.`);
       tips.set(env.agent, [env.seq, h]);
       fresh.push(r);
     }
+    if (this.quota !== null && prj.used + fresh.length > this.quota) return err(429, "quota_exceeded", "This sandbox's monthly allowance is used up.");
     const heads: any[] = [];
     if (fresh.length) {
       const hashes = fresh.map(recordHash);

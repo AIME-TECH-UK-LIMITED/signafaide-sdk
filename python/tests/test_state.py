@@ -28,7 +28,7 @@ def _append(state, agent="bot", n=1, content=None):
         out.append(
             state.append(
                 f"{BUCKET}/{agent}",
-                lambda seq, prev: make_record(key, kind="note", project=BUCKET.split("/")[0], env=BUCKET.split("/")[1], agent=agent, seq=seq, prev=prev, name="n", content=content or {"i": 1}),
+                lambda seq, prev, *_: make_record(key, kind="note", project=BUCKET.split("/")[0], env=BUCKET.split("/")[1], agent=agent, seq=seq, prev=prev, name="n", content=content or {"i": 1}),
                 lambda r: wire_record(r, False),
             )
         )
@@ -37,10 +37,12 @@ def _append(state, agent="bot", n=1, content=None):
 
 def test_layout_gitignore_and_root(project, state):
     assert state.home == project / ".signafaide"
-    assert (project / ".gitignore").read_text() == ".signafaide/\n"
+    assert not (project / ".gitignore").exists()  # never edited at runtime: a CI checkout stays clean
+    state.ignore_in_git(".env")
+    assert (project / ".gitignore").read_text() == ".signafaide/\n.env\n"
     (project / "sub").mkdir()
     assert find_root(project / "sub") == project
-    state.ensure()
+    state.ignore_in_git()
     assert (project / ".gitignore").read_text().count(".signafaide") == 1
 
 
@@ -76,7 +78,7 @@ def test_append_chains_and_fills_outbox(state):
     assert [r["envelope"]["seq"] for r in recs] == [1, 2, 3]
     assert recs[0]["envelope"]["prev"] is None
     assert recs[1]["envelope"]["prev"] == record_hash(recs[0])
-    assert state.tail(C) == (3, record_hash(recs[2]))
+    assert state.tail(C) == (3, record_hash(recs[2]), recs[2]["envelope"]["time"])
     assert [json.loads(line) for line in state.chain_path(C).read_text().splitlines()] == recs
     box = state.outbox(C)
     assert [r["envelope"]["seq"] for r in box] == [1, 2, 3]
@@ -186,30 +188,30 @@ def test_buckets_follow_the_api_key(state):
 
 def test_adopt_signs_drafts_into_the_project_chain(state):
     key = state.load_key("bot")
-    draft = lambda seq, prev, ref=None: make_draft(key, kind="note", agent="bot", seq=seq, prev=prev, name="n", content={}, ref=ref)  # noqa: E731
+    draft = lambda seq, prev, *_, ref=None: make_draft(key, kind="note", agent="bot", seq=seq, prev=prev, name="n", content={}, ref=ref)  # noqa: E731
     d1 = state.append("_pending/nokey/bot", draft, lambda r: wire_record(r, False))
-    state.append("_pending/nokey/bot", lambda seq, prev: make_draft(key, kind="outcome", agent="bot", seq=seq, prev=prev, name="n", content={}, ref=record_hash(d1)),
+    state.append("_pending/nokey/bot", lambda seq, prev, *_: make_draft(key, kind="outcome", agent="bot", seq=seq, prev=prev, name="n", content={}, ref=record_hash(d1)),
                  lambda r: wire_record(r, False))
     assert state.outbox_size() == 0 and list(state.read_chain("_pending/nokey/bot")) == [] and state.draft_count("_pending/nokey/bot") == 2
-    assert state.adopt("_pending/nokey", BUCKET, lambda a: key, lambda r: wire_record(r, False)) == []
+    assert state.adopt("_pending/nokey", BUCKET, lambda a, *_: key, lambda r: wire_record(r, False)) == []
     assert state.chains() == [C] and state.outbox_chains() == [C] and state.tail(C)[0] == 2
     signed = list(state.read_chain(C))
     assert [r["envelope"]["project"] + "/" + r["envelope"]["env"] for r in signed] == [BUCKET] * 2
     assert signed[1]["envelope"]["prev"] == record_hash(signed[0]) == signed[1]["envelope"]["ref"]  # the ref follows its decision
     assert state.translate_ref(C, record_hash(d1)) == record_hash(signed[0])
     state.append("_pending/nokey/bot", draft, lambda r: wire_record(r, False))
-    assert state.adopt("_pending/nokey", BUCKET, lambda a: key, lambda r: wire_record(r, False)) == [("_pending/nokey/bot", "exists")]  # never merged into an existing chain
+    assert state.adopt("_pending/nokey", BUCKET, lambda a, *_: key, lambda r: wire_record(r, False)) == [("_pending/nokey/bot", "exists")]  # never merged into an existing chain
 
 
 def test_adopt_keeps_a_chain_older_than_not_before_local(state):
     key = state.load_key("old")
-    at = lambda t: lambda seq, prev: make_draft(key, kind="note", agent="old", seq=seq, prev=prev, name="n", content={}, time=t)  # noqa: E731
+    at = lambda t: lambda seq, prev, *_: make_draft(key, kind="note", agent="old", seq=seq, prev=prev, name="n", content={}, time=t)  # noqa: E731
     state.append("_pending/nokey/old", at("2026-01-01T00:00:00.000Z"), lambda r: r)
     state.append("_pending/nokey/old", at("2026-01-02T00:00:00.000Z"), lambda r: r)
-    assert state.adopt("_pending/nokey", BUCKET, lambda a: key, lambda r: wire_record(r, False), "2026-01-01T12:00:00.000Z") == [
+    assert state.adopt("_pending/nokey", BUCKET, lambda a, *_: key, lambda r: wire_record(r, False), "2026-01-01T12:00:00.000Z") == [
         ("_pending/nokey/old", "2026-01-01T00:00:00.000Z")]
     assert state.chains() == ["_pending/nokey/old"] and state.outbox_size() == 0
-    assert state.adopt("_pending/nokey", BUCKET, lambda a: key, lambda r: wire_record(r, False), "2025-12-31T00:00:00.000Z") == []
+    assert state.adopt("_pending/nokey", BUCKET, lambda a, *_: key, lambda r: wire_record(r, False), "2025-12-31T00:00:00.000Z") == []
     assert [r["envelope"]["time"] for r in state.read_chain(f"{BUCKET}/old")] == ["2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z"]
 
 

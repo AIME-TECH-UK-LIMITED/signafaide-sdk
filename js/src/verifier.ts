@@ -32,7 +32,7 @@ export const CHECKS = [
 /** Why a pack without records fails (§7): an empty pack proves nothing. */
 export const NO_RECORDS = "no records: an empty pack proves nothing";
 /** Shown when drand rounds are present but no BLS library could be loaded. */
-export const DRAND_NOT_CHECKED = "drand: not checked (npm install @noble/curves)";
+export const DRAND_NOT_CHECKED = "drand: not checked (BLS library not installed; npm install @noble/curves)";
 const NO_LOCAL_RECORDS = "no records: nothing has been recorded here yet";
 /** Check 3 without independent agent keys (§7). */
 export const NOT_INDEPENDENT =
@@ -56,7 +56,8 @@ export const QUICKNET_PUBLIC_KEY =
   "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a";
 
 export type CheckId = (typeof CHECKS)[number][0];
-export type Status = "pass" | "fail" | "not_checked";
+/** `pending`: ran, found nothing wrong, and waits for an anchor or public timestamp not confirmed yet (§7); never counted as passed. */
+export type Status = "pass" | "fail" | "not_checked" | "pending";
 export interface Failure {
   item: string;
   message: string;
@@ -120,19 +121,22 @@ export const SHORT_NAMES: Record<string, string> = {
 const WITNESS_CHECKS = ["record_hash", "merkle", "batch_sig", "batch_chain", "head_sig", "drand", "anchor", "ots"];
 export const NOTHING_COSIGNED = "nothing co-signed yet";
 
-/** How many checks passed, failed and were not checked (§7 result line). */
+/** How many checks passed, failed, are pending and were not checked (§7 result line). */
 export function countsText(checks: { id: string; status: Status }[], nothingCosigned = false): string {
   const total = checks.length;
   const failed = checks.filter((c) => c.status === "fail").map((c) => SHORT_NAMES[c.id]);
+  const pending = checks.filter((c) => c.status === "pending").map((c) => SHORT_NAMES[c.id]);
   const unchecked = checks.filter((c) => c.status === "not_checked").map((c) => c.id);
-  const passed = total - failed.length - unchecked.length;
+  const passed = total - failed.length - pending.length - unchecked.length;
   if (failed.length) {
     let out = `${failed.length} of ${total} checks failed (${failed.join(", ")})`;
     if (passed) out += `, ${passed} passed`;
+    if (pending.length) out += `, ${pending.length} pending`;
     if (unchecked.length) out += `, ${unchecked.length} not checked`;
     return out;
   }
   let out = `${passed} of ${total} checks passed`;
+  if (pending.length) out += `, ${pending.length} pending (${pending.join(", ")})`;
   if (unchecked.length) {
     let names = unchecked.map((i) => SHORT_NAMES[i]);
     if (nothingCosigned && unchecked.some((i) => WITNESS_CHECKS.includes(i))) {
@@ -185,6 +189,13 @@ export class Report {
   readonly after: string[] = [];
   /** Local state with no record co-signed yet: the result line says so (§7). */
   nothingCosigned = false;
+  /** Local state: chains that cannot ship (refused by the witness, or wedged here), as
+   * `<chain>: <reason>`. Any makes the result BLOCKED, which always fails (§7). */
+  readonly blocked: string[] = [];
+  /** Local state with --fail-on-pending-send: records not co-signed yet, which then fail. */
+  notSent = 0;
+  /** The project's name from the signed export statement, when the pack has one. */
+  projectName: string | null = null;
 
   constructor(
     readonly checks: Check[],
@@ -201,18 +212,21 @@ export class Report {
    * `PASS (agent keys taken from the pack, not independent): export of ...` (§7). */
   get resultLine(): string {
     const s = this.scope;
-    const counts = countsText(this.checks, this.nothingCosigned);
+    let counts = countsText(this.checks, this.nothingCosigned);
+    if (this.blocked.length) counts = `${plural(this.blocked.length, "chain")} cannot ship (${this.blocked.map((b) => b.split(":")[0]).join(", ")}); ${counts}`;
+    else if (this.notSent) counts = `${plural(this.notSent, "record")} not sent yet (--fail-on-pending-send); ${counts}`;
     // Local state: the only way keys are not independent there is plain http on this machine.
     if (!s) return resultLine(this.result, this.independent.service_keys ? "independent" : "fetched over plain http", "independent", false, null, counts);
     return resultLine(this.result, s.sources[0], s.sources[1], s.byService, scopeText(s.filter, s.generated), counts);
   }
 
   get ok(): boolean {
-    return this.checks.every((c) => c.status !== "fail");
+    return !this.blocked.length && !this.notSent && this.checks.every((c) => c.status !== "fail");
   }
 
-  get result(): "PASS" | "FAIL" {
-    return this.ok ? "PASS" : "FAIL";
+  get result(): "PASS" | "FAIL" | "BLOCKED" {
+    if (this.checks.some((c) => c.status === "fail") || (this.notSent && !this.blocked.length)) return "FAIL";
+    return this.blocked.length ? "BLOCKED" : "PASS";
   }
 
   check(id: CheckId): Check {
@@ -225,15 +239,22 @@ export class Report {
 
   lines(): string[] {
     const out = [...this.notes];
-    if (this.project && this.env) out.push(`signafAIde pack ${this.project} (${this.env}), ${plural(this.records, "record")}`);
+    if (this.project && this.env) {
+      out.push(
+        this.projectName
+          ? `signafAIde pack of project ${this.projectName} (${this.project}, ${this.env}), ${plural(this.records, "record")}`
+          : `signafAIde pack ${this.project} (${this.env}), ${plural(this.records, "record")}`,
+      );
+    }
     out.push(...this.warnings.map((w) => `WARNING: ${w}`));
     for (const c of this.checks) {
-      const label = c.status === "fail" ? "FAIL" : c.status === "not_checked" ? "NOT CHECKED" : c.value?.startsWith("confirmed@") ? "CONFIRMED" : (c.value ?? "pass").toUpperCase();
+      const label = c.status === "fail" ? "FAIL" : c.status === "not_checked" ? "NOT CHECKED" : c.status === "pending" ? "PENDING" : c.value?.startsWith("confirmed@") ? "CONFIRMED" : (c.value ?? "pass").toUpperCase();
       out.push(`${String(c.n).padStart(2)}. ${c.title.padEnd(28)} ${label.padEnd(12)} ${c.detail}`);
       out.push(...c.failures.slice(0, 20).map((f) => `      - ${f.item}: ${f.message}`));
       if (c.failures.length > 20) out.push(`      ... and ${c.failures.length - 20} more`);
     }
     out.push(...this.after);
+    out.push(...this.blocked.map((b) => `BLOCKED ${b}`));
     out.push(this.resultLine);
     return out;
   }
@@ -247,6 +268,7 @@ export class Report {
       result: this.result,
       result_line: this.resultLine,
       project: this.project,
+      ...(this.projectName ? { project_name: this.projectName } : {}),
       env: this.env,
       records: this.records,
       generated: this.scope?.generated ?? null,
@@ -256,6 +278,7 @@ export class Report {
       notes: this.notes,
       checks: this.checks,
       ...(this.after.length ? { not_yet: this.after } : {}),
+      ...(this.blocked.length ? { blocked: this.blocked } : {}),
     };
   }
 }
@@ -366,7 +389,7 @@ export function recordsHash(records: any[]): string {
 
 /** The export statement the service signs (§7, domain `export`). */
 export function exportStatement(pack: any): object {
-  return { project: pack.project, env: pack.env, generated: pack.generated, filter: pack.filter, heads: pack.heads.map((sh: any) => sh.head), records_hash: recordsHash(pack.records) };
+  return { project: pack.project, ...(pack.project_name !== undefined ? { project_name: pack.project_name } : {}), env: pack.env, generated: pack.generated, filter: pack.filter, heads: pack.heads.map((sh: any) => sh.head), records_hash: recordsHash(pack.records) };
 }
 
 /** True for `http://localhost` and loopback addresses: the only hosts plain http is accepted from. */
@@ -426,12 +449,14 @@ export function verifyPack(pack: any, serviceKeys: KeyDoc[] | null, opts: PackOp
     exportSig: pack.export_sig,
     pack,
   });
-  return new Report(v.run(pack.records, pack.anchors), pack.project, pack.env, pack.records.length, warnings, [], independent, {
+  const report = new Report(v.run(pack.records, pack.anchors), pack.project, pack.env, pack.records.length, warnings, [], independent, {
     generated: pack.generated,
     filter: pack.filter,
     sources: [serviceSrc, agentSrc],
     byService,
   });
+  report.projectName = typeof pack.project_name === "string" ? pack.project_name : null;
+  return report;
 }
 
 function earliest(a: string | null, b: string | null): string | null {
@@ -479,12 +504,16 @@ function packError(pack: any): string | null {
   if (pack.format !== "signafaide-pack/1") return `format is '${pack.format}', expected 'signafaide-pack/1'`;
   const fields = ["format", "generated", "project", "env", "service_keys", "agent_keys", "filter", "heads", "records", "anchors", "export_sig"];
   for (const k of fields) if (!(k in pack)) return `missing field \`${k}\``;
-  const extra = Object.keys(pack).filter((k) => !fields.includes(k)).sort();
+  const extra = Object.keys(pack).filter((k) => !fields.includes(k) && k !== "project_name").sort();
   if (extra.length) return `unknown field \`${extra[0]}\``;
   for (const k of ["service_keys", "agent_keys", "heads", "records", "anchors"]) if (!Array.isArray(pack[k])) return `\`${k}\` must be a list`;
   if (typeof pack.export_sig !== "string") return "`export_sig` must be a string";
   if (pack.env !== "test" && pack.env !== "live") return "env must be test or live";
   if (!validProjectId(pack.project)) return "project is not a valid project id";
+  if ("project_name" in pack) {
+    const n = pack.project_name;
+    if (typeof n !== "string" || !n.length || [...n].length > 200 || /[\u0000-\u001f\u007f-\u009f]/.test(n)) return "project_name must be 1 to 200 characters, without control characters";
+  }
   if (!validTime(pack.generated)) return "generated is not a time";
   for (const k of pack.service_keys) {
     const e = keyEntryErrors(k);
@@ -557,6 +586,7 @@ class Acc {
   failures: Failure[] = [];
   notes: string[] = [];
   notChecked = false;
+  pending = false;
   value?: string;
   fail(item: string, message: string): void {
     this.failures.push({ item, message });
@@ -688,7 +718,7 @@ class Verifier {
       n: i + 1,
       id: CHECKS[i][0],
       title: CHECKS[i][1],
-      status: acc.failures.length ? "fail" : acc.notChecked ? "not_checked" : "pass",
+      status: acc.failures.length ? "fail" : acc.notChecked ? "not_checked" : acc.pending ? "pending" : "pass",
       checked: acc.checked,
       detail: plural(acc.checked, ...UNITS[i]) + acc.notes.map((n) => `; ${n}`).join(""),
       ...(acc.value !== undefined ? { value: acc.value } : {}),
@@ -1071,12 +1101,21 @@ class Verifier {
       a10.notes.push(`${plural(stale, "batch", "batches")} not timestamped: older than the 2-hour anchor window, and no anchor in the pack covers them`);
     }
     if (!anchors.length && !stale) {
-      a10.notChecked = true;
+      if (this.local) a10.notChecked = true;
+      else a10.pending = true;
       a10.notes.push(this.local ? "local state holds no anchors" : "no anchors in the pack yet (an anchor is made every hour)");
-    } else if (young) a10.notes.push(`${plural(young, "batch", "batches")} not yet anchored`);
+    } else if (young) {
+      a10.pending = true;
+      a10.notes.push(`${plural(young, "batch", "batches")} not yet anchored`);
+    }
     const unchecked = proofs.filter((p): p is ["unchecked", number, string] => p[0] === "unchecked");
-    if (!proofs.length) a11.notChecked = true;
-    else if (unchecked.length) {
+    if (!proofs.length) {
+      // No proof yet because the batches wait for their anchor: pending, not unchecked.
+      if (a10.pending && !a10.notChecked) {
+        a11.pending = true;
+        a11.notes.push("waiting for the anchor");
+      } else a11.notChecked = true;
+    } else if (unchecked.length) {
       a11.notChecked = true;
       a11.notes.push(`public timestamp not checked (${unchecked[0][2]}); claims block ${unchecked.map((p) => p[1]).join(", ")}`);
     } else if (proofs.every((p) => p[0] === "confirmed")) {
@@ -1085,6 +1124,7 @@ class Verifier {
       a11.notes.push(`each public timestamp checked against its public record (block ${h})`);
     } else {
       a11.value = "pending";
+      a11.pending = true;
       a11.notes.push(`waiting for the public timestamp to confirm (usually within a few hours): ${proofs.filter((p) => p[0] === "pending").length} of ${proofs.length}`);
     }
   }

@@ -19,6 +19,8 @@ export {
   registration,
   signDraft,
   now,
+  clampTime,
+  withWallTime,
   receiptErrors,
   recordErrors,
   recordHash,

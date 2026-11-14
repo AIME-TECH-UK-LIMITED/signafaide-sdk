@@ -1,6 +1,6 @@
 """Every entry of spec/vectors.json, byte for byte.
 
-The drand BLS checks need the ``signafaide[bls]`` extra (``py_ecc``, a dev
+The drand BLS checks use ``py_ecc`` (a dependency; also a dev
 dependency here); without it they are skipped and check 9 says "not checked".
 """
 
@@ -224,11 +224,11 @@ def test_variants(v, bls):
 def test_pack_without_bls_says_not_checked(v):
     keys, o = options({}, v)
     r = verify_pack(v["pack"]["pack"], keys, **o)
-    assert r.ok and r.check("drand").status == "not_checked" and "signafaide[bls]" in r.check("drand").detail
+    assert r.ok and r.check("drand").status == "not_checked" and "BLS library not installed" in r.check("drand").detail
 
 
 def test_tampered_packs(v, bls):
-    assert len(v["tampered"]) == 48
+    assert len(v["tampered"]) == 49
     for case in v["tampered"]:
         keys, o = options(case, v, drand=bls)
         r = verify_pack(case["pack"], keys, **o)
@@ -249,5 +249,5 @@ def test_verify_says_plainly_when_drand_is_not_checked(v, recorder, monkeypatch,
     monkeypatch.setattr(signafaide, "load_drand_verifier", lambda: None)
     r = signafaide.verify(v["pack"]["pack"], keys=v["keys_document"], agent_keys=v["agent_keys_document"], offline=True)
     assert r.ok and r.check("drand").status == "not_checked"
-    assert DRAND_NOT_CHECKED == "drand: not checked. Install the signafaide[bls] extra (uv add 'signafaide[bls]', or pip inside your virtual environment)"
+    assert DRAND_NOT_CHECKED == "drand: not checked (BLS library not installed; pip install py_ecc)"
     assert DRAND_NOT_CHECKED in str(r).splitlines()

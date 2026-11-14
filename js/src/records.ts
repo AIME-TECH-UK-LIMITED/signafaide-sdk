@@ -67,6 +67,25 @@ export function now(): string {
   return new Date().toISOString();
 }
 
+/** §2.2 monotonic time: the machine's clock (`wall`), raised to the previous record's time in
+ * the chain and to the signing key's valid_from when it reads earlier (an NTP step back, a VM
+ * resumed). Returns [time, raised]. When raised, the SDK keeps `wall` in the content's
+ * `meta.wall_time`. A chain written this way never goes back in time. */
+export function clampTime(wall: string, prev?: string | null, validFrom?: string | null): [string, boolean] {
+  let t = Date.parse(wall);
+  for (const f of [prev, validFrom]) if (f && validTime(f)) t = Math.max(t, Date.parse(f));
+  const out = new Date(t).toISOString();
+  return [out, out !== wall];
+}
+
+/** `content` with the clock's own reading kept in `meta.wall_time` (when the record's time was raised). */
+export function withWallTime(content: Record<string, unknown>, wall: string): Record<string, unknown> {
+  const meta = content.meta;
+  if (meta === undefined || meta === null) return { ...content, meta: { wall_time: wall } };
+  if (typeof meta === "object" && !Array.isArray(meta)) return { ...content, meta: { ...(meta as object), wall_time: wall } };
+  return { ...content, wall_time: wall };
+}
+
 export function validTime(s: unknown): boolean {
   // Years 0001 to 9999 (§1): Date accepts year 0000, the protocol does not.
   return typeof s === "string" && TIME_RE.test(s) && !s.startsWith("0000") && !Number.isNaN(Date.parse(s)) && new Date(s).toISOString() === s;
@@ -273,9 +292,9 @@ export function draftErrors(rec: unknown): string[] {
 }
 
 /** The signed record for a draft once its project is known (§8). */
-export function signDraft(key: SigningKey, draft: SignedRecord, project: string, env: "test" | "live", prev: string | null, ref: string | null): SignedRecord {
+export function signDraft(key: SigningKey, draft: SignedRecord, project: string, env: "test" | "live", prev: string | null, ref: string | null, seq?: number): SignedRecord {
   const d = draft.envelope;
-  return makeRecord(key, { kind: d.kind, project, env, agent: d.agent, seq: d.seq, prev, name: d.name, content: draft.content ?? {}, ref, time: d.time, salt: draft.salt });
+  return makeRecord(key, { kind: d.kind, project, env, agent: d.agent, seq: seq ?? d.seq, prev, name: d.name, content: draft.content ?? {}, ref, time: d.time, salt: draft.salt });
 }
 
 /** A service key (§5) or, with `agent`, a pack's agent key: exact fields, valid times. */

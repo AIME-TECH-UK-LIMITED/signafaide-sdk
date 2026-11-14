@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from signafaide.crypto import SigningKey, audit_path, b64url, b64url_decode, content_hash, hash_json, key_id, merkle_root, verify_sig
-from signafaide.records import now, record_errors, record_hash, registration
+from signafaide.records import now, parse_time, record_errors, record_hash, registration
 
 
 def err(status, code, message, **extra):
@@ -27,6 +28,9 @@ class FakeService:
         self.projects = {}  # api_key -> project
         self.calls = []
         self.fail = None  # (status, code, message) returned once for the next /v1/records
+        self.fail_always = None  # returned for every /v1/records until cleared (a refusal that persists)
+        self.quota = None  # monthly allowance per project; None: unlimited
+        self.hang = 0.0  # seconds to wait before answering any request (a slow or hanging witness)
         self.lock = threading.Lock()
         self.sandbox_n = 0
         self.registrations = []
@@ -69,12 +73,14 @@ class FakeService:
         if prj is None:
             return err(401, "invalid_key", "The API key is not valid; run `signafaide init` for a new sandbox key.")
         if method == "GET" and path == "/v1/project":
-            return 200, {"project": prj["project"], "env": prj["env"]}
+            return 200, {"project": prj["project"], "env": prj["env"], "claimed": bool(prj.get("claimed"))}
         if method == "POST" and path == "/v1/agents":
             pk = body["public_key"]
             kid = key_id(b64url_decode(pk))
             if any(kid in keys for name, keys in prj["agents"].items() if name != body["name"]):
                 return err(400, "invalid_record", "This key is registered to another agent; generate a new key for this agent.")
+            if parse_time(body["valid_from"]).timestamp() > time.time() + 60:
+                return err(400, "invalid_record", f"valid_from {body['valid_from']} is ahead of the service clock ({now()}): the client's clock is ahead.")
             h = hash_json(registration(prj["project"], prj["env"], body["name"], pk, body.get("valid_from") or ""))
             if not verify_sig(pk, "register", h, body.get("proof") or ""):
                 return err(400, "bad_signature", "proof must be the new key's signature over the registration (domain register).")
@@ -96,6 +102,8 @@ class FakeService:
             retired = [{"key_id": k, "valid_to": v["valid_to"]} for k, v in sorted(ag.items()) if v["valid_to"] is not None]
             return 200, {"agent": body["name"], "key_id": kid, "retired": retired}
         if method == "POST" and path == "/v1/records":
+            if self.fail_always:
+                return self.fail_always
             if self.fail:
                 f, self.fail = self.fail, None
                 return f
@@ -103,7 +111,7 @@ class FakeService:
                 return self.submit(prj, body.get("records") or [])
         if method == "GET" and path.startswith("/v1/heads/"):
             agent = path.rsplit("/", 1)[1]
-            return 200, prj["heads"].get(agent) or {}
+            return (200, prj["heads"][agent]) if agent in prj["heads"] else err(404, "not_found", "This agent has no records.")
         if method == "GET" and path == "/v1/usage":
             return 200, {"period": "2026-11", "used": prj["used"], "quota": 1000}
         if method == "GET" and path == "/v1/export":
@@ -136,6 +144,10 @@ class FakeService:
                 return err(400, "bad_signature", f"key {r['key_id']} is not registered for agent '{env['agent']}'; register it with POST /v1/agents.")
             if key["valid_to"] is not None:
                 return err(400, "bad_signature", f"key {r['key_id']} was retired or revoked at {key['valid_to']}; it cannot add records.")
+            if parse_time(env["time"]).timestamp() > time.time() + 300:
+                return err(400, "invalid_record", f"time {env['time']} is more than 300 s ahead of the service clock ({now()}); check the client clock.")
+            if env["time"] < key["valid_from"]:
+                return err(400, "bad_signature", f"time {env['time']} is before key {r['key_id']} was made (valid from {key['valid_from']}).")
             if not verify_sig(key["public_key"], "record", h, r["sig"]):
                 return err(400, "bad_signature", "The record signature does not verify; sign record_hash with domain 'record'.")
             if ("content" in r) != ("salt" in r) or ("content" in r and content_hash(r["content"], r["salt"]) != env["content_hash"]):
@@ -145,6 +157,8 @@ class FakeService:
                 return err(409, "chain_conflict", "This record does not extend the service chain; the head is attached.", head={"agent": env["agent"], "seq": seq, "record_hash": last})
             tips[env["agent"]] = (env["seq"], h)
             new.append(r)
+        if self.quota is not None and prj["used"] + len(new) > self.quota:
+            return err(429, "quota_exceeded", "This sandbox's monthly allowance is used up.")
         receipts = []
         heads = []
         if new:
@@ -234,6 +248,8 @@ class FakeService:
                 body = json.loads(self.rfile.read(n)) if n else None
                 q = dict(urllib.parse.parse_qsl(u.query))
                 svc.client_ids.append(self.headers.get("X-Signafaide-Client"))
+                if svc.hang:
+                    time.sleep(svc.hang)
                 status, obj = svc.route(method, u.path, q, body, self.headers.get("Authorization"))
                 data = obj.encode() if isinstance(obj, str) else json.dumps(obj).encode()
                 self.send_response(status)

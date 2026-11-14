@@ -41,13 +41,15 @@ describe("X-Signafaide-Client", () => {
     expect(clientHeader({ adapter: "langchain", agent: "codex", env: { SIGNAFAIDE_TELEMETRY: "0" } })).toBe(`signafaide-js/${VERSION} (node ${node}; via=sdk)`);
   });
 
-  it("is on every request", async () => {
+  it("is on every request, and never guesses the coding agent per process", async () => {
+    // A program started from a terminal inside a coding agent is not that agent: only set-up
+    // time (init, agent setup) records the agent.
     process.env.CODEX_SANDBOX = "seatbelt";
     ctx.service.clientIds.length = 0; // the sandbox was created before this test chose its agent
     note("a", {});
     await flush();
     expect(ctx.service.clientIds.length).toBeGreaterThanOrEqual(2); // register, records
-    for (const c of ctx.service.clientIds) expect(c).toMatch(/^signafaide-js\/\S+ \(node [^;]+; adapter=none; agent=codex; via=sdk\)$/);
+    for (const c of ctx.service.clientIds) expect(c).toMatch(/^signafaide-js\/\S+ \(node [^;]+; adapter=none; agent=unknown; via=sdk\)$/);
   });
 
   it("adds strict=1 once a strict tool ran", async () => {
@@ -60,6 +62,8 @@ describe("X-Signafaide-Client", () => {
   it("carries the agent stored at init", async () => {
     process.env.GEMINI_CLI = "1";
     const rec = await init({ url: ctx.service.url, quiet: true });
+    expect(fs.existsSync(path.join(rec.state.home, "config.json")) && JSON.parse(fs.readFileSync(path.join(rec.state.home, "config.json"), "utf8")).agent).toBeFalsy(); // the library's init() does not guess
+    rec.rememberAgent(); // what `signafaide init` and `agent setup` do
     expect(JSON.parse(fs.readFileSync(path.join(rec.state.home, "config.json"), "utf8")).agent).toBe("gemini-cli");
     delete process.env.GEMINI_CLI; // later: production, no coding agent around
     ctx.service.clientIds.length = 0;

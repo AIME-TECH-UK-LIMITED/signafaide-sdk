@@ -249,7 +249,7 @@
   "export": {
     "export_sig": "2vg0ID9EPvaG9NgLBLu6rAXS2qpm6Bf4BJ8IyQOivQRd7Q0FykPiTB8MeBY672Ozboz26-NiuTnA1fZhrQkgAg",
     "records_hash": "a97a1a6bfcee3ae77b28aa8f7258384bc119a3ff678fd2e9229ae336b7f6f5ed",
-    "result_line": "PASS: 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+    "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
     "statement": {
       "env": "live",
       "filter": {
@@ -1163,7 +1163,7 @@
         "schema": "pass"
       },
       "result": "PASS",
-      "result_line": "PASS: 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
     },
     "pack": {
       "agent_keys": [
@@ -13313,6 +13313,319 @@
       "tamper": "generated was changed after the service signed the export"
     },
     {
+      "check": "head_sig",
+      "first_failed": "head_sig",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEITRNpEXQkXZSvVkPgpeIlqO5lWQJB+M74TmdqL8AIhGvwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "e5015da0097c73648baf812c4246d4efff911079f95d54d9ad6a3635509263d4",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "JN3MV2KCf2KcrT6DOR9emq9oMP09XGvWtYvSfwlnHO0zApKovq_JZo-enpjEXsWIa5y-bVA7RZ4d1riC7JGyCA",
+            "paths": {
+              "1add3980574c60415125961f42de1c8a03866ded958345e2ea4028735418c04e": {
+                "index": 1,
+                "path": [
+                  "7cace3b9b65a1dfe502636beb757f028c05528366a3fe8b2a4488119f86835ba"
+                ]
+              },
+              "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92": {
+                "index": 0,
+                "path": [
+                  "d7294e3195e518c8c56fa0d59f234f1cbebeb7b6b8c231f31e260aa6a5fb8592"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "C5DGwtc3rFBR3dLyrQCBWJlen8M9kisObASxzk2ipFLCcnOvgUnH4v4iPBfQgJUHI2MRjFx3JEQtz5O0zdeNCA",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "9c0d5528aefab95f020ce30f68c1e3b59b6b2a2b1c20ad6f572bf8964899b52d",
+              "seq": 4,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "czZ748DgR4XWYAcBAVb9uAmMrwOllXV3CCL1EnknhF4roKd2L6bQsptixUC0kF3Hd1CNy6WAmXq7ciqrduiPDw"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "project_name": "someone else's project",
+        "records": [
+          {
+            "content": {
+              "input": {
+                "amount": 1250.5,
+                "invoice": "INV-1001"
+              },
+              "meta": {
+                "big": 1e+21,
+                "ratio": 0.1,
+                "tags": [
+                  "finance",
+                  "été",
+                  "😀"
+                ],
+                "zero": -0.0
+              },
+              "model": "model-x",
+              "output": {
+                "approved": true
+              },
+              "reason": "Within the approval limit."
+            },
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "76c901c607c2cc0cf5d5bb5438ed08de78a5c5d02e94402330e02acbffc09583",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0ef055e64d41d852dba2bc57cda4e2278798ba925c66888867d65fde71b66a1b",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+              "batch_sig": "F007PZ2RDGoWxeaztvGseQjzmrSjFWCkA0w128HmtYRQiZtyZJTnOyHopcvPaeIJdw-zrShVTTnxzy0xzUBTDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "JR22DRY_Tk9kuPoaPtN_VDroMWkdupJXAPan7rdlNhH971QMN61SgUcimI0wLg4Ej5QZAur4Q3Rk3m3FjC63CA",
+              "index": 0,
+              "proof": [
+                "83bfa6d344d4ee899c63639c18d4706097bad8331d95bba5db06ddcc4d72d07f",
+                "281662dc7288010d8a66a600c8ff43854b00243dec3176679bd8163b7a2d08b4"
+              ],
+              "record_hash": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "salt": "f1726c91b8c845da8bbf8e22abc7ee89",
+            "sig": "ImFIfua-6Uko3WHZL7j0NgmlQHRQYdLUUSVNLUsUsMzKAvyEqjYo83mpZKpoEY6VA0cJq0y9-EkC1PcFwNdtAQ"
+          },
+          {
+            "content": {
+              "output": {
+                "amount": 1250.5,
+                "paid": true
+              }
+            },
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "742d3dd383fee36858f3e10007ecab5a2cc6a34bb808cf094bf87299f1fca0e4",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "seq": 2,
+              "time": "2026-11-13T10:00:00.500Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0ef055e64d41d852dba2bc57cda4e2278798ba925c66888867d65fde71b66a1b",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+              "batch_sig": "F007PZ2RDGoWxeaztvGseQjzmrSjFWCkA0w128HmtYRQiZtyZJTnOyHopcvPaeIJdw-zrShVTTnxzy0xzUBTDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "JR22DRY_Tk9kuPoaPtN_VDroMWkdupJXAPan7rdlNhH971QMN61SgUcimI0wLg4Ej5QZAur4Q3Rk3m3FjC63CA",
+              "index": 1,
+              "proof": [
+                "f2c3809f9fcfb9f5cfa860915fd610b3331a19bcf4117f9d9fbc79abc833d5a8",
+                "281662dc7288010d8a66a600c8ff43854b00243dec3176679bd8163b7a2d08b4"
+              ],
+              "record_hash": "61438bacbfe79730d8753801866ef2e931dedfad8cfb676e8efa86cd2dbc6976",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "salt": "9677838199f12d36f5ee971d49f68abc",
+            "sig": "XQ23vEVfNRP_mPI-S9Z3erhB9OV34zvdZItPBRfS3pSLWa-EIIL64C62jvAn0sy-wuE2-Pn9Je2S7tQKp3AYBw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "4c5daa0fd76e042ada96862d11a0e77abda5eff97ded5665be3f839bcf91e4cf",
+              "env": "live",
+              "kind": "note",
+              "name": "nightly_summary",
+              "prev": "61438bacbfe79730d8753801866ef2e931dedfad8cfb676e8efa86cd2dbc6976",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0ef055e64d41d852dba2bc57cda4e2278798ba925c66888867d65fde71b66a1b",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+              "batch_sig": "F007PZ2RDGoWxeaztvGseQjzmrSjFWCkA0w128HmtYRQiZtyZJTnOyHopcvPaeIJdw-zrShVTTnxzy0xzUBTDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "JR22DRY_Tk9kuPoaPtN_VDroMWkdupJXAPan7rdlNhH971QMN61SgUcimI0wLg4Ej5QZAur4Q3Rk3m3FjC63CA",
+              "index": 2,
+              "proof": [
+                "e2e618c65747638d978709e919dc2aa3092262a76acd5a8221269008cdc58cfa"
+              ],
+              "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "aBK2KsuFmyxUrwusewOT0SKXg4U1ukooqYeX36CH6Jsvhqz_YQu_4AvWPIGbX3NJPS2W3KjN4C6f1B5WD9dTDQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "4c4f417de6fd0153f0d9ee6088beda8899099f50436aa53a8803ebcd561ed026",
+              "env": "live",
+              "kind": "decision",
+              "name": "reject_refund",
+              "prev": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:04:59.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0fa727f02b4ed2a24222153077e6cc198668ac788f6835ac1f05e28129ffede6",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 1,
+                "v": 1
+              },
+              "batch_hash": "1add3980574c60415125961f42de1c8a03866ded958345e2ea4028735418c04e",
+              "batch_sig": "ag7rug783aWnkdo0ufFppLCCCEnxsXPTvU57pEDClkUWTbGYZKYx5XkfbnEOqVnwZ1uuLLOcB896YhsNEwD2BQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "9c0d5528aefab95f020ce30f68c1e3b59b6b2a2b1c20ad6f572bf8964899b52d",
+                "seq": 4,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "czZ748DgR4XWYAcBAVb9uAmMrwOllXV3CCL1EnknhF4roKd2L6bQsptixUC0kF3Hd1CNy6WAmXq7ciqrduiPDw",
+              "index": 0,
+              "proof": [],
+              "record_hash": "9c0d5528aefab95f020ce30f68c1e3b59b6b2a2b1c20ad6f572bf8964899b52d",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "d7QddCj5cTjcvbBj5YOW-F4KEoHsg_oWRgznQ2GFpTla_MhyDDB_ofbbUzz99sbCVnedHpSYt2Y-qYhlug-2AA"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      },
+      "tamper": "project_name was changed after the service signed the export"
+    },
+    {
       "check": "chain",
       "first_failed": "chain",
       "pack": {
@@ -15958,6 +16271,48 @@
       "input": "0000-01-01T00:00:00.000Z"
     }
   ],
+  "time_clamp": [
+    {
+      "name": "clock ahead of the previous record",
+      "prev": "2026-11-13T10:00:05.000Z",
+      "raised": false,
+      "time": "2026-11-13T10:00:10.000Z",
+      "valid_from": "2026-11-13T09:00:00.000Z",
+      "wall": "2026-11-13T10:00:10.000Z"
+    },
+    {
+      "name": "clock stepped back 5 s",
+      "prev": "2026-11-13T10:00:05.000Z",
+      "raised": true,
+      "time": "2026-11-13T10:00:05.000Z",
+      "valid_from": "2026-11-13T09:00:00.000Z",
+      "wall": "2026-11-13T10:00:00.000Z"
+    },
+    {
+      "name": "same millisecond as the previous record",
+      "prev": "2026-11-13T10:00:05.000Z",
+      "raised": false,
+      "time": "2026-11-13T10:00:05.000Z",
+      "valid_from": null,
+      "wall": "2026-11-13T10:00:05.000Z"
+    },
+    {
+      "name": "first record, clock before the key was made",
+      "prev": null,
+      "raised": true,
+      "time": "2026-11-13T10:00:00.000Z",
+      "valid_from": "2026-11-13T10:00:00.000Z",
+      "wall": "2026-11-13T09:59:59.999Z"
+    },
+    {
+      "name": "first record, nothing to clamp to",
+      "prev": null,
+      "raised": false,
+      "time": "2026-11-13T10:00:00.000Z",
+      "valid_from": null,
+      "wall": "2026-11-13T10:00:00.000Z"
+    }
+  ],
   "variants": [
     {
       "expect": {
@@ -15976,7 +16331,7 @@
           "schema": "pass"
         },
         "result": "PASS",
-        "result_line": "PASS: 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
       "name": "independent service and agent keys, offline",
       "pack": {
@@ -16288,6 +16643,633 @@
       }
     },
     {
+      "expect": {
+        "checks": {
+          "anchor": "pending",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "pass",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 2 pending (anchors, public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "young batches no anchor covers yet: anchors and public timestamp pending",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [],
+        "env": "live",
+        "export_sig": "2vg0ID9EPvaG9NgLBLu6rAXS2qpm6Bf4BJ8IyQOivQRd7Q0FykPiTB8MeBY672Ozboz26-NiuTnA1fZhrQkgAg",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "9c0d5528aefab95f020ce30f68c1e3b59b6b2a2b1c20ad6f572bf8964899b52d",
+              "seq": 4,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "czZ748DgR4XWYAcBAVb9uAmMrwOllXV3CCL1EnknhF4roKd2L6bQsptixUC0kF3Hd1CNy6WAmXq7ciqrduiPDw"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "content": {
+              "input": {
+                "amount": 1250.5,
+                "invoice": "INV-1001"
+              },
+              "meta": {
+                "big": 1e+21,
+                "ratio": 0.1,
+                "tags": [
+                  "finance",
+                  "été",
+                  "😀"
+                ],
+                "zero": -0.0
+              },
+              "model": "model-x",
+              "output": {
+                "approved": true
+              },
+              "reason": "Within the approval limit."
+            },
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "76c901c607c2cc0cf5d5bb5438ed08de78a5c5d02e94402330e02acbffc09583",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0ef055e64d41d852dba2bc57cda4e2278798ba925c66888867d65fde71b66a1b",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+              "batch_sig": "F007PZ2RDGoWxeaztvGseQjzmrSjFWCkA0w128HmtYRQiZtyZJTnOyHopcvPaeIJdw-zrShVTTnxzy0xzUBTDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "JR22DRY_Tk9kuPoaPtN_VDroMWkdupJXAPan7rdlNhH971QMN61SgUcimI0wLg4Ej5QZAur4Q3Rk3m3FjC63CA",
+              "index": 0,
+              "proof": [
+                "83bfa6d344d4ee899c63639c18d4706097bad8331d95bba5db06ddcc4d72d07f",
+                "281662dc7288010d8a66a600c8ff43854b00243dec3176679bd8163b7a2d08b4"
+              ],
+              "record_hash": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "salt": "f1726c91b8c845da8bbf8e22abc7ee89",
+            "sig": "ImFIfua-6Uko3WHZL7j0NgmlQHRQYdLUUSVNLUsUsMzKAvyEqjYo83mpZKpoEY6VA0cJq0y9-EkC1PcFwNdtAQ"
+          },
+          {
+            "content": {
+              "output": {
+                "amount": 1250.5,
+                "paid": true
+              }
+            },
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "742d3dd383fee36858f3e10007ecab5a2cc6a34bb808cf094bf87299f1fca0e4",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "seq": 2,
+              "time": "2026-11-13T10:00:00.500Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0ef055e64d41d852dba2bc57cda4e2278798ba925c66888867d65fde71b66a1b",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+              "batch_sig": "F007PZ2RDGoWxeaztvGseQjzmrSjFWCkA0w128HmtYRQiZtyZJTnOyHopcvPaeIJdw-zrShVTTnxzy0xzUBTDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "JR22DRY_Tk9kuPoaPtN_VDroMWkdupJXAPan7rdlNhH971QMN61SgUcimI0wLg4Ej5QZAur4Q3Rk3m3FjC63CA",
+              "index": 1,
+              "proof": [
+                "f2c3809f9fcfb9f5cfa860915fd610b3331a19bcf4117f9d9fbc79abc833d5a8",
+                "281662dc7288010d8a66a600c8ff43854b00243dec3176679bd8163b7a2d08b4"
+              ],
+              "record_hash": "61438bacbfe79730d8753801866ef2e931dedfad8cfb676e8efa86cd2dbc6976",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "salt": "9677838199f12d36f5ee971d49f68abc",
+            "sig": "XQ23vEVfNRP_mPI-S9Z3erhB9OV34zvdZItPBRfS3pSLWa-EIIL64C62jvAn0sy-wuE2-Pn9Je2S7tQKp3AYBw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "4c5daa0fd76e042ada96862d11a0e77abda5eff97ded5665be3f839bcf91e4cf",
+              "env": "live",
+              "kind": "note",
+              "name": "nightly_summary",
+              "prev": "61438bacbfe79730d8753801866ef2e931dedfad8cfb676e8efa86cd2dbc6976",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0ef055e64d41d852dba2bc57cda4e2278798ba925c66888867d65fde71b66a1b",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+              "batch_sig": "F007PZ2RDGoWxeaztvGseQjzmrSjFWCkA0w128HmtYRQiZtyZJTnOyHopcvPaeIJdw-zrShVTTnxzy0xzUBTDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "JR22DRY_Tk9kuPoaPtN_VDroMWkdupJXAPan7rdlNhH971QMN61SgUcimI0wLg4Ej5QZAur4Q3Rk3m3FjC63CA",
+              "index": 2,
+              "proof": [
+                "e2e618c65747638d978709e919dc2aa3092262a76acd5a8221269008cdc58cfa"
+              ],
+              "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "aBK2KsuFmyxUrwusewOT0SKXg4U1ukooqYeX36CH6Jsvhqz_YQu_4AvWPIGbX3NJPS2W3KjN4C6f1B5WD9dTDQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "4c4f417de6fd0153f0d9ee6088beda8899099f50436aa53a8803ebcd561ed026",
+              "env": "live",
+              "kind": "decision",
+              "name": "reject_refund",
+              "prev": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:04:59.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0fa727f02b4ed2a24222153077e6cc198668ac788f6835ac1f05e28129ffede6",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 1,
+                "v": 1
+              },
+              "batch_hash": "1add3980574c60415125961f42de1c8a03866ded958345e2ea4028735418c04e",
+              "batch_sig": "ag7rug783aWnkdo0ufFppLCCCEnxsXPTvU57pEDClkUWTbGYZKYx5XkfbnEOqVnwZ1uuLLOcB896YhsNEwD2BQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "9c0d5528aefab95f020ce30f68c1e3b59b6b2a2b1c20ad6f572bf8964899b52d",
+                "seq": 4,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "czZ748DgR4XWYAcBAVb9uAmMrwOllXV3CCL1EnknhF4roKd2L6bQsptixUC0kF3Hd1CNy6WAmXq7ciqrduiPDw",
+              "index": 0,
+              "proof": [],
+              "record_hash": "9c0d5528aefab95f020ce30f68c1e3b59b6b2a2b1c20ad6f572bf8964899b52d",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "d7QddCj5cTjcvbBj5YOW-F4KEoHsg_oWRgznQ2GFpTla_MhyDDB_ofbbUzz99sbCVnedHpSYt2Y-qYhlug-2AA"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "pass",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "result": "PASS",
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "a pack that names its project (signed in the export statement)",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEITRNpEXQkXZSvVkPgpeIlqO5lWQJB+M74TmdqL8AIhGvwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "e5015da0097c73648baf812c4246d4efff911079f95d54d9ad6a3635509263d4",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "JN3MV2KCf2KcrT6DOR9emq9oMP09XGvWtYvSfwlnHO0zApKovq_JZo-enpjEXsWIa5y-bVA7RZ4d1riC7JGyCA",
+            "paths": {
+              "1add3980574c60415125961f42de1c8a03866ded958345e2ea4028735418c04e": {
+                "index": 1,
+                "path": [
+                  "7cace3b9b65a1dfe502636beb757f028c05528366a3fe8b2a4488119f86835ba"
+                ]
+              },
+              "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92": {
+                "index": 0,
+                "path": [
+                  "d7294e3195e518c8c56fa0d59f234f1cbebeb7b6b8c231f31e260aa6a5fb8592"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "C5DGwtc3rFBR3dLyrQCBWJlen8M9kisObASxzk2ipFLCcnOvgUnH4v4iPBfQgJUHI2MRjFx3JEQtz5O0zdeNCA",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "9c0d5528aefab95f020ce30f68c1e3b59b6b2a2b1c20ad6f572bf8964899b52d",
+              "seq": 4,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "czZ748DgR4XWYAcBAVb9uAmMrwOllXV3CCL1EnknhF4roKd2L6bQsptixUC0kF3Hd1CNy6WAmXq7ciqrduiPDw"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "project_name": "claims automation",
+        "records": [
+          {
+            "content": {
+              "input": {
+                "amount": 1250.5,
+                "invoice": "INV-1001"
+              },
+              "meta": {
+                "big": 1e+21,
+                "ratio": 0.1,
+                "tags": [
+                  "finance",
+                  "été",
+                  "😀"
+                ],
+                "zero": -0.0
+              },
+              "model": "model-x",
+              "output": {
+                "approved": true
+              },
+              "reason": "Within the approval limit."
+            },
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "76c901c607c2cc0cf5d5bb5438ed08de78a5c5d02e94402330e02acbffc09583",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0ef055e64d41d852dba2bc57cda4e2278798ba925c66888867d65fde71b66a1b",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+              "batch_sig": "F007PZ2RDGoWxeaztvGseQjzmrSjFWCkA0w128HmtYRQiZtyZJTnOyHopcvPaeIJdw-zrShVTTnxzy0xzUBTDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "JR22DRY_Tk9kuPoaPtN_VDroMWkdupJXAPan7rdlNhH971QMN61SgUcimI0wLg4Ej5QZAur4Q3Rk3m3FjC63CA",
+              "index": 0,
+              "proof": [
+                "83bfa6d344d4ee899c63639c18d4706097bad8331d95bba5db06ddcc4d72d07f",
+                "281662dc7288010d8a66a600c8ff43854b00243dec3176679bd8163b7a2d08b4"
+              ],
+              "record_hash": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "salt": "f1726c91b8c845da8bbf8e22abc7ee89",
+            "sig": "ImFIfua-6Uko3WHZL7j0NgmlQHRQYdLUUSVNLUsUsMzKAvyEqjYo83mpZKpoEY6VA0cJq0y9-EkC1PcFwNdtAQ"
+          },
+          {
+            "content": {
+              "output": {
+                "amount": 1250.5,
+                "paid": true
+              }
+            },
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "742d3dd383fee36858f3e10007ecab5a2cc6a34bb808cf094bf87299f1fca0e4",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "seq": 2,
+              "time": "2026-11-13T10:00:00.500Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0ef055e64d41d852dba2bc57cda4e2278798ba925c66888867d65fde71b66a1b",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+              "batch_sig": "F007PZ2RDGoWxeaztvGseQjzmrSjFWCkA0w128HmtYRQiZtyZJTnOyHopcvPaeIJdw-zrShVTTnxzy0xzUBTDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "JR22DRY_Tk9kuPoaPtN_VDroMWkdupJXAPan7rdlNhH971QMN61SgUcimI0wLg4Ej5QZAur4Q3Rk3m3FjC63CA",
+              "index": 1,
+              "proof": [
+                "f2c3809f9fcfb9f5cfa860915fd610b3331a19bcf4117f9d9fbc79abc833d5a8",
+                "281662dc7288010d8a66a600c8ff43854b00243dec3176679bd8163b7a2d08b4"
+              ],
+              "record_hash": "61438bacbfe79730d8753801866ef2e931dedfad8cfb676e8efa86cd2dbc6976",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "salt": "9677838199f12d36f5ee971d49f68abc",
+            "sig": "XQ23vEVfNRP_mPI-S9Z3erhB9OV34zvdZItPBRfS3pSLWa-EIIL64C62jvAn0sy-wuE2-Pn9Je2S7tQKp3AYBw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "4c5daa0fd76e042ada96862d11a0e77abda5eff97ded5665be3f839bcf91e4cf",
+              "env": "live",
+              "kind": "note",
+              "name": "nightly_summary",
+              "prev": "61438bacbfe79730d8753801866ef2e931dedfad8cfb676e8efa86cd2dbc6976",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0ef055e64d41d852dba2bc57cda4e2278798ba925c66888867d65fde71b66a1b",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+              "batch_sig": "F007PZ2RDGoWxeaztvGseQjzmrSjFWCkA0w128HmtYRQiZtyZJTnOyHopcvPaeIJdw-zrShVTTnxzy0xzUBTDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "JR22DRY_Tk9kuPoaPtN_VDroMWkdupJXAPan7rdlNhH971QMN61SgUcimI0wLg4Ej5QZAur4Q3Rk3m3FjC63CA",
+              "index": 2,
+              "proof": [
+                "e2e618c65747638d978709e919dc2aa3092262a76acd5a8221269008cdc58cfa"
+              ],
+              "record_hash": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "aBK2KsuFmyxUrwusewOT0SKXg4U1ukooqYeX36CH6Jsvhqz_YQu_4AvWPIGbX3NJPS2W3KjN4C6f1B5WD9dTDQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "4c4f417de6fd0153f0d9ee6088beda8899099f50436aa53a8803ebcd561ed026",
+              "env": "live",
+              "kind": "decision",
+              "name": "reject_refund",
+              "prev": "381dd60e614d67484a89dd9da6dab0aeef6f751af864ac6aa65f62bf950503d9",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:04:59.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "d0823807f046eeb6dd7be57837db7877584afeb572ad07c1ac6899f60719fa92",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0fa727f02b4ed2a24222153077e6cc198668ac788f6835ac1f05e28129ffede6",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 1,
+                "v": 1
+              },
+              "batch_hash": "1add3980574c60415125961f42de1c8a03866ded958345e2ea4028735418c04e",
+              "batch_sig": "ag7rug783aWnkdo0ufFppLCCCEnxsXPTvU57pEDClkUWTbGYZKYx5XkfbnEOqVnwZ1uuLLOcB896YhsNEwD2BQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "9c0d5528aefab95f020ce30f68c1e3b59b6b2a2b1c20ad6f572bf8964899b52d",
+                "seq": 4,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "czZ748DgR4XWYAcBAVb9uAmMrwOllXV3CCL1EnknhF4roKd2L6bQsptixUC0kF3Hd1CNy6WAmXq7ciqrduiPDw",
+              "index": 0,
+              "proof": [],
+              "record_hash": "9c0d5528aefab95f020ce30f68c1e3b59b6b2a2b1c20ad6f572bf8964899b52d",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "d7QddCj5cTjcvbBj5YOW-F4KEoHsg_oWRgznQ2GFpTla_MhyDDB_ofbbUzz99sbCVnedHpSYt2Y-qYhlug-2AA"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
       "agent_keys": null,
       "expect": {
         "checks": {
@@ -16305,7 +17287,7 @@
           "schema": "pass"
         },
         "result": "PASS",
-        "result_line": "PASS (agent keys taken from the pack, not independent): 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS (agent keys taken from the pack, not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
       "name": "agent keys from the pack, trusted explicitly",
       "pack": {
@@ -17964,7 +18946,7 @@
           "schema": "pass"
         },
         "result": "PASS",
-        "result_line": "PASS: 12 of 12 checks passed; export of every agent, records from 2026-11-13T10:00:00.500Z, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records from 2026-11-13T10:00:00.500Z, generated 2026-11-13T12:00:00.000Z"
       },
       "name": "an export from a time: the chain starts mid-way",
       "pack": {
@@ -18217,7 +19199,7 @@
           "schema": "pass"
         },
         "result": "PASS",
-        "result_line": "PASS: 12 of 12 checks passed; export of every agent, records before 2026-11-13T10:04:00.000Z, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records before 2026-11-13T10:04:00.000Z, generated 2026-11-13T12:00:00.000Z"
       },
       "name": "an export up to a time: the chain ends before the head",
       "pack": {
@@ -18500,7 +19482,7 @@
           "schema": "pass"
         },
         "result": "PASS",
-        "result_line": "PASS: 12 of 12 checks passed; export of every agent, records before 2026-11-13T10:04:00.000Z, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records before 2026-11-13T10:04:00.000Z, generated 2026-11-13T12:00:00.000Z"
       },
       "head": {
         "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D": {
@@ -18800,7 +19782,7 @@
           "schema": "pass"
         },
         "result": "PASS",
-        "result_line": "PASS: 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
       "head": {
         "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D": {
@@ -19166,7 +20148,7 @@
           "schema": "pass"
         },
         "result": "PASS",
-        "result_line": "PASS: 12 of 12 checks passed; export of every agent, records from 2026-11-13T09:30:00.000Z, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records from 2026-11-13T09:30:00.000Z, generated 2026-11-13T12:00:00.000Z"
       },
       "name": "two agents, exported from a time",
       "pack": {
@@ -19525,7 +20507,7 @@
           "schema": "pass"
         },
         "result": "PASS",
-        "result_line": "PASS: 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
       "name": "a retired key's records from before its retirement (the customer's manifest)",
       "pack": {
@@ -20153,7 +21135,7 @@
           "schema": "pass"
         },
         "result": "PASS",
-        "result_line": "PASS (checked by the service with its own key registry; not independent): 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS (checked by the service with its own key registry; not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
       "name": "checked by the service with its own key registry",
       "pack": {
@@ -20481,7 +21463,7 @@
           "schema": "pass"
         },
         "result": "PASS",
-        "result_line": "PASS (service keys fetched over plain http, not independent): 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS (service keys fetched over plain http, not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
       "name": "service keys fetched over plain http from a local address",
       "pack": {

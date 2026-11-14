@@ -5,8 +5,9 @@
 return a :class:`Report` with the same check ids, statuses, text and JSON as
 the reference verifier (``signafaide-verify``).
 
-The drand BLS12-381 signature (check 9) is checked only with the optional
-``signafaide[bls]`` extra (``py_ecc``); without it the check says ``DRAND_NOT_CHECKED``.
+The drand BLS12-381 signature (check 9) is checked with ``py_ecc`` (a dependency, as
+``@noble/curves`` is for the TypeScript SDK), so both SDKs count the same checks; if it cannot be
+imported the check says ``DRAND_NOT_CHECKED``, never pass.
 """
 
 from __future__ import annotations
@@ -42,7 +43,8 @@ CHECKS = [
 ]
 UNITS = [("record",), ("record",), ("record",), ("record",), ("record",), ("batch", "batches"), ("batch", "batches"), ("head",), ("round",), ("anchor",), ("proof",), ("record",)]
 QUICKNET_CHAIN = "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971"
-PASS, FAIL, NOT_CHECKED = "pass", "fail", "not_checked"
+#: PENDING: ran, found nothing wrong, and waits for an anchor or public timestamp not confirmed yet (§7); never counted as passed.
+PASS, FAIL, NOT_CHECKED, PENDING = "pass", "fail", "not_checked", "pending"
 #: Why a pack without records fails (§7): an empty pack proves nothing.
 NO_RECORDS = "no records: an empty pack proves nothing"
 NO_LOCAL_RECORDS = "no records: nothing has been recorded here yet"
@@ -59,7 +61,7 @@ ANCHOR_WINDOW_MS = 7_200_000
 #: Where keys came from, when not from an independent source (§7 result line).
 INDEPENDENT, FROM_PACK, PLAIN_HTTP = "independent", "taken from the pack", "fetched over plain http"
 #: py_ecc is optional (about 23 MB with its dependencies), so say plainly when it is missing.
-DRAND_NOT_CHECKED = "drand: not checked. Install the signafaide[bls] extra (uv add 'signafaide[bls]', or pip inside your virtual environment)"
+DRAND_NOT_CHECKED = "drand: not checked (BLS library not installed; pip install py_ecc)"
 
 
 class KeysRequired(ValueError):
@@ -83,6 +85,8 @@ class Check:
             return "FAIL"
         if self.status == NOT_CHECKED:
             return "NOT CHECKED"
+        if self.status == PENDING:
+            return "PENDING"
         return "CONFIRMED" if (self.value or "").startswith("confirmed@") else (self.value or "pass").upper()
 
 
@@ -119,19 +123,24 @@ NOTHING_COSIGNED = "nothing co-signed yet"
 
 
 def counts_text(checks: List[Tuple[str, str]], nothing_cosigned: bool = False) -> str:
-    """How many checks passed, failed and were not checked (§7 result line)."""
+    """How many checks passed, failed, are pending and were not checked (§7 result line)."""
     total = len(checks)
     failed = [SHORT_NAMES[i] for i, st in checks if st == FAIL]
+    pending = [SHORT_NAMES[i] for i, st in checks if st == PENDING]
     unchecked_ids = [i for i, st in checks if st == NOT_CHECKED]
-    passed = total - len(failed) - len(unchecked_ids)
+    passed = total - len(failed) - len(pending) - len(unchecked_ids)
     if failed:
         out = f"{len(failed)} of {total} checks failed ({', '.join(failed)})"
         if passed:
             out += f", {passed} passed"
+        if pending:
+            out += f", {len(pending)} pending"
         if unchecked_ids:
             out += f", {len(unchecked_ids)} not checked"
         return out
     out = f"{passed} of {total} checks passed"
+    if pending:
+        out += f", {len(pending)} pending ({', '.join(pending)})"
     if unchecked_ids:
         names = [SHORT_NAMES[i] for i in unchecked_ids]
         if nothing_cosigned and any(i in WITNESS_CHECKS for i in unchecked_ids):
@@ -177,14 +186,23 @@ class Report:
     after: List[str] = field(default_factory=list)
     #: Local state with no record co-signed yet: the result line says so (§7).
     nothing_cosigned: bool = False
+    #: The project's name from the signed export statement, when the pack has one.
+    project_name: Optional[str] = None
+    #: Local state: chains that cannot ship (refused by the witness, or wedged here), as
+    #: ``<chain>: <reason>``. Any makes the result BLOCKED, which always fails (§7).
+    blocked: List[str] = field(default_factory=list)
+    #: Local state with --fail-on-pending-send: records not co-signed yet, which then fail.
+    not_sent: int = 0
 
     @property
     def ok(self) -> bool:
-        return all(c.status != FAIL for c in self.checks)
+        return not self.blocked and not self.not_sent and all(c.status != FAIL for c in self.checks)
 
     @property
     def result(self) -> str:
-        return "PASS" if self.ok else "FAIL"
+        if any(c.status == FAIL for c in self.checks) or (self.not_sent and not self.blocked):
+            return "FAIL"
+        return "BLOCKED" if self.blocked else "PASS"
 
     def check(self, id: str) -> Check:
         return next(c for c in self.checks if c.id == id)
@@ -195,7 +213,10 @@ class Report:
     def lines(self) -> List[str]:
         out = list(self.notes)
         if self.project and self.env:
-            out.append(f"signafAIde pack {self.project} ({self.env}), {plural(self.records, 'record')}")
+            if self.project_name:
+                out.append(f"signafAIde pack of project {self.project_name} ({self.project}, {self.env}), {plural(self.records, 'record')}")
+            else:
+                out.append(f"signafAIde pack {self.project} ({self.env}), {plural(self.records, 'record')}")
         out += [f"WARNING: {w}" for w in self.warnings]
         for c in self.checks:
             out.append(f"{c.n:>2}. {c.title:<28} {c.label:<12} {c.detail}")
@@ -203,6 +224,7 @@ class Report:
             if len(c.failures) > 20:
                 out.append(f"      ... and {len(c.failures) - 20} more")
         out += self.after
+        out += [f"BLOCKED {b}" for b in self.blocked]
         out.append(self.result_line)
         return out
 
@@ -210,6 +232,10 @@ class Report:
     def result_line(self) -> str:
         scope = scope_text(self.filter, self.generated) if self.filter is not None and self.generated else None
         counts = counts_text([(c.id, c.status) for c in self.checks], self.nothing_cosigned)
+        if self.blocked:
+            counts = f"{plural(len(self.blocked), 'chain')} cannot ship ({', '.join(b.split(':')[0] for b in self.blocked)}); {counts}"
+        elif self.not_sent:
+            counts = f"{plural(self.not_sent, 'record')} not sent yet (--fail-on-pending-send); {counts}"
         return result_line(self.result, self.sources[0], self.sources[1], self.by_service, scope, counts)
 
     def __str__(self) -> str:
@@ -223,10 +249,12 @@ class Report:
                 d["value"] = c.value
             checks.append(d)
         return {
-            "result": self.result, "result_line": self.result_line, "project": self.project, "env": self.env, "records": self.records,
+            "result": self.result, "result_line": self.result_line, "project": self.project,
+            **({"project_name": self.project_name} if self.project_name else {}), "env": self.env, "records": self.records,
             "generated": self.generated, "filter": self.filter, "warnings": self.warnings, "independent": self.independent, "notes": self.notes,
             "checks": checks,
             **({"not_yet": self.after} if self.after else {}),
+            **({"blocked": self.blocked} if self.blocked else {}),
         }
 
 
@@ -422,9 +450,11 @@ def verify_pack(
     v = _Verifier(service_keys, keys, contents or {}, project=pack["project"], env=pack["env"], local=False, drand=drand,
                   filter=pack["filter"], export_heads=pack["heads"], client_heads=heads, bitcoin=bitcoin, not_independent=not_independent,
                   generated=pack["generated"], export_sig=pack["export_sig"])
+    v.project_name = pack.get("project_name")
     checks = v.run(pack["records"], pack["anchors"])
     return Report(checks, pack["project"], pack["env"], len(pack["records"]), warnings, independent=independent, generated=pack["generated"],
-                  filter=pack["filter"], sources=(service_src, agent_src), by_service=by_service)
+                  filter=pack["filter"], sources=(service_src, agent_src), by_service=by_service,
+                  project_name=pack.get("project_name") if isinstance(pack.get("project_name"), str) else None)
 
 
 def _earliest(a: Optional[str], b: Optional[str]) -> Optional[str]:
@@ -446,7 +476,8 @@ def records_hash(records: list) -> str:
 
 def export_statement(pack: dict) -> dict:
     """The export statement the service signs (§7, domain ``export``)."""
-    return {"project": pack["project"], "env": pack["env"], "generated": pack["generated"], "filter": pack["filter"],
+    return {"project": pack["project"], **({"project_name": pack["project_name"]} if "project_name" in pack else {}),
+            "env": pack["env"], "generated": pack["generated"], "filter": pack["filter"],
             "heads": [sh["head"] for sh in pack["heads"]], "records_hash": records_hash(pack["records"])}
 
 
@@ -499,9 +530,13 @@ def _pack_errors(pack: Any) -> Optional[str]:
     for k in fields:
         if k not in pack:
             return f"missing field `{k}`"
-    extra = sorted(set(pack) - set(fields))
+    extra = sorted(set(pack) - set(fields) - {"project_name"})
     if extra:
         return f"unknown field `{extra[0]}`"
+    if "project_name" in pack:
+        n = pack["project_name"]
+        if not isinstance(n, str) or not n or len(n) > 200 or any(ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F for ch in n):
+            return "project_name must be 1 to 200 characters, without control characters"
     for k in ("service_keys", "agent_keys", "heads", "records", "anchors"):
         if not isinstance(pack[k], list):
             return f"`{k}` must be a list"
@@ -604,6 +639,7 @@ class _Acc:
         self.failures: List[dict] = []
         self.notes: List[str] = []
         self.not_checked = False
+        self.pending = False
         self.value: Optional[str] = None
 
     def fail(self, item: str, message: str) -> None:
@@ -611,6 +647,8 @@ class _Acc:
 
 
 class _Verifier:
+    project_name: Optional[str] = None
+
     def __init__(self, service_keys, agent_keys, contents, *, project, env, local, local_heads=None, drand=None,
                  filter=None, export_heads=None, client_heads=None, bitcoin=None, not_independent=False, generated=None, export_sig=None):
         self.service_keys = service_keys
@@ -707,7 +745,7 @@ class _Verifier:
 
         checks = []
         for i, acc in enumerate(a):
-            status = FAIL if acc.failures else NOT_CHECKED if acc.not_checked else PASS
+            status = FAIL if acc.failures else NOT_CHECKED if acc.not_checked else PENDING if acc.pending else PASS
             detail = plural(acc.checked, *UNITS[i]) + "".join(f"; {n}" for n in acc.notes)
             checks.append(Check(i + 1, CHECKS[i][0], CHECKS[i][1], status, acc.checked, detail, acc.value, acc.failures))
         return checks
@@ -926,8 +964,9 @@ class _Verifier:
 
         if not self.local:
             try:
-                ok = self.any_key("export", hash_json(export_statement({"project": self.project, "env": self.env, "generated": self.generated,
-                                                                         "filter": self.filter, "heads": self.export_heads, "records": self.raw_records})),
+                stmt = {"project": self.project, "env": self.env, "generated": self.generated, "filter": self.filter, "heads": self.export_heads,
+                        "records": self.raw_records, **({"project_name": self.project_name} if self.project_name is not None else {})}
+                ok = self.any_key("export", hash_json(export_statement(stmt)),
                                   self.export_sig, self.generated)
                 if not ok:
                     acc.fail("export statement", "export_sig does not verify with any service key active at generated: the pack's filter, heads, "
@@ -1036,6 +1075,7 @@ class _Verifier:
         acc = self.acc[8]
         nulls = 0
         rounds = set()
+        to_check: list = []
         for rc in batches.values():
             d = rc["batch"]["drand"]
             if d is None:
@@ -1052,10 +1092,16 @@ class _Verifier:
                 acc.fail(item, f"unknown drand chain {d['chain']}")
             elif not re.fullmatch(r"(?:[0-9a-f]{2})+", d["signature"]):
                 acc.fail(item, "signature is not hex")
-            elif self.drand_verifier and not self.drand_verifier(d):
-                acc.fail(item, f"BLS signature does not verify for round {d['round']}")
             elif sha256_hex(bytes.fromhex(d["signature"])) != d["randomness"]:
                 acc.fail(item, "randomness is not sha256(signature)")
+            else:
+                to_check.append((item, d))
+        if self.drand_verifier and to_check:
+            many = getattr(self.drand_verifier, "many", None)
+            results = many([d for _, d in to_check]) if many else [self.drand_verifier(d) for _, d in to_check]
+            for (item, d), ok in zip(to_check, results):
+                if not ok:
+                    acc.fail(item, f"BLS signature does not verify for round {d['round']}")
         acc.checked = len(rounds)
         if nulls:
             acc.notes.append(f"{plural(nulls, 'batch', 'batches')} without a drand round (beacon unreachable when written)")
@@ -1121,13 +1167,22 @@ class _Verifier:
             a10.not_checked = True
             a10.notes.append(f"{plural(stale, 'batch', 'batches')} not timestamped: older than the 2-hour anchor window, and no anchor in the pack covers them")
         if not anchors and not stale:
-            a10.not_checked = True
+            if self.local:
+                a10.not_checked = True
+            else:
+                a10.pending = True
             a10.notes.append("local state holds no anchors" if self.local else "no anchors in the pack yet (an anchor is made every hour)")
         elif young:
+            a10.pending = True
             a10.notes.append(f"{plural(young, 'batch', 'batches')} not yet anchored")
         unchecked = [p for p in proofs if p[0] == "unchecked"]
         if not proofs:
-            a11.not_checked = True
+            # No proof yet because the batches wait for their anchor: pending, not unchecked.
+            if a10.pending and not a10.not_checked:
+                a11.pending = True
+                a11.notes.append("waiting for the anchor")
+            else:
+                a11.not_checked = True
         elif unchecked:
             a11.not_checked = True
             a11.notes.append(f"public timestamp not checked ({unchecked[0][2]}); claims block {', '.join(str(p[1]) for p in unchecked)}")
@@ -1136,6 +1191,7 @@ class _Verifier:
             a11.notes.append(f"each public timestamp checked against its public record (block {max(p[1] for p in proofs)})")
         else:
             a11.value = "pending"
+            a11.pending = True
             a11.notes.append(f"waiting for the public timestamp to confirm (usually within a few hours): {sum(1 for p in proofs if p[0] == 'pending')} of {len(proofs)}")
 
     # 12

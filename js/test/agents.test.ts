@@ -5,7 +5,7 @@ import { VERSION } from "../src/version.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AGENT_IDS, SETUP_NOTES, setup } from "../src/agents.js";
 import { main } from "../src/cli.js";
-import { SECTION_START, SKILL_BODY, claudeSkill } from "../src/skill.js";
+import { SECTION_START, SKILL_BODY, claudeSkill, instructionsSection, skillBody } from "../src/skill.js";
 
 let root: string;
 let home: string;
@@ -24,7 +24,7 @@ afterEach(() => fs.rmSync(path.dirname(root), { recursive: true, force: true }))
 const read = (f: string) => fs.readFileSync(path.join(root, f), "utf8");
 const json = (f: string) => JSON.parse(read(f));
 const run = (agents?: string[], dryRun = false) => setup({ root, agents, dryRun, env, home });
-const SERVER = { command: "npx", args: ["-y", `signafaide@${VERSION}`, "mcp"] };
+const SERVER = { command: "npx", args: ["-y", `signafaide-mcp@${VERSION}`] };
 
 describe("agent setup", () => {
   it("writes every agent's native format", () => {
@@ -33,7 +33,7 @@ describe("agent setup", () => {
     expect(json(".mcp.json")).toEqual({ mcpServers: { signafaide: { type: "stdio", ...SERVER, env: {} } } });
     expect(read(".claude/skills/signafaide/SKILL.md")).toBe(claudeSkill());
     expect(read(".claude/skills/signafaide/SKILL.md")).toMatch(/^---\nname: signafaide\ndescription: Signed, tamper-evident/);
-    expect(fs.readFileSync(path.join(home, ".codex/config.toml"), "utf8")).toBe(`[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide@${VERSION}", "mcp"]\n`);
+    expect(fs.readFileSync(path.join(home, ".codex/config.toml"), "utf8")).toBe(`[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide-mcp@${VERSION}"]\n`);
     expect(json(".cursor/mcp.json")).toEqual({ mcpServers: { signafaide: { type: "stdio", ...SERVER } } });
     expect(read(".cursor/rules/signafaide.mdc")).toMatch(/^---\ndescription: .+\nalwaysApply: false\n---\n/);
     expect(json(".gemini/settings.json")).toEqual({ mcpServers: { signafaide: SERVER } });
@@ -41,7 +41,7 @@ describe("agent setup", () => {
     expect(json(".devin/mcp_config.json")).toEqual({ mcpServers: { signafaide: SERVER } });
     for (const f of ["CLAUDE.md", "AGENTS.md", "GEMINI.md", ".github/copilot-instructions.md"]) {
       expect(read(f).split(SECTION_START)).toHaveLength(2); // one section, even though codex and windsurf share AGENTS.md
-      expect(read(f)).toContain("## Adopt it in 3 steps"); // headings one level down
+      expect(read(f)).toContain("### Steps"); // headings one level down
     }
   });
 
@@ -61,7 +61,7 @@ describe("agent setup", () => {
     expect(json(".gemini/settings.json")).toEqual({ theme: "dark", mcpServers: { signafaide: SERVER } });
     expect(read("AGENTS.md")).toMatch(/^# Team rules\n\nUse tabs\.\n\n<!-- signafaide:start -->\n/);
     expect(fs.readFileSync(path.join(home, ".codex/config.toml"), "utf8")).toBe(
-      `model = "o3"\n\n[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide@${VERSION}", "mcp"]\nenabled = false\n\n[mcp_servers.signafaide.env]\nX = "1"\n\n[other]\na = 1\n`,
+      `model = "o3"\n\n[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide-mcp@${VERSION}"]\nenabled = false\n\n[mcp_servers.signafaide.env]\nX = "1"\n\n[other]\na = 1\n`,
     );
 
     const again = run(["claude-code", "gemini", "codex"]);
@@ -151,7 +151,7 @@ describe("agent setup --url", () => {
     expect(json(".vscode/mcp.json")).toEqual({ servers: { signafaide: { type: "stdio", ...withEnv } } });
     expect(json(".devin/mcp_config.json")).toEqual({ mcpServers: { signafaide: withEnv } });
     const toml = path.join(home, ".codex/config.toml");
-    expect(fs.readFileSync(toml, "utf8")).toBe(`[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide@${VERSION}", "mcp"]\nenv = { SIGNAFAIDE_URL = "${url}" }\n`);
+    expect(fs.readFileSync(toml, "utf8")).toBe(`[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide-mcp@${VERSION}"]\nenv = { SIGNAFAIDE_URL = "${url}" }\n`);
     const again = setup({ root, agents: ["all"], env, home, url });
     expect(again.flatMap((r) => r.changes.map((c) => c.result)).every((r) => r === "unchanged")).toBe(true);
   });
@@ -161,10 +161,10 @@ describe("agent setup --url", () => {
     fs.mkdirSync(path.dirname(toml), { recursive: true });
     fs.writeFileSync(toml, '[mcp_servers.signafaide]\ncommand = "old"\n\n[mcp_servers.signafaide.env]\nX = "1"\nSIGNAFAIDE_URL = "http://old"\n');
     setup({ root, agents: ["codex"], env, home, url });
-    expect(fs.readFileSync(toml, "utf8")).toBe(`[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide@${VERSION}", "mcp"]\n\n[mcp_servers.signafaide.env]\nSIGNAFAIDE_URL = "${url}"\nX = "1"\n`);
+    expect(fs.readFileSync(toml, "utf8")).toBe(`[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide-mcp@${VERSION}"]\n\n[mcp_servers.signafaide.env]\nSIGNAFAIDE_URL = "${url}"\nX = "1"\n`);
     fs.writeFileSync(toml, '[mcp_servers.signafaide]\ncommand = "old"\nenv = { X = "1" }\n');
     setup({ root, agents: ["codex"], env, home, url });
-    expect(fs.readFileSync(toml, "utf8")).toBe(`[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide@${VERSION}", "mcp"]\nenv = { X = "1", SIGNAFAIDE_URL = "${url}" }\n`);
+    expect(fs.readFileSync(toml, "utf8")).toBe(`[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide-mcp@${VERSION}"]\nenv = { X = "1", SIGNAFAIDE_URL = "${url}" }\n`);
     expect(setup({ root, agents: ["codex"], env, home, url })[0].changes[0].result).toBe("unchanged");
   });
 
@@ -183,13 +183,15 @@ describe("agent setup --url", () => {
       console.log = log;
     }
     expect(json(".mcp.json").mcpServers.signafaide.env).toEqual({ SIGNAFAIDE_URL: url });
-    expect(lines.at(-1)).toContain(`witness: ${url} (SIGNAFAIDE_URL in each MCP entry)`);
+    expect(lines.some((l) => l.includes(`witness: ${url} (SIGNAFAIDE_URL in each MCP entry)`))).toBe(true);
+    expect(lines.at(-1)).toContain("agent names: give each agent an explicit name");
+    expect(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8")).toContain(`the witness at \`${url}\``);
   });
 });
 
 describe("agent setup safety", () => {
   it("pins the package version and never writes through a symbolic link", () => {
-    expect(SERVER.args[1]).toBe(`signafaide@${VERSION}`);
+    expect(SERVER.args[1]).toBe(`signafaide-mcp@${VERSION}`);
     const target = fs.mkdtempSync(path.join(os.tmpdir(), "sfa-elsewhere-"));
     fs.symlinkSync(target, path.join(root, ".cursor"));
     const r = run(["cursor"]);
@@ -199,28 +201,26 @@ describe("agent setup safety", () => {
 });
 
 describe("skill text", () => {
-  it("opens with the facts: what leaves the machine, no account, self-host, open source", () => {
-    const head = SKILL_BODY.split("\n").slice(0, 8).join("\n");
-    expect(head).toContain("each record's hashes, plus its tool name, agent name and time; never inputs or outputs");
-    expect(head).toContain("never put personal data in agent or tool names");
-    expect(head).not.toContain("personal data.");
-    expect(head).toContain("Nothing at all is sent until a person runs `signafaide init` or sets `SIGNAFAIDE_API_KEY`");
-    expect(head).toContain("agree to the signafAIde Terms and Privacy notice");
-    expect(head).toContain("needs no account, email or card");
-    expect(head).toContain("self-host the witness and set `SIGNAFAIDE_URL` (https://signafaide.com/docs/self-host)");
-    expect(head).toContain("Apache-2.0, with a public protocol spec and an independent verifier");
+  it("is plain: what it does, what is sent, when to use it", () => {
+    const head = SKILL_BODY.split("\n").slice(0, 6).join("\n");
+    expect(head).toContain("Nothing is sent until a person runs `signafaide init` or sets `SIGNAFAIDE_API_KEY`");
+    expect(head).toContain("Only hashes, tool names, agent names and times are sent, never inputs or outputs");
+    expect(head).toContain("agent and tool names must not hold personal data");
+    expect(head).toContain("the hosted witness (https://api.signafaide.com)");
+    for (const hype of ["revolution", "best-in-class", "seamless", "effortless", "world-class", "Why not", "!\n", "! ", "**"]) expect(SKILL_BODY).not.toContain(hype);
+    expect(SKILL_BODY.split("\n").length).toBeLessThan(50);
   });
 
-  it("says when, how and why, and nothing it cannot back", () => {
-    expect(SKILL_BODY).toContain(
-      "a self-written log, even signed, can't prove to a third party when a record was made or that it wasn't rebuilt; signafAIde records are co-signed and publicly timestamped",
-    );
-    for (const s of ["pay, send, approve, delete or change", "uv add signafaide", "python3 -m venv .venv", "npm install signafaide", "signafaide verify", "claim link", "do what they asked", "Do not run `signafaide init` yourself"])
+  it("asks for explicit agent names and leaves the opt-in to the person", () => {
+    for (const s of ['agent="claims-bot"', '{ agent: "claims-bot" }', "uv add signafaide", "python3 -m venv .venv", "npm install signafaide", "signafaide verify", "Do not run `signafaide init` yourself", "SIGNAFAIDE_AGENT_KEY_<NAME>"])
       expect(SKILL_BODY).toContain(s);
-    expect(SKILL_BODY.indexOf("**Use it when**")).toBeLessThan(SKILL_BODY.indexOf("## Adopt it in 3 steps"));
-    expect(SKILL_BODY.indexOf("## Adopt it in 3 steps")).toBeLessThan(SKILL_BODY.indexOf("**Why not a self-written log:**"));
-    for (const hype of ["revolution", "best-in-class", "seamless", "effortless", "world-class", "!\n", "! "]) expect(SKILL_BODY).not.toContain(hype);
-    expect(SKILL_BODY.split("\n").length).toBeLessThan(60);
+  });
+
+  it("names the witness it was set up with (--url), not the hosted one", () => {
+    const body = skillBody("https://witness.internal.example.com");
+    expect(body).toContain("the witness at `https://witness.internal.example.com`");
+    expect(body).not.toContain("api.signafaide.com");
+    expect(instructionsSection("https://witness.internal.example.com")).toContain("https://witness.internal.example.com");
   });
 
   it("the plugin's SKILL.md is the generated one", () => {

@@ -15,7 +15,9 @@ in the background. Only hashes leave the machine unless ``store_content=True``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
+
+from ._plural import plural
 
 from . import runtime
 from ._version import __version__
@@ -24,7 +26,7 @@ from .decorator import NotRecorded, note, record, to_jsonable, wrap_tool, wrap_t
 from .experiments import ExperimentReport, VerificationFailed, compare
 from .http import SignafaideError
 from .replay import Replay, replay
-from .runtime import Recorder
+from .runtime import Recorder, recording_disabled, test_mode
 from .bitcoin import DEFAULT_URL as DEFAULT_TIMESTAMP_URL, lookup as lookup_timestamps
 from .verifier import (
     DRAND_NOT_CHECKED, KeysRequired, Report, bitcoin_heights, is_loopback_url, load_agent_keys, load_content, load_heads, load_service_keys,
@@ -32,6 +34,8 @@ from .verifier import (
 )
 
 __all__ = [
+    "recording_disabled",
+    "test_mode",
     "init",
     "record",
     "wrap_tools",
@@ -75,22 +79,24 @@ def init(
     home: Optional[str] = None,
     store_content: bool = False,
     quiet: bool = False,
+    key_provider: Optional[Callable[[str, str], Any]] = None,
+    exit_flush: Optional[float] = None,
 ) -> Recorder:
     """Configure signafAIde (optional). Finds SIGNAFAIDE_API_KEY (env or .env).
     Without one, records stay local (signed, chained, verifiable in ``.signafaide/``)
     and nothing is sent: it never creates a sandbox. A human opts in with
     ``signafaide init`` or by setting the key. Never raises when the service is
     offline: records are kept in the outbox."""
-    rec = runtime.configure(url=url, api_key=api_key, home=home, store_content=store_content, quiet=quiet)
-    rec.remember_agent()
+    rec = runtime.configure(url=url, api_key=api_key, home=home, store_content=store_content, quiet=quiet, key_provider=key_provider,
+                            exit_flush=exit_flush)
     key = rec.api_key
     if not key:
         return rec
     try:
         rec.resolve_project(key)
     except SignafaideError as e:
-        if e.code != "network":
-            raise
+        # A wrong key or an unreachable witness is a warning, never an exception in the
+        # caller's program (records are kept locally until it is fixed).
         if not quiet:
             import sys
 
@@ -108,6 +114,37 @@ def status() -> dict:
     return runtime.get().status()
 
 
+def check_held(rec: Recorder) -> dict:
+    """Records ``signafaide repair`` set aside: their signatures (with the key that signed them),
+    chain links and content hashes still check; they are not co-signed. Failures name the check."""
+    from .crypto import check_content, verify_sig
+    from .records import record_hash
+
+    keys = {k["key_id"]: k for k in rec.state.agent_public_keys()}
+    failures, records = [], 0
+    segs = rec.state.held_segments()
+    for chain, path, recs in segs:
+        prev = None
+        for r in recs:
+            records += 1
+            item = f"{chain}#{r['envelope']['seq']} (held, {path.name})"
+            k = keys.get(r.get("key_id"))
+            if k is None:
+                failures.append({"check": "record_sig", "item": item, "message": f"no key {r.get('key_id')} for agent {r['envelope']['agent']} on this machine"})
+            elif not verify_sig(k["public_key"], "draft" if r.get("draft") else "record", record_hash(r), r.get("sig", "")):
+                failures.append({"check": "record_sig", "item": item, "message": "signature does not verify"})
+            if prev is not None and (r["envelope"]["seq"] != prev["envelope"]["seq"] + 1 or r["envelope"]["prev"] != record_hash(prev)):
+                failures.append({"check": "chain", "item": item, "message": "does not follow the held record before it"})
+            try:
+                h = check_content(r.get("content"), r.get("salt"), r["envelope"]["content_hash"])
+                if h:
+                    failures.append({"check": "content", "item": item, "message": f"content hashes to {h}, envelope says {r['envelope']['content_hash']}"})
+            except ValueError as e:
+                failures.append({"check": "content", "item": item, "message": str(e)})
+            prev = r
+    return {"records": records, "segments": len(segs), "failures": failures}
+
+
 def verify(
     pack: Union[str, Path, dict, None] = None,
     *,
@@ -119,6 +156,7 @@ def verify(
     timestamp_check: str = DEFAULT_TIMESTAMP_URL,
     offline: bool = False,
     content: Union[str, Path, None] = None,
+    fail_on_pending_send: bool = False,
 ) -> Report:
     """Run the §7 verifier on a pack (path or dict) or, with no pack, on the
     local ``.signafaide`` state. ``print(report)`` shows one line per check and
@@ -133,6 +171,10 @@ def verify(
     ``timestamp_check`` unless ``offline``. Keys over plain http are accepted only from this
     machine and never count as independent. Raises :class:`KeysRequired` when no service
     keys can be had, and OSError or ValueError when an input cannot be read.
+
+    For local state, a chain that cannot ship (refused by the witness, or wedged here) makes
+    the result BLOCKED, which always fails; ``fail_on_pending_send`` also fails while records
+    wait to be co-signed (for CI).
     """
     rec = runtime.get()
     notes = []
@@ -161,7 +203,20 @@ def verify(
         report = verify_local(rec.state, service_keys, drand=drand, service_keys_plain_http=keys_plain)
         notes.insert(0, f"local state: {rec.state.home}")
         records = [r for c in rec.state.chains() for r in rec.state.read_all(c)]
-        report.after += not_yet(sum(1 for r in records if "receipt" not in r), len(records), bool(rec.api_key))
+        unsent = sum(1 for r in records if "receipt" not in r)
+        report.after += not_yet(unsent, len(records), bool(rec.api_key))
+        held = check_held(rec)
+        if held["segments"]:
+            for f in held["failures"]:
+                c = report.check(f["check"])
+                c.failures.append({"item": f["item"], "message": f["message"]})
+                c.status = "fail"
+            report.after.append(f"held aside by `signafaide repair`: {plural(held['records'], 'record')} in {plural(held['segments'], 'segment')} "
+                                "(signatures, links and content hashes checked here; not co-signed)")
+        for b in rec.diagnose():
+            report.blocked.append(f"{b['chain']}: {b['reason']}; {plural(b['records'], 'record')} cannot ship. Next: {b['next']}")
+        if fail_on_pending_send:
+            report.not_sent = unsent
     else:
         if isinstance(pack, (str, Path)):
             pack = _loads(Path(pack).read_text())

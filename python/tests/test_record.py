@@ -164,7 +164,7 @@ def test_too_old_local_records_stay_local_with_a_clear_error(local_recorder):
     key = local_recorder.key("claims-project")
     old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     local_recorder.state.append("_pending/nokey/claims-project",
-                                lambda seq, prev: make_draft(key, kind="note", agent="claims-project", seq=seq, prev=prev, name="old", content={}, time=old),
+                                lambda seq, prev, *_: make_draft(key, kind="note", agent="claims-project", seq=seq, prev=prev, name="old", content={}, time=old),
                                 lambda r: r)
     local_recorder.create_sandbox()
     e = error_for(signafaide.flush())
@@ -271,7 +271,11 @@ def test_chain_conflict_is_reported_not_rewritten(recorder, service):
     assert "Chain conflict, head attached." in str(e) and "seq 7" in str(e) and "nothing was rewritten" in str(e)
     assert chain_path(recorder).read_text() == before
     assert recorder.state.outbox_size() == 1
-    assert error_for(signafaide.flush()) is e  # stays blocked, no retry storm
+    # In the background the refused chain is not tried again until the configuration changes
+    # (no retry storm); an explicit flush (`signafaide flush`) always tries.
+    calls = len(service.calls)
+    assert error_for(recorder.flush(background=True)) is e
+    assert len(service.calls) == calls
 
 
 def test_server_message_surfaces_verbatim(recorder, service):
@@ -392,9 +396,10 @@ def test_switching_keys_starts_a_fresh_chain(recorder, service):
     live_key = "sfa_live_" + "L" * 32
     live = service.add_project(live_key, env="live")
     recorder._api_key = live_key
-    signafaide.note("c", {})  # the new key's project is looked up first (GET /v1/project)
-    assert not [c for c in recorder.state.chains() if c.startswith("_pending/")]
+    signafaide.note("c", {})  # no network while writing: a signed draft until the shipper learns the key's project
+    assert [c for c in recorder.state.chains() if c.startswith("_pending/")]
     r = signafaide.flush()
+    assert not [c for c in recorder.state.chains() if c.startswith("_pending/")]
     assert r["errors"] == {} and r["shipped"] == 1
     live_chain = f"{live['project']}/live/claims-project"
     assert sorted(recorder.state.chains()) == sorted([sandbox_chain, live_chain])

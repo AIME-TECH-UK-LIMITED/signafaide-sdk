@@ -251,7 +251,11 @@ describe("shipping", () => {
     expect(e.message).toMatch(/^Chain conflict, head attached\. .*seq 7.*nothing was rewritten/);
     expect(fs.readFileSync(p, "utf8")).toBe(before);
     expect(getRecorder().state.outboxSize()).toBe(1);
-    expect(errorFor(await flush())).toBe(e);
+    // In the background the refused chain is not tried again until the configuration changes;
+    // an explicit flush (`signafaide flush`) always tries.
+    const calls = ctx.service.calls.length;
+    expect(errorFor(await getRecorder().flush(10_000, "bg"))).toBe(e);
+    expect(ctx.service.calls.length).toBe(calls);
   });
 
   it("surfaces the service message verbatim", async () => {

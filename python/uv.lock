@@ -3183,10 +3183,6 @@ source = { editable = "." }
 dependencies = [
     { name = "cryptography", version = "47.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version <= '3.9'" },
     { name = "cryptography", version = "50.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version > '3.9'" },
-]
-
-[package.optional-dependencies]
-bls = [
     { name = "py-ecc" },
 ]
 
@@ -3205,7 +3201,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=41" },
-    { name = "py-ecc", marker = "extra == 'bls'", specifier = ">=7" },
+    { name = "py-ecc", specifier = ">=7" },
 ]
 provides-extras = ["bls"]
 

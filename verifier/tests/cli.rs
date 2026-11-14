@@ -24,7 +24,7 @@ fn run(args: &[&str]) -> (i32, String) {
     (out.status.code().unwrap(), String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr))
 }
 
-const SCOPE: &str = ": 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z";
+const SCOPE: &str = ": 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z";
 
 /// A one-thread fake server: `path` answers `body`, anything else 404. Counts the requests.
 fn serve(path: &'static str, body: String) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {

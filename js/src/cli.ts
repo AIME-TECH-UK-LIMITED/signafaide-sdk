@@ -31,19 +31,30 @@ const mask = (k?: string | null): string => (k ? `${k.slice(0, 13)}...` : "none"
 export async function statusLines(rec: Recorder): Promise<string[]> {
   const lines: string[] = [];
   const s = rec.status();
+  if (s.test_mode) lines.push("test mode: records go to a temporary folder and nothing is sent (SIGNAFAIDE_TEST, or a test runner); SIGNAFAIDE_TEST=0 turns it off");
   lines.push(
-    `key: ${mask(s.api_key)}` +
-      (s.env ? ` (env ${s.env})` : "; records stay on this machine (signed and chained, nothing is sent). `signafaide init` creates a free sandbox and sends hashes; or set SIGNAFAIDE_API_KEY"),
+    s.api_key_invalid
+      ? `key: SIGNAFAIDE_API_KEY is set but is not a signafAIde key (sfa_test_ or sfa_live_ and 32 letters or digits); nothing is sent until it is fixed`
+      : `key: ${mask(s.api_key)}` +
+          (s.env ? ` (env ${s.env})` : "; records stay on this machine (signed and chained, nothing is sent). `signafaide init` creates a free sandbox and sends hashes; or set SIGNAFAIDE_API_KEY"),
   );
   lines.push(`service: ${s.url}`);
   lines.push(`home: ${s.home}`);
   if (!s.chains.length) lines.push("chains: none yet; wrap a function with record()");
+  const blocked: string[] = [];
   for (const c of s.chains) {
     const last = c.receipt_seq ? `last receipt seq ${c.receipt_seq} at ${c.receipt_time}` : "no receipt yet";
     const other = c.current || !c.waiting ? "" : `; ${c.waiting} waiting for the key of that project`;
-    lines.push(`chain ${c.chain}: key ${c.key_id}, ${plural(c.records, "record")}, ${last}${other}`);
+    lines.push(`chain ${c.chain}: key ${c.key_id}, ${plural(c.records, "record")}, ${last}${other}${c.blocked ? "; BLOCKED" : ""}`);
+    if (c.blocked) blocked.push(`BLOCKED ${c.chain}: ${c.blocked.reason}; ${plural(c.blocked.records, "record")} cannot ship. Next: ${c.blocked.next}`);
   }
-  lines.push(`outbox: ${plural(s.outbox, "record")} waiting` + (s.outbox ? "; run `signafaide flush`" : ""));
+  if (s.chains.some((c) => c.agent === rec.defaultAgent)) {
+    lines.push(`note: agent "${rec.defaultAgent}" is named after the project folder; give agents explicit names in production (record(fn, { agent: "claims-bot" }))`);
+  }
+  for (const h of s.held) lines.push(`held: ${h.chain}: ${plural(h.records, "record")} set aside by \`signafaide repair\` in ${h.file} (kept, verifiable locally, not co-signed)`);
+  lines.push(`outbox: ${plural(s.outbox, "record")} waiting` + (s.outbox && !blocked.length ? "; run `signafaide flush`" : ""));
+  lines.push(...blocked);
+  let claimed = !!s.sandbox?.claimed;
   if (s.api_key) {
     try {
       const u = await rec.client(5000).usage();
@@ -51,17 +62,30 @@ export async function statusLines(rec: Recorder): Promise<string[]> {
     } catch (e) {
       lines.push(`quota: unknown (${(e as Error).message})`);
     }
+    if (!claimed && s.api_key.startsWith("sfa_test_") && s.sandbox?.claim_url) {
+      try {
+        claimed = (await rec.client(5000).project())?.claimed === true;
+        if (claimed) rec.state.saveSandbox({ ...s.sandbox, claimed: true });
+      } catch {
+        /* shown as unclaimed */
+      }
+    }
   }
-  if (s.sandbox?.claim_url && s.api_key?.startsWith("sfa_test_")) lines.push(`claim: ${s.sandbox.claim_url}`);
+  if (s.sandbox?.claim_url && s.api_key?.startsWith("sfa_test_")) lines.push(claimed ? "claim: done (this sandbox belongs to an organisation now)" : `claim: ${s.sandbox.claim_url}`);
   return lines;
 }
 
 export const COMMANDS: Record<string, Command> = {
   init: {
-    help: "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link",
+    help:
+      "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link. " +
+      "The witness is https://api.signafaide.com unless SIGNAFAIDE_URL names another (a self-hosted witness, or http://127.0.0.1:7474 for a local one). " +
+      "Adds .signafaide/ and .env to .gitignore",
+    usage: "init   (environment: SIGNAFAIDE_URL=<witness url>, SIGNAFAIDE_API_KEY=<existing key>)",
     async run() {
       const rec = recorder();
       rec.rememberAgent();
+      rec.state.ignoreInGit();
       const had = rec.apiKey;
       const key = await rec.createSandbox();
       const claim = rec.state.sandbox()?.claim_url;
@@ -77,9 +101,38 @@ export const COMMANDS: Record<string, Command> = {
   },
 
   status: {
-    help: "key and env, agents, last receipt, outbox size, quota",
+    help: "key and env, agents, last receipt, outbox size, quota; BLOCKED chains (exit 1 when any)",
     async run() {
-      for (const line of await statusLines(recorder())) out(line);
+      const rec = recorder();
+      const lines = await statusLines(rec);
+      for (const line of lines) out(line);
+      return lines.some((l) => l.startsWith("BLOCKED ")) ? 1 : 0;
+    },
+  },
+
+  repair: {
+    help: "set aside records the witness can never take (clock went back, revoked key, clock ahead), rotate the agent's key and start a new segment; history is kept and verifiable",
+    usage: "repair [--agent X] [--dry-run]",
+    options: { agent: { type: "string" }, "dry-run": { type: "boolean" } },
+    async run(v) {
+      const rec = recorder();
+      const dry = !!v["dry-run"];
+      const done = rec.repair({ agent: v.agent, dryRun: dry });
+      if (!done.length) {
+        out(`nothing to repair${v.agent ? ` for agent ${v.agent}` : ""}: every chain can ship (\`signafaide status\` shows them)`);
+        return 0;
+      }
+      for (const r of done) {
+        out(`${r.chain}: ${r.blocked.reason}`);
+        if (dry) {
+          out(`  would set aside seq ${r.blocked.seq} onwards (${plural(r.blocked.records, "record")}), give the agent a new key and write a signafaide.repair note`);
+          continue;
+        }
+        out(`  set aside ${plural(r.records!, "record")} in ${r.held} (kept; \`signafaide verify\` still checks their signatures and content hashes)`);
+        out(r.newKey ? `  new key ${r.newKey} signs from now on; the old key is retired on the witness at the next send` : "  the key comes from a secret store: rotate it there if it was revoked");
+        out(`  note ${r.note!.slice(0, 12)} (signafaide.repair) commits to the held records' hashes and ships with the next send`);
+      }
+      if (!dry) out("next: `signafaide flush` sends the new segment, then `signafaide keys export` for your auditors (it lists the old and new keys)");
       return 0;
     },
   },
@@ -87,7 +140,9 @@ export const COMMANDS: Record<string, Command> = {
   verify: {
     help: "verify a pack or the local state; exit 0 PASS, 1 FAIL, 2 unreadable input",
     usage:
-      "verify [pack.json] [--keys <file|url>] [--agent-keys <file|url>] [--head head.json] [--timestamp-check <url>] [--offline] [--trust-embedded-keys] [--trust-embedded-agent-keys] [--content <file|dir>] [--json]",
+      "verify [pack.json] [--keys <file|url>] [--agent-keys <file|url>] [--head head.json] [--timestamp-check <url>] [--offline] [--trust-embedded-keys] [--trust-embedded-agent-keys] [--content <file|dir>] [--fail-on-pending-send] [--json]\n" +
+      "  --head: the customer's .signafaide/head.json (their newest receipt per agent). It proves no record was cut from the end of the pack; the customer sends it with the pack.\n" +
+      "  without a pack: checks this machine's records; a BLOCKED chain always exits 1, and --fail-on-pending-send also fails while records wait to be co-signed (for CI)",
     options: {
       keys: { type: "string" },
       "trust-embedded-keys": { type: "boolean" },
@@ -99,6 +154,7 @@ export const COMMANDS: Record<string, Command> = {
       offline: { type: "boolean" },
       content: { type: "string" },
       json: { type: "boolean" },
+      "fail-on-pending-send": { type: "boolean" },
     },
     async run(v, pos) {
       const rec = recorder();
@@ -113,6 +169,7 @@ export const COMMANDS: Record<string, Command> = {
           timestampCheck: v["timestamp-check"] ?? v.bitcoin,
           offline: v.offline,
           content: v.content,
+          failOnPendingSend: v["fail-on-pending-send"],
         });
       } catch (e) {
         err(`signafaide: ${(e as Error).message}`);
@@ -127,8 +184,8 @@ export const COMMANDS: Record<string, Command> = {
 
   keys: {
     help: "export the agent public keys for auditors, or rotate an agent's key",
-    usage: "keys export [-o agent-keys.json] | keys rotate [--agent X]",
-    options: { output: { type: "string", short: "o" }, agent: { type: "string" } },
+    usage: "keys export [-o agent-keys.json] | keys rotate [--agent X] [--env test|live]",
+    options: { output: { type: "string", short: "o" }, agent: { type: "string" }, env: { type: "string" } },
     async run(v, pos) {
       const rec = recorder();
       if (pos[0] === "export" && pos.length === 1) {
@@ -139,12 +196,14 @@ export const COMMANDS: Record<string, Command> = {
         }
         const file = v.output ?? "agent-keys.json";
         fs.writeFileSync(file, JSON.stringify(doc, null, 2) + "\n");
-        out(`wrote ${file} (${plural(doc.keys.length, "key")}); give it to your auditors: signafaide verify pack.json --agent-keys ${file}`);
+        out(`wrote ${file} (${plural(doc.keys.length, "key")}); give it to your auditors with pack.json and head.json: signafaide verify pack.json --keys <witness>/.well-known/signafaide-keys.json --agent-keys ${file} --head head.json`);
         return 0;
       }
       if (pos[0] === "rotate" && pos.length === 1) {
         const agent = v.agent ?? rec.defaultAgent;
-        const [old, next] = rec.state.rotateKey(agent);
+        const env = v.env ?? envOf(rec.apiKey);
+        if (env && env !== "test" && env !== "live") throw new SyntaxError("--env must be test or live");
+        const [old, next] = rec.state.rotateKey(agent, env === "live" ? "live" : "");
         out(
           `${agent}: new key ${next.keyId} signs from now on. Records the old key ${old.keyId} signed earlier ship first; the next record then registers the new key, signed by the old one, and the service retires the old key at that moment`,
         );
@@ -267,6 +326,13 @@ export const COMMANDS: Record<string, Command> = {
       const dry = !!v["dry-run"];
       const root = v.dir ? path.resolve(v.dir) : findRoot();
       const results = setup({ root, agents: v.agent, dryRun: dry, url: v.url });
+      if (!dry && results.length) {
+        // Set-up time: the coding agent is remembered once here (telemetry), and the local state
+        // is kept out of git here, never at runtime.
+        const rec = configure({ quiet: true, via: "cli", root });
+        rec.rememberAgent();
+        rec.state.ignoreInGit();
+      }
       if (!results.length) {
         out(`no coding agent found for ${root}; name one with --agent ${AGENT_IDS.join("|")} (or --agent all)`);
         return 1;
@@ -282,10 +348,18 @@ export const COMMANDS: Record<string, Command> = {
   },
 
   mcp: {
-    help: "run the signafAIde MCP server over stdio (for coding agents)",
+    help: "run the signafAIde MCP server over stdio (the separate signafaide-mcp package; `agent setup` configures it)",
     async run() {
-      const { serve } = await import("./mcp.js");
-      await serve();
+      // A variable specifier: bundlers leave it alone, so the SDK never ships the MCP server.
+      const pkg = "signafaide-mcp";
+      let mod: { serve(): Promise<void> };
+      try {
+        mod = await import(pkg);
+      } catch {
+        err(`signafaide: the MCP server is a separate package: run \`npx -y signafaide-mcp@${VERSION}\` (\`signafaide agent setup\` writes that into your coding agent's configuration)`);
+        return 1;
+      }
+      await mod.serve();
       return 0;
     },
   },
@@ -305,6 +379,7 @@ export const COMMANDS: Record<string, Command> = {
         .filter(([, e]) => e.code === "too_old" || e.code === "chain_exists")
         .reduce((n, [c]) => n + rec.state.draftCount(c), 0);
       out(`shipped ${plural(r.shipped, "record")}, ${r.left - local} left in the outbox` + (local ? `; ${plural(local, "record")} kept on this machine only (see above)` : ""));
+      for (const b of rec.diagnose()) out(`BLOCKED ${b.chain}: ${plural(b.records, "record")} cannot ship as they are. Next: ${b.next}`);
       return Object.keys(r.errors).length ? 1 : 0;
     },
   },

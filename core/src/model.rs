@@ -538,6 +538,10 @@ pub struct Pack {
     pub format: String,
     pub generated: String,
     pub project: String,
+    /// The project's name, as the customer named it in the console (optional; signed in the
+    /// export statement when present, §7), so a verifier can show it next to the id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
     pub env: Env,
     pub service_keys: Vec<KeyEntry>,
     pub agent_keys: Vec<AgentKey>,
@@ -554,6 +558,8 @@ pub struct Pack {
 #[derive(Serialize, Clone, Debug)]
 pub struct ExportStatement<'a> {
     pub project: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<&'a str>,
     pub env: Env,
     pub generated: &'a str,
     pub filter: &'a PackFilter,
@@ -582,6 +588,7 @@ impl Pack {
             .collect::<Result<_>>()?;
         Ok(ExportStatement {
             project: &self.project,
+            project_name: self.project_name.as_deref(),
             env: self.env,
             generated: &self.generated,
             filter: &self.filter,
@@ -594,6 +601,11 @@ impl Pack {
     pub fn validate(&self) -> Result<()> {
         if !valid_project_id(&self.project) {
             bail!("project is not a valid project id");
+        }
+        if let Some(n) = &self.project_name {
+            if n.is_empty() || n.chars().count() > 200 || n.chars().any(char::is_control) {
+                bail!("project_name must be 1 to 200 characters, without control characters");
+            }
         }
         time::parse(&self.generated).map_err(|e| Error::new(format!("generated: {e}")))?;
         for k in &self.service_keys {

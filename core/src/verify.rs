@@ -35,6 +35,9 @@ pub enum Status {
     Pass,
     Fail,
     NotChecked,
+    /// Ran, found nothing wrong, and waits for something that has not happened yet: an anchor or
+    /// a public timestamp that is not confirmed yet (§7). Never counted as passed.
+    Pending,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -73,6 +76,9 @@ pub struct Report {
     /// what the pack covers.
     pub result_line: String,
     pub project: Option<String>,
+    /// The project's name from the signed export statement, when the pack has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
     pub env: Option<Env>,
     pub records: usize,
     /// When the service made the pack (the signed export statement).
@@ -102,7 +108,10 @@ impl Report {
     pub fn to_text(&self) -> String {
         let mut out = String::new();
         if let (Some(p), Some(e)) = (&self.project, self.env) {
-            out += &format!("signafAIde pack {p} ({}), {}\n", e.as_str(), plural(self.records as u64, "record", "records"));
+            match &self.project_name {
+                Some(n) => out += &format!("signafAIde pack of project {n} ({p}, {}), {}\n", e.as_str(), plural(self.records as u64, "record", "records")),
+                None => out += &format!("signafAIde pack {p} ({}), {}\n", e.as_str(), plural(self.records as u64, "record", "records")),
+            }
         }
         for w in &self.warnings {
             out += &format!("WARNING: {w}\n");
@@ -111,6 +120,7 @@ impl Report {
             let status = match (c.status, &c.value) {
                 (Status::Fail, _) => "FAIL".to_string(),
                 (Status::NotChecked, _) => "NOT CHECKED".to_string(),
+                (Status::Pending, _) => "PENDING".to_string(),
                 (Status::Pass, Some(v)) if v.starts_with("confirmed@") => "CONFIRMED".to_string(),
                 (Status::Pass, Some(v)) => v.to_uppercase(),
                 (Status::Pass, None) => "PASS".to_string(),
@@ -196,16 +206,20 @@ pub fn check_short_name(id: &str) -> &'static str {
     }
 }
 
-/// How many checks passed, failed and were not checked (§7 result line): `12 of 12 checks
-/// passed`, `10 of 12 checks passed, 2 not checked (public timestamp, content hashes)`, or
-/// `1 of 12 checks failed (record hashes), 9 passed, 2 not checked`.
+/// How many checks passed, failed, are pending and were not checked (§7 result line): `12 of 12
+/// checks passed`, `11 of 12 checks passed, 1 pending (public timestamp)`, `10 of 12 checks
+/// passed, 2 not checked (public timestamp, content hashes)`, or `1 of 12 checks failed (record
+/// hashes), 9 passed, 1 pending, 1 not checked`.
 pub fn counts_text(checks: &[(&str, Status)]) -> String {
     let total = checks.len();
     let names = |st: Status| checks.iter().filter(|c| c.1 == st).map(|c| check_short_name(c.0)).collect::<Vec<_>>();
-    let (failed, unchecked) = (names(Status::Fail), names(Status::NotChecked));
-    let passed = total - failed.len() - unchecked.len();
+    let (failed, pending, unchecked) = (names(Status::Fail), names(Status::Pending), names(Status::NotChecked));
+    let passed = total - failed.len() - pending.len() - unchecked.len();
     if failed.is_empty() {
         let mut out = format!("{passed} of {total} checks passed");
+        if !pending.is_empty() {
+            out += &format!(", {} pending ({})", pending.len(), pending.join(", "));
+        }
         if !unchecked.is_empty() {
             out += &format!(", {} not checked ({})", unchecked.len(), unchecked.join(", "));
         }
@@ -214,6 +228,9 @@ pub fn counts_text(checks: &[(&str, Status)]) -> String {
         let mut out = format!("{} of {total} checks failed ({})", failed.len(), failed.join(", "));
         if passed > 0 {
             out += &format!(", {passed} passed");
+        }
+        if !pending.is_empty() {
+            out += &format!(", {} pending", pending.len());
         }
         if !unchecked.is_empty() {
             out += &format!(", {} not checked", unchecked.len());
@@ -301,6 +318,7 @@ struct Acc {
     failures: Vec<Failure>,
     notes: Vec<String>,
     not_checked: bool,
+    pending: bool,
     value: Option<String>,
 }
 
@@ -821,14 +839,21 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         acc[9].notes.push(format!("{} not timestamped: older than the 2-hour anchor window, and no anchor in the pack covers them", plural(stale, "batch", "batches")));
     }
     if pack.anchors.is_empty() && stale == 0 {
-        acc[9].not_checked = true;
+        acc[9].pending = true;
         acc[9].notes.push("no anchors in the pack yet (an anchor is made every hour)".into());
     } else if young > 0 {
+        acc[9].pending = true;
         acc[9].notes.push(format!("{} not yet anchored", plural(young, "batch", "batches")));
     }
     let unchecked: Vec<(u64, &str)> = proofs.iter().filter_map(|o| if let Ots::Unchecked(h, why) = o { Some((*h, why.as_str())) } else { None }).collect();
     if proofs.is_empty() {
-        acc[10].not_checked = true;
+        // No proof yet because the batches wait for their anchor: pending, not unchecked.
+        if acc[9].pending && !acc[9].not_checked {
+            acc[10].pending = true;
+            acc[10].notes.push("waiting for the anchor".into());
+        } else {
+            acc[10].not_checked = true;
+        }
     } else if !unchecked.is_empty() {
         acc[10].not_checked = true;
         let blocks: Vec<String> = unchecked.iter().map(|(h, _)| h.to_string()).collect();
@@ -839,6 +864,7 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         acc[10].notes.push(format!("each public timestamp checked against its public record (block {h})"));
     } else {
         acc[10].value = Some("pending".into());
+        acc[10].pending = true;
         let waiting = proofs.iter().filter(|o| matches!(o, Ots::Pending)).count();
         acc[10].notes.push(format!("waiting for the public timestamp to confirm (usually within a few hours): {waiting} of {}", proofs.len()));
     }
@@ -874,6 +900,8 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
                 Status::Fail
             } else if a.not_checked {
                 Status::NotChecked
+            } else if a.pending {
+                Status::Pending
             } else {
                 Status::Pass
             };
@@ -891,6 +919,7 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
     Ok(Report {
         result,
         result_line: result_line(result, service_src, agent_src, opts.by_service, &counts, Some(&scope)),
+        project_name: pack.project_name.clone(),
         project: Some(pack.project),
         env: Some(pack.env),
         records: pack.records.len(),
@@ -1057,6 +1086,7 @@ fn malformed(why: String, independent: Independent) -> Report {
         result: "FAIL",
         result_line: format!("FAIL: {}", counts_text(&CHECKS.iter().enumerate().map(|(i, c)| (c.0, if i == 0 { Status::Fail } else { Status::NotChecked })).collect::<Vec<_>>())),
         project: None,
+        project_name: None,
         env: None,
         records: 0,
         generated: None,

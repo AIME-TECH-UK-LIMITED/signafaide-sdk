@@ -36,10 +36,13 @@ def _mask(key: Optional[str]) -> str:
     return f"{key[:13]}..." if key else "none"
 
 
-@command("init", "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link")
+@command("init", "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link. "
+         "The witness is https://api.signafaide.com unless SIGNAFAIDE_URL names another (a self-hosted witness, or http://127.0.0.1:7474 "
+         "for a local one); an existing key is read from SIGNAFAIDE_API_KEY. Adds .signafaide/ and .env to .gitignore")
 def cmd_init(a: argparse.Namespace) -> int:
     rec = _recorder()
     rec.remember_agent()
+    rec.state.ignore_in_git()
     had = rec.api_key
     key = rec.create_sandbox()
     sandbox = rec.state.sandbox() or {}
@@ -56,30 +59,83 @@ def cmd_init(a: argparse.Namespace) -> int:
     return 0
 
 
-@command("status", "key and env, agents, last receipt, outbox size, quota")
+@command("status", "key and env, agents, last receipt, outbox size, quota; BLOCKED chains (exit 1 when any)")
 def cmd_status(a: argparse.Namespace) -> int:
     rec = _recorder()
     s = rec.status()
-    print(f"key: {_mask(s['api_key'])}" + (f" (env {s['env']})" if s["env"] else
-          "; records stay on this machine (signed and chained, nothing is sent). `signafaide init` creates a free sandbox and sends hashes; or set SIGNAFAIDE_API_KEY"))
+    if s["test_mode"]:
+        print("test mode: records go to a temporary folder and nothing is sent (SIGNAFAIDE_TEST, or pytest); SIGNAFAIDE_TEST=0 turns it off")
+    if s["api_key_invalid"]:
+        print("key: SIGNAFAIDE_API_KEY is set but is not a signafAIde key (sfa_test_ or sfa_live_ and 32 letters or digits); nothing is sent until it is fixed")
+    else:
+        print(f"key: {_mask(s['api_key'])}" + (f" (env {s['env']})" if s["env"] else
+              "; records stay on this machine (signed and chained, nothing is sent). `signafaide init` creates a free sandbox and sends hashes; or set SIGNAFAIDE_API_KEY"))
     print(f"service: {s['url']}")
     print(f"home: {s['home']}")
     if not s["chains"]:
         print("chains: none yet; decorate a function with @signafaide.record")
+    blocked = []
     for c in s["chains"]:
         last = f"last receipt seq {c['receipt_seq']} at {c['receipt_time']}" if c["receipt_seq"] else "no receipt yet"
         other = "" if c["current"] or not c["waiting"] else f"; {c['waiting']} waiting for the key of that project"
-        print(f"chain {c['chain']}: key {c['key_id']}, {plural(c['records'], 'record')}, {last}{other}")
-    print(f"outbox: {plural(s['outbox'], 'record')} waiting" + ("; run `signafaide flush`" if s["outbox"] else ""))
+        print(f"chain {c['chain']}: key {c['key_id']}, {plural(c['records'], 'record')}, {last}{other}" + ("; BLOCKED" if c["blocked"] else ""))
+        if c["blocked"]:
+            b = c["blocked"]
+            blocked.append(f"BLOCKED {c['chain']}: {b['reason']}; {plural(b['records'], 'record')} cannot ship. Next: {b['next']}")
+    if any(c["agent"] == rec.default_agent for c in s["chains"]):
+        print(f'note: agent "{rec.default_agent}" is named after the project folder; give agents explicit names in production '
+              '(@signafaide.record(agent="claims-bot"))')
+    for h in s["held"]:
+        print(f"held: {h['chain']}: {plural(h['records'], 'record')} set aside by `signafaide repair` in {h['file']} (kept, verifiable locally, not co-signed)")
+    print(f"outbox: {plural(s['outbox'], 'record')} waiting" + ("; run `signafaide flush`" if s["outbox"] and not blocked else ""))
+    for line in blocked:
+        print(line)
+    sandbox = s["sandbox"] or {}
+    claimed = bool(sandbox.get("claimed"))
     if s["api_key"]:
         try:
             u = rec.client(timeout=5).usage()
             print(f"quota: {u.get('used')} of {u.get('quota')} used in {u.get('period')}")
         except SignafaideError as e:
             print(f"quota: unknown ({e})")
-    claim = (s["sandbox"] or {}).get("claim_url")
+        if not claimed and s["api_key"].startswith("sfa_test_") and sandbox.get("claim_url"):
+            try:
+                claimed = (rec.client(timeout=5).project() or {}).get("claimed") is True
+                if claimed:
+                    rec.state.save_sandbox({**sandbox, "claimed": True})
+            except SignafaideError:
+                pass
+    claim = sandbox.get("claim_url")
     if claim and (s["api_key"] or "").startswith("sfa_test_"):
-        print(f"claim: {claim}")
+        print("claim: done (this sandbox belongs to an organisation now)" if claimed else f"claim: {claim}")
+    return 1 if blocked else 0
+
+
+def _repair_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--agent", help="only this agent (default: every blocked chain)")
+    p.add_argument("--dry-run", action="store_true", help="say what would be done, change nothing")
+
+
+@command("repair", "set aside records the witness can never take (clock went back, revoked key, clock ahead), rotate the agent's key and "
+         "start a new segment; history is kept and verifiable", _repair_args)
+def cmd_repair(a: argparse.Namespace) -> int:
+    rec = _recorder()
+    done = rec.repair(agent=a.agent, dry_run=a.dry_run)
+    if not done:
+        print(f"nothing to repair{f' for agent {a.agent}' if a.agent else ''}: every chain can ship (`signafaide status` shows them)")
+        return 0
+    for r in done:
+        b = r["blocked"]
+        print(f"{r['chain']}: {b['reason']}")
+        if a.dry_run:
+            print(f"  would set aside seq {b['seq']} onwards ({plural(b['records'], 'record')}), give the agent a new key and write a signafaide.repair note")
+            continue
+        print(f"  set aside {plural(r['records'], 'record')} in {r['held']} (kept; `signafaide verify` still checks their signatures and content hashes)")
+        print(f"  new key {r['new_key']} signs from now on; the old key is retired on the witness at the next send" if r["new_key"]
+              else "  the key comes from a secret store: rotate it there if it was revoked")
+        print(f"  note {r['note'][:12]} (signafaide.repair) commits to the held records' hashes and ships with the next send")
+    if not a.dry_run:
+        print("next: `signafaide flush` sends the new segment, then `signafaide keys export` for your auditors (it lists the old and new keys)")
     return 0
 
 
@@ -89,10 +145,13 @@ def _verify_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--trust-embedded-keys", action="store_true", help="use the service keys inside the pack")
     p.add_argument("--agent-keys", help="the customer's agent keys from `signafaide keys export` (default: this project's own keys)")
     p.add_argument("--trust-embedded-agent-keys", action="store_true", help="use the agent keys inside the pack (not independent)")
-    p.add_argument("--head", help="the client's .signafaide/head.json: fails if the pack ends before it (default: this project's own)")
+    p.add_argument("--head", help="the customer's .signafaide/head.json (their newest receipt per agent, sent with the pack): proves no record was "
+                   "cut from the end of the pack (default: this project's own)")
     p.add_argument("--timestamp-check", "--bitcoin", dest="timestamp_check", default=None, help="explorer API that confirms public timestamps (default https://mempool.space/api)")
     p.add_argument("--offline", action="store_true", help="do not look up public timestamps (they show NOT CHECKED)")
     p.add_argument("--content", help="chain .jsonl file or folder with the content (default: local .signafaide/chain)")
+    p.add_argument("--fail-on-pending-send", action="store_true",
+                   help="local state: also fail while records wait to be co-signed (for CI); a BLOCKED chain always fails")
     p.add_argument("--json", action="store_true", help="machine-readable output")
 
 
@@ -102,7 +161,8 @@ def cmd_verify(a: argparse.Namespace) -> int:
     try:
         kw = {"timestamp_check": a.timestamp_check} if a.timestamp_check else {}
         report = run_verify(a.pack, keys=a.keys, trust_embedded_keys=a.trust_embedded_keys, agent_keys=a.agent_keys,
-                            trust_embedded_agent_keys=a.trust_embedded_agent_keys, head=a.head, offline=a.offline, content=a.content, **kw)
+                            trust_embedded_agent_keys=a.trust_embedded_agent_keys, head=a.head, offline=a.offline, content=a.content,
+                            fail_on_pending_send=a.fail_on_pending_send, **kw)
     except (KeysRequired, SignafaideError, StateError, OSError, ValueError) as e:
         print(f"signafaide: {e}", file=sys.stderr)
         rec.event("verify")
@@ -115,6 +175,7 @@ def cmd_verify(a: argparse.Namespace) -> int:
 def _keys_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("action", choices=["export", "rotate"], help="export: write the agent-key manifest for auditors; rotate: give an agent a new key")
     p.add_argument("--agent", help="rotate: the agent (default: this project's folder name)")
+    p.add_argument("--env", choices=["test", "live"], help="rotate: the key of this env (default: the API key's env)")
     p.add_argument("-o", "--output", help="export: output file (default agent-keys.json)")
 
 
@@ -128,10 +189,12 @@ def cmd_keys(a: argparse.Namespace) -> int:
             return 1
         out = Path(a.output or "agent-keys.json")
         out.write_text(json.dumps(doc, indent=2) + "\n")
-        print(f"wrote {out} ({plural(len(doc['keys']), 'key')}); give it to your auditors: signafaide verify pack.json --agent-keys {out}")
+        print(f"wrote {out} ({plural(len(doc['keys']), 'key')}); give it to your auditors with pack.json and head.json: "
+              f"signafaide verify pack.json --keys <witness>/.well-known/signafaide-keys.json --agent-keys {out} --head head.json")
         return 0
     agent = a.agent or rec.default_agent
-    old, new = rec.state.rotate_key(agent)
+    env = a.env or runtime._env_of(rec.api_key)
+    old, new = rec.state.rotate_key(agent, "live" if env == "live" else "")
     print(f"{agent}: new key {new.key_id} signs from now on. Records the old key {old.key_id} signed earlier ship first; the next record then "
           "registers the new key, signed by the old one, and the service retires the old key at that moment")
     return 0
@@ -274,6 +337,8 @@ def cmd_flush(a: argparse.Namespace) -> int:
     local = sum(rec.state.draft_count(c) for c, e in r["errors"].items() if e.code in ("too_old", "chain_exists"))
     print(f"shipped {plural(r['shipped'], 'record')}, {r['left'] - local} left in the outbox"
           + (f"; {plural(local, 'record')} kept on this machine only (see above)" if local else ""))
+    for b in rec.diagnose():
+        print(f"BLOCKED {b['chain']}: {plural(b['records'], 'record')} cannot ship as they are. Next: {b['next']}")
     return 1 if r["errors"] else 0
 
 

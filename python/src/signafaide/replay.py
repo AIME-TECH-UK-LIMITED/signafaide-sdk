@@ -86,6 +86,7 @@ class Entry:
     hash: str
     problems: List[str] = field(default_factory=list)
     pair: Optional["Entry"] = None  # the outcome of a decision, or the decision of an outcome
+    blocked: Optional[str] = None  # why the witness can never take this record (the chain is BLOCKED from here)
 
     @property
     def envelope(self) -> dict:
@@ -102,10 +103,11 @@ class Entry:
 
     @property
     def status(self) -> str:
-        """``verified``, ``signed`` (not co-signed by the service yet) or ``FAIL``."""
+        """``verified``, ``signed`` (not co-signed by the service yet), ``BLOCKED`` (can never be
+        co-signed as it is) or ``FAIL``."""
         if self.problems:
             return "FAIL"
-        return "verified" if self.receipt else "signed"
+        return "verified" if self.receipt else "BLOCKED" if self.blocked else "signed"
 
     def to_dict(self) -> dict:
         e, rc = self.envelope, self.receipt or {}
@@ -115,6 +117,7 @@ class Entry:
             "ref": e["ref"], "content_hash": e["content_hash"], "content": self.content, "status": self.status,
             "problems": self.problems, "batch_seq": b.get("seq"), "server_time": b.get("server_time"),
             "drand_round": (b.get("drand") or {}).get("round"), "pair": self.pair.hash if self.pair else None,
+            **({"blocked": self.blocked} if self.blocked else {}),
         }
 
 
@@ -127,15 +130,23 @@ class Replay:
     since: Optional[str] = None
     until: Optional[str] = None
     total: int = 0
+    #: Why the chain cannot ship from some record on (`signafaide repair` fixes it), or None.
+    blocked: Optional[dict] = None
 
     @property
     def ok(self) -> bool:
-        return self.report.ok
+        return self.report.ok and not self.blocked
+
+    @property
+    def result(self) -> str:
+        """PASS, FAIL or BLOCKED (a chain the witness refuses never passes)."""
+        return "BLOCKED" if self.report.result == "PASS" and self.blocked else self.report.result
 
     def to_dict(self) -> dict:
         return {
             "agent": self.agent, "chain": self.chain, "since": self.since, "until": self.until, "total": self.total,
-            "shown": len(self.entries), "verification": self.report.to_dict(), "entries": [e.to_dict() for e in self.entries],
+            "shown": len(self.entries), "result": self.result, **({"blocked": self.blocked} if self.blocked else {}),
+            "verification": self.report.to_dict(), "entries": [e.to_dict() for e in self.entries],
         }
 
     def __str__(self) -> str:
@@ -144,7 +155,9 @@ class Replay:
     def lines(self) -> List[str]:
         window = f"{self.since or 'start'} to {self.until or 'now'}"
         out = [f"signafAIde replay: {self.agent}  ({self.chain})", f"window: {window}; {len(self.entries)} of {plural(self.total, 'record')} shown"]
-        out.append(f"verification: {self.report.result}" + ("" if self.ok else f" (first failed check: {self.report.first_failed()})"))
+        out.append(f"verification: {self.report.result_line}" + ("" if self.report.ok else f" (first failed check: {self.report.first_failed()})"))
+        if self.blocked:
+            out.append(f"BLOCKED from seq {self.blocked['seq']}: {self.blocked['reason']}. Next: {self.blocked['next']}")
         out += [f"  {n}" for n in self.report.notes]
         out.append("")
         for e in self.entries:
@@ -153,7 +166,8 @@ class Replay:
             if e.pair is not None:
                 link = f"  -> outcome #{e.pair.envelope['seq']}" if env["kind"] == "decision" else f"  <- decision #{e.pair.envelope['seq']}"
             rc = e.receipt
-            where = f"batch {rc['batch']['seq']}" + (f", drand {rc['batch']['drand']['round']}" if rc["batch"].get("drand") else "") if rc else "not co-signed yet"
+            where = (f"batch {rc['batch']['seq']}" + (f", drand {rc['batch']['drand']['round']}" if rc["batch"].get("drand") else "") if rc
+                     else "the witness cannot take it" if e.blocked else "not co-signed yet")
             out.append(f"#{env['seq']:<5} {env['time']}  {env['kind']:<8} {env['name']}{link}")
             out.append(f"       {e.hash[:16]}  {e.status.upper()} ({where})")
             for p in e.problems:
@@ -167,7 +181,16 @@ class Replay:
                 out.append("       (no local content for this record)")
             out.append("")
         failed = sum(1 for e in self.entries if e.problems)
-        out.append(f"{self.report.result}: {plural(len(self.entries), 'record')} shown, " + (f"{failed} failed" if failed else "every one checked against its content_hash and receipt"))
+        signed = sum(1 for e in self.entries if not e.receipt and not e.problems)
+        blocked_n = sum(1 for e in self.entries if e.status == "BLOCKED")
+        if failed:
+            what = f"{failed} failed"
+        elif signed:
+            what = (f"each checked against its content_hash and signature; {signed} not co-signed yet"
+                    + (f" ({blocked_n} BLOCKED)" if blocked_n else "") + ", so their receipts could not be checked")
+        else:
+            what = "each checked against its content_hash, its signature and its receipt"
+        out.append(f"{self.result}: {plural(len(self.entries), 'record')} shown, {what}")
         return out
 
     def to_html(self) -> str:
@@ -179,14 +202,14 @@ class Replay:
             link = ""
             if e.pair is not None:
                 link = f'<span class="muted">{"outcome" if env["kind"] == "decision" else "decision"} <a href="#r{e.pair.envelope["seq"]}">#{e.pair.envelope["seq"]}</a></span>'
-            cls = {"verified": "ok", "signed": "warn", "FAIL": "bad"}[e.status]
+            cls = {"verified": "ok", "signed": "warn", "BLOCKED": "bad", "FAIL": "bad"}[e.status]
             body = "".join(
                 f'<div class="kv"><span>{esc(k)}</span><pre>{esc(json.dumps(v, ensure_ascii=False, indent=2))}</pre></div>' for k, v in (e.content or {}).items()
             ) or '<p class="muted">No local content for this record.</p>'
             probs = "".join(f'<li>{esc(p)}</li>' for p in e.problems)
             receipt = (
                 f'batch {rc["batch"]["seq"]} · {esc(rc["batch"]["server_time"])}' + (f' · drand {rc["batch"]["drand"]["round"]}' if rc["batch"].get("drand") else "")
-                if rc else "not co-signed by the service yet"
+                if rc else f"BLOCKED: {esc(e.blocked)}" if e.blocked else "not co-signed by the service yet"
             )
             rows.append(
                 f'<article id="r{env["seq"]}" class="{esc(env["kind"])}"><header><span class="seq">#{env["seq"]}</span>'
@@ -203,7 +226,8 @@ class Replay:
 <title>Replay: {esc(self.agent)}</title><style>{_CSS}</style></head><body><main>
 <p class="muted small">signafAIde replay</p><h1>{esc(self.agent)}</h1>
 <p class="muted">{esc(self.chain)} · {esc(self.since or "start")} to {esc(self.until or "now")} · {len(self.entries)} of {plural(self.total, 'record')}</p>
-<p class="result">Verification: <span class="st {"ok" if self.ok else "bad"}">{self.report.result}</span></p>
+<p class="result">Verification: <span class="st {"ok" if self.ok else "bad"}">{self.result}</span> <span class="muted small">{esc(self.report.result_line)}</span></p>
+{f'<p class="probs">BLOCKED from seq {self.blocked["seq"]}: {esc(self.blocked["reason"])}. Next: {esc(self.blocked["next"])}</p>' if self.blocked else ""}
 <details><summary>Checks</summary><ul class="small muted">{notes}</ul><table>{checks}</table></details>
 {"".join(rows)}
 <footer>Each record was checked against its content_hash, its signature and the service's receipt. Generated by signafAIde from the local chain.</footer>
@@ -268,6 +292,11 @@ def replay(
         if len(hit) != 1:
             raise ValueError(f"{'no' if not hit else len(hit)} records match {record} in {chain}")
         entries = sorted({id(x): x for x in [hit[0], hit[0].pair] if x}.values(), key=lambda x: x.envelope["seq"])
+    b = next((x for x in rec.diagnose() if x["chain"] == chain), None)
+    if b:
+        for e in entries:
+            if not e.receipt and e.envelope["seq"] >= b["seq"]:
+                e.blocked = b["reason"]
     entries = [e for e in entries if (lo is None or e.envelope["time"] >= lo) and (hi is None or e.envelope["time"] < hi)]
-    return Replay(agent, chain, entries, report, lo, hi, total)
+    return Replay(agent, chain, entries, report, lo, hi, total, {"seq": b["seq"], "reason": b["reason"], "next": b["next"]} if b else None)
 

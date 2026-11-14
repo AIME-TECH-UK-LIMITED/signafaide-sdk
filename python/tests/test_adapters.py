@@ -60,7 +60,9 @@ def test_langchain_tool_decorator(recorder, lc_tools):
     recs = records(recorder)
     assert [r["envelope"]["kind"] for r in recs] == ["decision", "outcome"] * 3
     assert [r["content"]["input"] for r in recs[::2]] == [{"city": "Paris"}, {"city": "Rome"}, {"city": "Oslo"}]
-    assert recs[3]["content"]["output"]["content"] == "sunny in Rome"
+    # The outcome holds the tool's own return value, not the ToolMessage LangChain wraps it in.
+    assert recs[3]["content"]["output"] == "sunny in Rome"
+    assert recs[1]["content"]["output"] == "sunny in Paris" and recs[5]["content"]["output"] == "sunny in Oslo"
 
 
 def test_langchain_tool_still_converts_for_models(recorder, lc_tools):

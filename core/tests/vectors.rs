@@ -232,10 +232,21 @@ fn valid_pack_passes() {
 }
 
 #[test]
+fn time_clamp_vectors() {
+    let v = vectors();
+    let cases = v["time_clamp"].as_array().unwrap();
+    assert_eq!(cases.len(), 5);
+    for c in cases {
+        let (t, raised) = signafaide_core::time::clamp(c["wall"].as_str().unwrap(), c["prev"].as_str(), c["valid_from"].as_str()).unwrap();
+        assert_eq!((t.as_str(), raised), (c["time"].as_str().unwrap(), c["raised"].as_bool().unwrap()), "{}", c["name"]);
+    }
+}
+
+#[test]
 fn every_tampered_pack_fails_at_its_check() {
     let v = vectors();
     let tampered = v["tampered"].as_array().unwrap();
-    assert_eq!(tampered.len(), 48, "one tampered pack per rule");
+    assert_eq!(tampered.len(), 49, "one tampered pack per rule");
     for id in v["check_ids"].as_array().unwrap() {
         assert!(tampered.iter().any(|t| t["check"] == *id), "no tampered pack for {id}");
     }
@@ -267,7 +278,7 @@ fn keys_are_required_and_embedded_keys_warn() {
     o.trust_embedded_keys = true;
     let r = verify_pack(pack, &o).unwrap();
     assert!(r.passed() && r.warnings.len() == 1);
-    let scope = ": 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z";
+    let scope = ": 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z";
     assert_eq!(r.result_line(), format!("PASS (service keys taken from the pack, not independent){scope}"));
     // Without independent agent keys check 3 fails, unless they are trusted explicitly.
     let r = verify_pack(pack, &Options { trust_embedded_keys: true, ..Default::default() }).unwrap();

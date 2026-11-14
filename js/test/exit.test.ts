@@ -51,6 +51,30 @@ describe.skipIf(!fs.existsSync(path.join(dist, "index.js")))("process exit (buil
     expect((await rec.flush()).shipped).toBe(2);
   });
 
+  it("a witness that never answers holds a finished program at most the exit limit", async () => {
+    const rec = new Recorder({ quiet: true, url: ctx.service.url });
+    await rec.createSandbox();
+    await rec.resolveProject(rec.apiKey!);
+    const conns: import("node:net").Socket[] = [];
+    const net = await import("node:net");
+    const hole = net.createServer((s) => conns.push(s));
+    await new Promise<void>((res) => hole.listen(0, "127.0.0.1", res));
+    try {
+      const t0 = Date.now();
+      const p = await run(`import { record } from ${JSON.stringify(path.join(dist, "index.js"))};\nrecord(() => 1, { name: "x" })();\n`, {
+        SIGNAFAIDE_URL: `http://127.0.0.1:${(hole.address() as import("node:net").AddressInfo).port}`,
+        SIGNAFAIDE_EXIT_FLUSH_MS: "800",
+      });
+      const took = Date.now() - t0;
+      expect(p.status, p.stderr).toBe(0);
+      expect(took).toBeLessThan(800 + 1500); // the old SDK took 103 s here
+      expect(p.stderr).toContain("2 records kept");
+    } finally {
+      for (const c of conns) c.destroy();
+      hole.close();
+    }
+  });
+
   it("works from CommonJS", () => {
     const file = path.join(ctx.root, "agent.cjs");
     fs.writeFileSync(file, `const s = require(${JSON.stringify(path.join(dist, "index.cjs"))});\nconsole.log(typeof s.record, typeof s.wrapTools, s.hashJson({b:1,a:2}));\n`);

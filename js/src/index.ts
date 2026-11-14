@@ -10,10 +10,14 @@
  * then the records ship in the background. Only hashes leave the machine unless `storeContent`.
  */
 
+import { installNodeCrypto } from "./nodecrypto.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { configure, getRecorder, type FlushResult, type Recorder, type RecorderOptions } from "./runtime.js";
 import { parseJson } from "./jcs.js";
+import { checkContent, verifySig } from "./crypto.js";
+import { plural } from "./plural.js";
+import { recordHash, type SignedRecord } from "./records.js";
 import { DEFAULT_TIMESTAMP_URL, lookupTimestamps } from "./timestamps.js";
 import {
   DRAND_NOT_CHECKED,
@@ -33,8 +37,10 @@ import {
 } from "./verifier.js";
 
 export * from "./core.js";
+
+installNodeCrypto();
 export { NotRecorded, note, record, toJsonable, wrapTool, wrapTools, type RecordOptions, type WrapOptions } from "./record.js";
-export { Recorder, configure, getRecorder, type FlushResult, type RecorderOptions } from "./runtime.js";
+export { Recorder, configure, getRecorder, recordingDisabled, testMode, type Blocked, type FlushResult, type RecorderOptions } from "./runtime.js";
 export { State, StateError } from "./state.js";
 export { Entry, Replay, loadServiceKeys, replay, type ReplayOptions } from "./replay.js";
 export { ExperimentReport, VerificationFailed, compare, recordedValue, type CompareOptions, type ExperimentRow } from "./experiments.js";
@@ -48,14 +54,15 @@ export { DEFAULT_TIMESTAMP_URL, blockHeader, checkHeader, lookupTimestamps, root
  */
 export async function init(opts: RecorderOptions = {}): Promise<Recorder> {
   const rec = configure(opts);
-  rec.rememberAgent();
   const key = rec.apiKey;
   if (!key) return rec;
   try {
     await rec.resolveProject(key);
   } catch (e) {
-    if ((e as { code?: string }).code !== "network") throw e;
-    if (!opts.quiet) console.error(`signafaide: ${(e as Error).message} Records are kept locally until then.`);
+    // A wrong key or an unreachable witness is a warning, never an exception in the caller's
+    // program (records are kept locally until it is fixed).
+    if (!(e instanceof Error)) throw e;
+    if (!opts.quiet) console.error(`signafaide: ${e.message} Records are kept locally until then.`);
   }
   return rec;
 }
@@ -86,6 +93,37 @@ export interface VerifyOptions {
   offline?: boolean;
   /** Content to check: a chain .jsonl file or a folder of them. Default: the local `.signafaide/chain`. */
   content?: string;
+  /** Local state: fail (exit 1) when any record has not been co-signed yet, for CI. A BLOCKED
+   * chain always fails. */
+  failOnPendingSend?: boolean;
+}
+
+/** Records `signafaide repair` set aside: their signatures (with the key that signed them),
+ * chain links and content hashes still check; they are not co-signed. Failures name the check. */
+export function checkHeld(rec: Recorder): { records: number; segments: number; failures: { check: "record_sig" | "chain" | "content"; item: string; message: string }[] } {
+  const keys = new Map(rec.state.agentPublicKeys().map((k) => [k.key_id, k]));
+  const failures: { check: "record_sig" | "chain" | "content"; item: string; message: string }[] = [];
+  let records = 0;
+  const segs = rec.state.heldSegments();
+  for (const [chain, file, recs] of segs) {
+    let prev: SignedRecord | null = null;
+    for (const r of recs) {
+      records++;
+      const item = `${chain}#${r.envelope.seq} (held, ${path.basename(file)})`;
+      const k = keys.get(r.key_id);
+      if (!k) failures.push({ check: "record_sig", item, message: `no key ${r.key_id} for agent ${r.envelope.agent} on this machine` });
+      else if (!verifySig(k.public_key, r.draft ? "draft" : "record", recordHash(r), r.sig)) failures.push({ check: "record_sig", item, message: "signature does not verify" });
+      if (prev && (r.envelope.seq !== prev.envelope.seq + 1 || r.envelope.prev !== recordHash(prev))) failures.push({ check: "chain", item, message: "does not follow the held record before it" });
+      try {
+        const h = checkContent(r.content, r.salt, r.envelope.content_hash);
+        if (h) failures.push({ check: "content", item, message: `content hashes to ${h}, envelope says ${r.envelope.content_hash}` });
+      } catch (e) {
+        failures.push({ check: "content", item, message: (e as Error).message });
+      }
+      prev = r;
+    }
+  }
+  return { records, segments: segs.length, failures };
 }
 
 async function readInput(src: string | object, flag: string): Promise<unknown> {
@@ -176,7 +214,19 @@ export async function verify(pack?: string | object | null, opts: VerifyOptions 
     }
     report = verifyLocalState({ records, chainIds, agentKeys, heads: st.chainHeads() }, keys ?? [], drand, keysPlain);
     notes.unshift(`local state: ${st.home}`);
-    report.after.push(...notYet(records.filter((r) => !r.receipt).length, records.length, !!rec.apiKey));
+    const unsent = records.filter((r) => !r.receipt).length;
+    report.after.push(...notYet(unsent, records.length, !!rec.apiKey));
+    const held = checkHeld(rec);
+    if (held.segments) {
+      for (const f of held.failures) {
+        const c = report.check(f.check);
+        c.failures.push({ item: f.item, message: f.message });
+        c.status = "fail";
+      }
+      report.after.push(`held aside by \`signafaide repair\`: ${plural(held.records, "record")} in ${plural(held.segments, "segment")} (signatures, links and content hashes checked here; not co-signed)`);
+    }
+    for (const b of rec.diagnose()) report.blocked.push(`${b.chain}: ${b.reason}; ${plural(b.records, "record")} cannot ship. Next: ${b.next}`);
+    if (opts.failOnPendingSend) report.notSent = unsent;
   } else {
     const p = typeof pack === "string" ? parseJson(fs.readFileSync(pack, "utf8")) : pack;
     const chainDir = path.join(rec.state.home, "chain");

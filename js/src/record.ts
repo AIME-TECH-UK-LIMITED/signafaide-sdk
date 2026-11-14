@@ -3,14 +3,15 @@
 import { canonicalize, isUnsafeInteger } from "./jcs.js";
 import { SignafaideError } from "./http.js";
 import { recordHash, type SignedRecord } from "./records.js";
-import { getRecorder, type Recorder } from "./runtime.js";
+import { getRecorder, recordingDisabled, type Recorder } from "./runtime.js";
 import { ADAPTERS } from "./telemetry.js";
 import { VERSION } from "./version.js";
 
 export interface RecordOptions {
   /** Action or tool name. Defaults to the function's name. */
   name?: string;
-  /** Agent chain name. Defaults to the project folder name. */
+  /** Agent chain name. Defaults to the project folder name; give one explicitly in production
+   * (one name per running instance, see the production guide). */
   agent?: string;
   /** Wait for the decision's receipt before running; refuse to run without one. */
   strict?: boolean;
@@ -52,6 +53,7 @@ class Spec {
   }
 
   private async strictCheck(rec: Recorder, d: SignedRecord): Promise<void> {
+    if (rec.test) return; // test mode never sends, so there is no receipt to wait for
     try {
       await rec.ensureReceipt(d);
     } catch (e) {
@@ -62,6 +64,7 @@ class Spec {
 
   /** Run `fn` between a decision and an outcome. Sync stays sync unless strict. */
   call(input: unknown, fn: () => unknown): unknown {
+    if (recordingDisabled()) return this.opts.strict ? Promise.resolve().then(fn) : fn();
     const [rec, d] = this.decide(input);
     if (this.opts.strict) return this.strictCheck(rec, d).then(() => this.run(rec, d, fn));
     return this.run(rec, d, fn);
@@ -111,6 +114,7 @@ export function record<F extends AnyFn>(fn: F, opts: RecordOptions = {}): AnyFn 
 
 /** Write a `note` record (anything worth keeping that is not a tool call). Returns its hash. */
 export function note(name: string, content: Record<string, unknown>, opts: { agent?: string; storeContent?: boolean } = {}): string {
+  if (recordingDisabled()) return "";
   return recordHash(getRecorder().write("note", name, toJsonable(content) as Record<string, unknown>, opts));
 }
 

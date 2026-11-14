@@ -34,7 +34,7 @@ describe("replay", () => {
     expect(d.pair).toBe(o);
     const text = String(r);
     expect(text).toContain("approve_payout  -> outcome #2");
-    expect(text.endsWith("every one checked against its content_hash and receipt")).toBe(true);
+    expect(text.endsWith("each checked against its content_hash, its signature and its receipt")).toBe(true);
     const page = r.toHtml();
     expect(page).not.toMatch(/<script|<link|src=/);
     expect(page).toContain("c-9");

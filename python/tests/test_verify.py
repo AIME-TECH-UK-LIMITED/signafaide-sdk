@@ -66,7 +66,11 @@ def test_clean_pack_passes(pack, keys):
     assert r.ok, str(r)
     s = statuses(r)
     assert [s[i] for i in ("schema", "record_hash", "record_sig", "chain", "merkle", "batch_sig", "batch_chain", "head_sig")] == ["pass"] * 8
-    assert s["drand"] == s["anchor"] == s["ots"] == s["content"] == "not_checked"
+    assert s["drand"] == s["content"] == "not_checked"
+    # A fresh pack: its batches wait for the hourly anchor, so anchors and the public timestamp
+    # are pending, never counted as passed.
+    assert s["anchor"] == s["ots"] == "pending"
+    assert ": 8 of 12 checks passed, 2 pending (anchors, public timestamp), 2 not checked (drand rounds, content hashes);" in r.result_line
     lines = str(r).splitlines()
     assert lines[0].startswith("signafAIde pack prj_") and no_counts(lines[-1]).startswith("PASS" + SCOPE) and len(lines) == 14
     assert lines[-1].endswith(pack["generated"])

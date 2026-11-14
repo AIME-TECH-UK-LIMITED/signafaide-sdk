@@ -68,7 +68,11 @@ describe("pack verifier", () => {
     expect(r.ok).toBe(true);
     const s = Object.fromEntries(r.checks.map((c) => [c.id, c.status]));
     for (const id of ["schema", "record_hash", "record_sig", "chain", "merkle", "batch_sig", "batch_chain", "head_sig"]) expect(s[id]).toBe("pass");
-    for (const id of ["drand", "anchor", "ots", "content"]) expect(s[id]).toBe("not_checked");
+    for (const id of ["drand", "content"]) expect(s[id]).toBe("not_checked");
+    // A fresh pack: its batches wait for the hourly anchor, so anchors and the public timestamp
+    // are pending, never counted as passed.
+    for (const id of ["anchor", "ots"]) expect(s[id]).toBe("pending");
+    expect(r.resultLine).toMatch(/: 8 of 12 checks passed, 2 pending \(anchors, public timestamp\), 2 not checked \(drand rounds, content hashes\);/);
     const lines = String(r).split("\n");
     expect(lines[0]).toMatch(/^signafAIde pack prj_\w+ \(test\), 5 records$/);
     expect(lines[1]).toMatch(/^ 1\. Envelope schema +PASS +5 records$/);

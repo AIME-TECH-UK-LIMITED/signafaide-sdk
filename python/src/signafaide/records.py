@@ -34,6 +34,28 @@ def now() -> str:
     return t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{t.microsecond // 1000:03d}Z"
 
 
+def clamp_time(wall: str, prev: Optional[str] = None, valid_from: Optional[str] = None) -> "tuple[str, bool]":
+    """§2.2 monotonic time: the machine's clock (*wall*), raised to the previous record's time in
+    the chain and to the signing key's valid_from when it reads earlier (an NTP step back, a VM
+    resumed). Returns (time, raised). When raised, the SDK keeps *wall* in the content's
+    ``meta.wall_time``. A chain written this way never goes back in time."""
+    t = wall
+    for f in (prev, valid_from):
+        if f and _valid_time(f) and f > t:  # protocol times sort as text
+            t = f
+    return t, t != wall
+
+
+def with_wall_time(content: dict, wall: str) -> dict:
+    """*content* with the clock's own reading kept in ``meta.wall_time`` (when the record's time was raised)."""
+    meta = content.get("meta")
+    if meta is None:
+        return {**content, "meta": {"wall_time": wall}}
+    if isinstance(meta, dict):
+        return {**content, "meta": {**meta, "wall_time": wall}}
+    return {**content, "wall_time": wall}
+
+
 def parse_time(s: str) -> datetime:
     if not isinstance(s, str) or not TIME_RE.match(s):
         raise ValueError(f"time {s!r} is not RFC 3339 UTC with milliseconds")
@@ -257,10 +279,10 @@ def draft_errors(rec: Any) -> list:
     return errs
 
 
-def sign_draft(key: SigningKey, draft: dict, *, project: str, env: str, prev: Optional[str], ref: Optional[str]) -> dict:
+def sign_draft(key: SigningKey, draft: dict, *, project: str, env: str, prev: Optional[str], ref: Optional[str], seq: Optional[int] = None) -> dict:
     """The signed record for a draft once its project is known (§8)."""
     d = draft["envelope"]
-    return make_record(key, kind=d["kind"], project=project, env=env, agent=d["agent"], seq=d["seq"], prev=prev, name=d["name"],
+    return make_record(key, kind=d["kind"], project=project, env=env, agent=d["agent"], seq=d["seq"] if seq is None else seq, prev=prev, name=d["name"],
                        content=draft["content"], ref=ref, time=d["time"], salt=draft.get("salt"))
 
 

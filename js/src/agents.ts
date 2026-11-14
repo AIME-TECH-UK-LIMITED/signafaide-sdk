@@ -22,8 +22,10 @@ import { VERSION } from "./version.js";
 
 export const SERVER = "signafaide";
 export const COMMAND = "npx";
-/** Pinned to this SDK's version, so a coding agent never runs whatever `latest` is today. */
-export const ARGS = ["-y", `signafaide@${VERSION}`, "mcp"];
+/** The MCP server is its own package (`signafaide-mcp`), so the SDK's install stays small.
+ * Pinned to this SDK's version, so a coding agent never runs whatever `latest` is today. */
+export const MCP_PACKAGE = "signafaide-mcp";
+export const ARGS = ["-y", `${MCP_PACKAGE}@${VERSION}`];
 
 export interface Ctx {
   root: string;
@@ -41,7 +43,8 @@ export function SETUP_NOTES(url?: string): string[] {
     "what leaves the machine after that: only hashes (hash-only by default). Full inputs and outputs stay in .signafaide/chain/<project>/<env>/<agent>.jsonl; storeContent (TypeScript) or store_content=True (Python) sends the content too, encrypted at rest (live records need the Team plan).",
     url
       ? `witness: ${url} (SIGNAFAIDE_URL in each MCP entry); it needs an API key from that instance, or \`signafaide init\` against it`
-      : "witness: the hosted service by default; to keep the evidence in your environment, self-host it and rerun with --url <your witness url> (https://signafaide.com/docs/self-host)",
+      : "witness: https://api.signafaide.com by default; a self-hosted witness (Enterprise contract) is set with --url <witness url> (https://signafaide.com/docs/self-host)",
+    "agent names: give each agent an explicit name, e.g. wrapTools(tools, { agent: \"claims-bot\" }) or wrap_tools(tools, agent=\"claims-bot\"); otherwise the folder name is used. Production set-up: https://signafaide.com/docs/production",
   ];
 }
 
@@ -131,7 +134,7 @@ export function mergeJson(ctx: Ctx, file: string, key: string, entry: object): C
 
 /** Put the marked signafAIde section in a Markdown file: replaced in place if present, else appended. */
 export function mergeSection(ctx: Ctx, file: string): Change {
-  const section = instructionsSection();
+  const section = instructionsSection(ctx.url);
   const prev = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   const a = prev.indexOf(SECTION_START);
   const b = prev.indexOf(SECTION_END, a);
@@ -224,7 +227,7 @@ export const AGENTS: Agent[] = [
     note: "Claude Code asks once to approve the project's MCP servers when it next starts here",
     install: (c) => [
       mergeJson(c, path.join(c.root, ".mcp.json"), "mcpServers", entry(c, { type: "stdio" }, true)),
-      write(c, path.join(c.root, ".claude", "skills", "signafaide", "SKILL.md"), claudeSkill()),
+      write(c, path.join(c.root, ".claude", "skills", "signafaide", "SKILL.md"), claudeSkill(c.url)),
       // Claude Code reads CLAUDE.md as the project's instructions; the skill alone is read as a file.
       mergeSection(c, path.join(c.root, "CLAUDE.md")),
     ],
@@ -251,7 +254,7 @@ export const AGENTS: Agent[] = [
       ]),
     install: (c) => [
       mergeJson(c, path.join(c.root, ".cursor", "mcp.json"), "mcpServers", entry(c, { type: "stdio" })),
-      write(c, path.join(c.root, ".cursor", "rules", "signafaide.mdc"), cursorRule()),
+      write(c, path.join(c.root, ".cursor", "rules", "signafaide.mdc"), cursorRule(c.url)),
     ],
   },
   {

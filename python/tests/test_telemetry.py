@@ -53,7 +53,8 @@ def test_every_request_carries_the_header(recorder, service, monkeypatch):
     signafaide.note("a", {})
     signafaide.flush()
     assert service.calls and len(service.client_ids) == len(service.calls)
-    assert all(c and c.startswith("signafaide-python/") and c.endswith("agent=codex; via=sdk)") for c in service.client_ids)
+    # Never guessed per process: a program started from a terminal inside a coding agent is not that agent.
+    assert all(c and c.startswith("signafaide-python/") and c.endswith("agent=unknown; via=sdk)") for c in service.client_ids)
 
 
 def test_strict_flag_in_header(recorder, service):
@@ -65,6 +66,8 @@ def test_strict_flag_in_header(recorder, service):
 def test_agent_stored_at_init_is_used_later(project, service, monkeypatch):
     monkeypatch.setenv("GEMINI_CLI", "1")
     rec = signafaide.init(url=service.url, quiet=True)
+    assert not (rec.state.home / "config.json").exists()  # the library's init() does not guess
+    rec.remember_agent()  # what `signafaide init` does
     assert json.loads((rec.state.home / "config.json").read_text())["agent"] == "gemini-cli"
     rec.create_sandbox()
     monkeypatch.delenv("GEMINI_CLI")  # later: running in production, no coding agent

@@ -20,7 +20,7 @@ export const ERRORS: ErrorDoc[] = [
     code: "bad_signature",
     status: 400,
     means: "A record's signature does not verify; its key was not active at the record's time, or was revoked before the service received it; or an agent registration's proof of possession or rotation signature is missing or wrong.",
-    fix: "Do not edit `.signafaide/` by hand. If an agent key file in `.signafaide/agents/` was replaced, restore it from backup. To give an agent a new key, run `signafaide keys rotate` (the SDK signs the rotation with the old key), or have a developer or admin revoke the old key in the console first.",
+    fix: "Do not edit `.signafaide/` by hand. If an agent key file in `.signafaide/agents/` was replaced, restore it from backup. If the key was revoked, run `signafaide keys rotate --agent <name>`, then `signafaide repair --agent <name>` to set aside the records it signed after it ended (kept, still verifiable locally). To give an agent a new key otherwise, run `signafaide keys rotate` (the SDK signs the rotation with the old key), or have a developer or admin revoke the old key in the console first.",
   },
   {
     code: "unknown_agent",
@@ -37,8 +37,8 @@ export const ERRORS: ErrorDoc[] = [
   {
     code: "quota_exceeded",
     status: 429,
-    means: "The monthly record quota of this project is used up. Records stay in the local outbox and nothing is lost.",
-    fix: "Claim the sandbox (`signafaide claim`) and use a live key, or wait for the next month. `signafaide status` shows the quota.",
+    means: "The monthly record quota of this project is used up. Records stay in the local outbox and nothing is lost. The SDK stops sending in the background until the API key or SIGNAFAIDE_URL changes, so it never floods the service.",
+    fix: "Claim the sandbox (`signafaide claim`) and use a live key, or wait for the next month; then `signafaide flush`. `signafaide status` shows the quota.",
   },
   {
     code: "plan_required",
@@ -56,7 +56,7 @@ export const ERRORS: ErrorDoc[] = [
     code: "invalid_record",
     status: 400,
     means: "A request or record breaks the rules of SPEC §2: a schema error (an agent name that is not lowercase, a name over 128 characters), an envelope for another project or env, a time more than 300 s ahead of the service clock or earlier than the agent's previous record, or a key registration with a valid_from more than 7 days back.",
-    fix: "The message names the record and the rule. Agent names match ^[a-z0-9][a-z0-9._-]{0,63}$; record names are 1 to 128 characters and never personal data. Check the machine's clock for time errors.",
+    fix: "The message names the record and the rule. Agent names match ^[a-z0-9][a-z0-9._-]{0,63}$; record names are 1 to 128 characters and never personal data. For time errors, fix the machine's clock (NTP); records already written with a time the witness cannot take make the chain BLOCKED, and `signafaide repair` sets them aside and starts a new segment.",
   },
   {
     code: "rate_limited",
@@ -103,8 +103,8 @@ export const ERRORS: ErrorDoc[] = [
   {
     code: "state",
     status: 0,
-    means: "The local `.signafaide/` state could not be used, for example a damaged chain line or a lock held by another process.",
-    fix: "The message names the file. Do not delete chain files: they are your evidence. Move a damaged line aside, then run `signafaide verify`.",
+    means: "The local `.signafaide/` state could not be used, for example a folder that cannot be written (a read-only disk), a damaged chain line or a lock held by another process.",
+    fix: "The message names the file. On a read-only disk, set SIGNAFAIDE_HOME to a writable folder (see the production guide), or SIGNAFAIDE_DISABLED=1 to turn recording off. Do not delete chain files: they are your evidence. Move a damaged line aside, then run `signafaide verify`.",
   },
   {
     code: "key_mismatch",

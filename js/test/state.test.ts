@@ -19,14 +19,16 @@ function append(st: State, n = 1, agent = "bot", chain = `${BUCKET}/${agent}`): 
 }
 
 describe("local state", () => {
-  it("lays out .signafaide and .gitignore", () => {
+  it("lays out .signafaide, and edits .gitignore only at set-up time", () => {
     const st = State.discover();
     st.ensure();
     expect(st.home).toBe(path.join(ctx.root, ".signafaide"));
-    expect(fs.readFileSync(path.join(ctx.root, ".gitignore"), "utf8")).toBe(".signafaide/\n");
+    expect(fs.existsSync(path.join(ctx.root, ".gitignore"))).toBe(false); // never at runtime: a CI checkout stays clean
+    st.ignoreInGit(".env");
+    expect(fs.readFileSync(path.join(ctx.root, ".gitignore"), "utf8")).toBe(".signafaide/\n.env\n");
     fs.mkdirSync(path.join(ctx.root, "sub"));
     expect(findRoot(path.join(ctx.root, "sub"))).toBe(ctx.root);
-    st.ensure();
+    st.ignoreInGit();
     expect(fs.readFileSync(path.join(ctx.root, ".gitignore"), "utf8").match(/signafaide/g)).toHaveLength(1);
   });
 
@@ -62,7 +64,7 @@ describe("local state", () => {
     const recs = append(st, 3);
     expect(recs.map((r) => r.envelope.seq)).toEqual([1, 2, 3]);
     expect(recs[1].envelope.prev).toBe(recordHash(recs[0]));
-    expect(st.tail(C)).toEqual([3, recordHash(recs[2])]);
+    expect(st.tail(C)).toEqual([3, recordHash(recs[2]), recs[2].envelope.time]);
     expect(st.readChain(C)).toEqual(recs);
     expect(fs.readFileSync(st.chainPath(C), "utf8").split("\n")[0]).toBe(canonicalize(recs[0]));
     expect(st.outbox(C).map((r) => r.envelope.seq)).toEqual([1, 2, 3]);

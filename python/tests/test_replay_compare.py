@@ -37,7 +37,7 @@ def test_replay_shows_verified_inputs_and_outputs(payouts, recorder, tmp_path):
     assert d.content["input"] == {"claim_id": "c-0", "amount": 0} and o.content == {"output": {"approved": True}}
     assert d.pair is o and o.pair is d
     text = str(r)
-    assert "approve_payout  -> outcome #2" in text and '"claim_id": "c-0"' in text and text.endswith("every one checked against its content_hash and receipt")
+    assert "approve_payout  -> outcome #2" in text and '"claim_id": "c-0"' in text and text.endswith("each checked against its content_hash, its signature and its receipt")
     page = r.to_html()
     assert "<script" not in page and "<link" not in page and "src=" not in page
     assert "c-9" in page and "verified" in page

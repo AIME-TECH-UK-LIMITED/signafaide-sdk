@@ -8,7 +8,7 @@
  */
 
 import * as fs from "node:fs";
-import { b64url, hashJson } from "./crypto.js";
+import { hashJson } from "./crypto.js";
 import { fetchJson } from "./http.js";
 import { plural } from "./plural.js";
 import type { SignedRecord } from "./records.js";
@@ -70,11 +70,7 @@ export async function verifyChain(rec: Recorder, chain: string, keys?: string | 
       note = "service keys: none needed (nothing co-signed yet)";
     }
   }
-  const agentKeys: KeyDoc[] = [];
-  for (const agent of st.agents()) {
-    const k = st.loadKey(agent, false);
-    if (k) agentKeys.push({ agent, key_id: k.keyId, public_key: b64url(k.publicKey), valid_from: null, valid_to: null });
-  }
+  const agentKeys: KeyDoc[] = st.agentPublicKeys().map((k) => ({ agent: k.agent, key_id: k.key_id, public_key: k.public_key, valid_from: null, valid_to: k.retired }));
   const heads = Object.fromEntries(Object.entries(st.chainHeads()).filter(([c]) => c === chain));
   const report = verifyLocalState({ records, chainIds: records.map(() => chain), agentKeys, heads }, serviceKeys, await loadDrandVerifier());
   report.notes.unshift(`chain: ${chain}`, note);
@@ -100,16 +96,18 @@ export class Entry {
   get receipt(): any {
     return (this.record as any).receipt ?? null;
   }
-  /** `verified`, `signed` (not co-signed by the service yet) or `FAIL`. */
-  get status(): "verified" | "signed" | "FAIL" {
-    return this.problems.length ? "FAIL" : this.receipt ? "verified" : "signed";
+  /** Why the witness can never take this record (the chain is BLOCKED from here), or null. */
+  blocked: string | null = null;
+  /** `verified`, `signed` (not co-signed by the service yet), `BLOCKED` (can never be co-signed as it is) or `FAIL`. */
+  get status(): "verified" | "signed" | "BLOCKED" | "FAIL" {
+    return this.problems.length ? "FAIL" : this.receipt ? "verified" : this.blocked ? "BLOCKED" : "signed";
   }
   toJSON() {
     const e = this.envelope;
     const b = this.receipt?.batch ?? {};
     return {
       seq: e.seq, kind: e.kind, name: e.name, time: e.time, record_hash: this.hash, ref: e.ref, content_hash: e.content_hash,
-      content: this.content, status: this.status, problems: this.problems, batch_seq: b.seq ?? null, server_time: b.server_time ?? null,
+      content: this.content, status: this.status, problems: this.problems, ...(this.blocked ? { blocked: this.blocked } : {}), batch_seq: b.seq ?? null, server_time: b.server_time ?? null,
       drand_round: b.drand?.round ?? null, pair: this.pair?.hash ?? null,
     };
   }
@@ -128,23 +126,35 @@ export class Replay {
     readonly total: number,
   ) {}
 
+  /** Why the chain cannot ship from some record on (`signafaide repair` fixes it), or null. */
+  blocked: { seq: number; reason: string; next: string } | null = null;
+
   get ok(): boolean {
-    return this.report.ok;
+    return this.report.ok && !this.blocked;
+  }
+
+  /** PASS, FAIL or BLOCKED (a chain the witness refuses never passes). */
+  get result(): string {
+    return this.report.result === "PASS" && this.blocked ? "BLOCKED" : this.report.result;
   }
 
   toJSON() {
-    return { agent: this.agent, chain: this.chain, since: this.since, until: this.until, total: this.total, shown: this.entries.length, verification: this.report.toJSON(), entries: this.entries.map((e) => e.toJSON()) };
+    return {
+      agent: this.agent, chain: this.chain, since: this.since, until: this.until, total: this.total, shown: this.entries.length, result: this.result,
+      ...(this.blocked ? { blocked: this.blocked } : {}), verification: this.report.toJSON(), entries: this.entries.map((e) => e.toJSON()),
+    };
   }
 
   lines(): string[] {
     const out = [`signafAIde replay: ${this.agent}  (${this.chain})`, `window: ${this.since ?? "start"} to ${this.until ?? "now"}; ${this.entries.length} of ${plural(this.total, "record")} shown`];
-    out.push(`verification: ${this.report.result}` + (this.ok ? "" : ` (first failed check: ${this.report.firstFailed()})`));
+    out.push(`verification: ${this.report.resultLine}` + (this.report.ok ? "" : ` (first failed check: ${this.report.firstFailed()})`));
+    if (this.blocked) out.push(`BLOCKED from seq ${this.blocked.seq}: ${this.blocked.reason}. Next: ${this.blocked.next}`);
     out.push(...this.report.notes.map((n) => `  ${n}`), "");
     for (const e of this.entries) {
       const env = e.envelope;
       const link = e.pair ? (env.kind === "decision" ? `  -> outcome #${e.pair.envelope.seq}` : `  <- decision #${e.pair.envelope.seq}`) : "";
       const rc = e.receipt;
-      const where = rc ? `batch ${rc.batch.seq}` + (rc.batch.drand ? `, drand ${rc.batch.drand.round}` : "") : "not co-signed yet";
+      const where = rc ? `batch ${rc.batch.seq}` + (rc.batch.drand ? `, drand ${rc.batch.drand.round}` : "") : e.blocked ? "the witness cannot take it" : "not co-signed yet";
       out.push(`#${String(env.seq).padEnd(5)} ${env.time}  ${env.kind.padEnd(8)} ${env.name}${link}`);
       out.push(`       ${e.hash.slice(0, 16)}  ${e.status.toUpperCase()} (${where})`);
       for (const p of e.problems) out.push(`       ! ${p}`);
@@ -157,7 +167,14 @@ export class Replay {
       out.push("");
     }
     const failed = this.entries.filter((e) => e.problems.length).length;
-    out.push(`${this.report.result}: ${plural(this.entries.length, "record")} shown, ` + (failed ? `${failed} failed` : "every one checked against its content_hash and receipt"));
+    const signed = this.entries.filter((e) => !e.receipt && !e.problems.length).length;
+    const blockedN = this.entries.filter((e) => e.status === "BLOCKED").length;
+    const what = failed
+      ? `${failed} failed`
+      : signed
+        ? `each checked against its content_hash and signature; ${signed} not co-signed yet${blockedN ? ` (${blockedN} BLOCKED)` : ""}, so their receipts could not be checked`
+        : "each checked against its content_hash, its signature and its receipt";
+    out.push(`${this.result}: ${plural(this.entries.length, "record")} shown, ${what}`);
     return out;
   }
 
@@ -171,13 +188,13 @@ export class Replay {
       const env = e.envelope;
       const rc = e.receipt;
       const link = e.pair ? `<span class="muted">${env.kind === "decision" ? "outcome" : "decision"} <a href="#r${e.pair.envelope.seq}">#${e.pair.envelope.seq}</a></span>` : "";
-      const cls = { verified: "ok", signed: "warn", FAIL: "bad" }[e.status];
+      const cls = { verified: "ok", signed: "warn", BLOCKED: "bad", FAIL: "bad" }[e.status];
       const body =
         Object.entries(e.content ?? {})
           .map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><pre>${esc(JSON.stringify(v, null, 2))}</pre></div>`)
           .join("") || '<p class="muted">No local content for this record.</p>';
       const probs = e.problems.map((p) => `<li>${esc(p)}</li>`).join("");
-      const receipt = rc ? `batch ${rc.batch.seq} · ${esc(rc.batch.server_time)}` + (rc.batch.drand ? ` · drand ${rc.batch.drand.round}` : "") : "not co-signed by the service yet";
+      const receipt = rc ? `batch ${rc.batch.seq} · ${esc(rc.batch.server_time)}` + (rc.batch.drand ? ` · drand ${rc.batch.drand.round}` : "") : e.blocked ? `BLOCKED: ${esc(e.blocked)}` : "not co-signed by the service yet";
       return (
         `<article id="r${env.seq}" class="${esc(env.kind)}"><header><span class="seq">#${env.seq}</span><span class="kind">${esc(env.kind)}</span><b>${esc(env.name)}</b>${link}<span class="st ${cls}">${e.status}</span></header>` +
         `<div class="meta"><code title="record_hash">${e.hash}</code> · ${esc(env.time)} · ${receipt}</div>` +
@@ -186,7 +203,7 @@ export class Replay {
         "</article>"
       );
     });
-    const label = (c: Report["checks"][number]) => (c.status === "fail" ? "FAIL" : c.status === "not_checked" ? "NOT CHECKED" : (c.value ?? "pass").toUpperCase());
+    const label = (c: Report["checks"][number]) => (c.status === "fail" ? "FAIL" : c.status === "not_checked" ? "NOT CHECKED" : c.status === "pending" ? "PENDING" : (c.value ?? "pass").toUpperCase());
     const checks = this.report.checks
       .map((c) => `<tr><td>${c.n}</td><td>${esc(c.title)}</td><td><span class="st ${c.status === "pass" ? "ok" : c.status === "fail" ? "bad" : ""}">${label(c)}</span></td><td>${esc(c.detail)}</td></tr>`)
       .join("");
@@ -195,7 +212,8 @@ export class Replay {
 <title>Replay: ${esc(this.agent)}</title><style>${CSS}</style></head><body><main>
 <p class="muted small">signafAIde replay</p><h1>${esc(this.agent)}</h1>
 <p class="muted">${esc(this.chain)} · ${esc(this.since ?? "start")} to ${esc(this.until ?? "now")} · ${this.entries.length} of ${plural(this.total, "record")}</p>
-<p class="result">Verification: <span class="st ${this.ok ? "ok" : "bad"}">${this.report.result}</span></p>
+<p class="result">Verification: <span class="st ${this.ok ? "ok" : "bad"}">${this.result}</span> <span class="muted small">${esc(this.report.resultLine)}</span></p>
+${this.blocked ? `<p class="probs">BLOCKED from seq ${this.blocked.seq}: ${esc(this.blocked.reason)}. Next: ${esc(this.blocked.next)}</p>` : ""}
 <details><summary>Checks</summary><ul class="small muted">${notes}</ul><table>${checks}</table></details>
 ${rows.join("")}
 <footer>Each record was checked against its content_hash, its signature and the service's receipt. Generated by signafAIde from the local chain.</footer>
@@ -266,6 +284,10 @@ export async function replay(opts: ReplayOptions = {}): Promise<Replay> {
     if (hit.length !== 1) throw new StateError(`${hit.length ? hit.length : "no"} records match ${opts.record} in ${chain}`);
     entries = [hit[0], hit[0].pair].filter((x): x is Entry => !!x).sort((a, b) => a.envelope.seq - b.envelope.seq);
   }
+  const b = rec.diagnose().find((x) => x.chain === chain);
+  if (b) for (const e of entries) if (!e.receipt && e.envelope.seq >= b.seq) e.blocked = b.reason;
   entries = entries.filter((e) => (!lo || e.envelope.time >= lo) && (!hi || e.envelope.time < hi));
-  return new Replay(agent, chain, entries, report, lo ?? null, hi ?? null, total);
+  const r = new Replay(agent, chain, entries, report, lo ?? null, hi ?? null, total);
+  if (b) r.blocked = { seq: b.seq, reason: b.reason, next: b.next };
+  return r;
 }

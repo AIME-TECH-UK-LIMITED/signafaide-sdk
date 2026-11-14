@@ -42,25 +42,25 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "rm -rf dist && tsup",
+    "build": "rm -rf dist && tsup && tsup --config tsup.mcp.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && vitest run --maxWorkers=2",
     "plugin": "node --experimental-strip-types --no-warnings scripts/plugin.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "^2.4.0",
     "@noble/curves": "^1.9.7",
     "@noble/ed25519": "^2.3.0",
-    "@noble/hashes": "^1.8.0",
-    "zod": "^4.6.7"
+    "@noble/hashes": "^1.8.0"
   },
   "devDependencies": {
     "@langchain/core": "^1.4.0",
     "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@openai/agents-core": "^0.22.0",
     "@types/node": "^20.19.0",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "zod": "^4.6.7"
   }
 }

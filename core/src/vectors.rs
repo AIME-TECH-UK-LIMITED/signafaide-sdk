@@ -359,6 +359,7 @@ fn build(mode: Build) -> Fixture {
         format: PACK_FORMAT.into(),
         generated: "2026-11-13T12:00:00.000Z".into(),
         project: PROJECT.into(),
+        project_name: None,
         env: Env::Live,
         service_keys: vec![service_key_entry()],
         agent_keys: agents
@@ -609,6 +610,11 @@ pub fn tampered_packs() -> Vec<(&'static str, &'static str, Value, Inputs)> {
             p["export_sig"] = json!(other.sign(Domain::Export, &st.statement().unwrap().hash().unwrap()));
         }), none()),
         ("head_sig", "generated was changed after the service signed the export", edit(&|p| p["generated"] = json!("2026-11-13T13:00:00.000Z")), none()),
+        ("head_sig", "project_name was changed after the service signed the export", edit(&|p| {
+            p["project_name"] = json!("claims automation");
+            sign_export(p);
+            p["project_name"] = json!("someone else's project");
+        }), none()),
         // What the service signs must still hold together.
         ("chain", "the service signed an export whose from filter is before the agent's first key, and the chain starts at seq 4", signed(&|p| {
             p["records"].as_array_mut().unwrap().drain(0..3);
@@ -672,8 +678,16 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         p["anchors"] = json!([]);
         p["generated"] = json!("2026-11-13T13:00:00.000Z");
     });
+    let named = signed(&|p| {
+        p["project_name"] = json!("claims automation");
+    });
+    let not_yet_anchored = signed(&|p| {
+        p["anchors"] = json!([]);
+    });
     vec![
         ("independent service and agent keys, offline", valid.clone(), none()),
+        ("young batches no anchor covers yet: anchors and public timestamp pending", not_yet_anchored, none()),
+        ("a pack that names its project (signed in the export statement)", named, none()),
         ("agent keys from the pack, trusted explicitly", valid.clone(), Inputs { agent_keys: Some(Value::Null), trust_embedded_agent_keys: true, ..none() }),
         ("a confirmed proof checked against its block header", confirmed.clone(), Inputs { bitcoin: Some(json!({"900000": header_json(&confirmed_root)})), ..none() }),
         ("a confirmed proof, offline", confirmed.clone(), none()),
@@ -705,6 +719,25 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         ("checked by the service with its own key registry", valid.clone(), Inputs { agent_keys: Some(Value::Null), by_service: true, ..none() }),
         ("service keys fetched over plain http from a local address", valid, Inputs { service_keys_plain_http: true, ..none() }),
     ]
+}
+
+/// §2.2 monotonic time: the client's time for a new record, from its clock, the previous record's
+/// time and the key's valid_from (`time::clamp`).
+fn time_clamp_cases() -> Vec<Value> {
+    let cases: [(&str, &str, Option<&str>, Option<&str>); 5] = [
+        ("clock ahead of the previous record", "2026-11-13T10:00:10.000Z", Some("2026-11-13T10:00:05.000Z"), Some("2026-11-13T09:00:00.000Z")),
+        ("clock stepped back 5 s", "2026-11-13T10:00:00.000Z", Some("2026-11-13T10:00:05.000Z"), Some("2026-11-13T09:00:00.000Z")),
+        ("same millisecond as the previous record", "2026-11-13T10:00:05.000Z", Some("2026-11-13T10:00:05.000Z"), None),
+        ("first record, clock before the key was made", "2026-11-13T09:59:59.999Z", None, Some("2026-11-13T10:00:00.000Z")),
+        ("first record, nothing to clamp to", "2026-11-13T10:00:00.000Z", None, None),
+    ];
+    cases
+        .iter()
+        .map(|(name, wall, prev, from)| {
+            let (t, raised) = time::clamp(wall, *prev, *from).unwrap();
+            json!({"name": name, "wall": wall, "prev": prev, "valid_from": from, "time": t, "raised": raised})
+        })
+        .collect()
 }
 
 fn expected(report: &verify::Report) -> Value {
@@ -922,6 +955,7 @@ pub fn generate() -> Value {
             {"input": "2026-11-13T10:00:00.000+00:00", "error": "invalid_time"},
             {"input": "0000-01-01T00:00:00.000Z", "error": "invalid_time"},
         ],
+        "time_clamp": time_clamp_cases(),
         "agent_names": {
             "valid": ["a", "agent-a", "billing.bot_2", "0", "a".repeat(64)],
             "invalid": ["", "Agent", "-a", ".a", "_a", "a b", "a/b", "a".repeat(65), "a\n", "agent-a\n"],

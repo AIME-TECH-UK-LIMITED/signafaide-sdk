@@ -13,7 +13,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { SigningKey, auditPath, b64url, contentHash, hashJson, leafHash, merkleRoot, sha256Hex, signedMessage, verifyInclusion, verifySig } from "../src/crypto.js";
 import { assertPortableNumbers, canonicalize, parseJson } from "../src/jcs.js";
 import { MAX_NODES, MAX_PROOF_BYTES, base64Decode, blockAttestations, otsStatus, parseOts } from "../src/ots.js";
-import { AGENT_RE, envelopeErrors, manifestEntry, validProjectId, validTime } from "../src/records.js";
+import { AGENT_RE, clampTime, envelopeErrors, manifestEntry, validProjectId, validTime } from "../src/records.js";
 import { checkHeader, rootsFromVector } from "../src/timestamps.js";
 import {
   ANCHOR_WINDOW_MS,
@@ -211,8 +211,13 @@ describe.skipIf(!v)("spec/vectors.json", () => {
     }
   });
 
+  it("monotonic time: the client's time for a new record (spec §2.2)", () => {
+    expect(v.time_clamp.length).toBe(5);
+    for (const c of v.time_clamp) expect(clampTime(c.wall, c.prev, c.valid_from), c.name).toEqual([c.time, c.raised]);
+  });
+
   it("tampered packs fail at the expected check", () => {
-    expect(v.tampered.length).toBe(48);
+    expect(v.tampered.length).toBe(49);
     for (const c of v.tampered) {
       const r = verifyPack(c.pack, ...inputs(c, { drand }));
       expect(r.firstFailed(), c.tamper).toBe(c.first_failed);

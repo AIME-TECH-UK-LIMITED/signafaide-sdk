@@ -29,7 +29,7 @@ def cli(project, service, monkeypatch, capsys):
 
 
 def test_commands_registered():
-    assert list(COMMANDS) == ["init", "status", "verify", "keys", "export", "replay", "compare", "claim", "flush"]
+    assert list(COMMANDS) == ["init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush"]
 
 
 def test_init_then_claim(cli, project, service):
@@ -68,7 +68,7 @@ def test_flush_keeps_a_chain_older_than_7_days_local(cli):
     key = rec.key("claims-project")
     old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     rec.state.append("_pending/nokey/claims-project",
-                     lambda seq, prev: make_draft(key, kind="note", agent="claims-project", seq=seq, prev=prev, name="old", content={}, time=old), lambda r: r)
+                     lambda seq, prev, *_: make_draft(key, kind="note", agent="claims-project", seq=seq, prev=prev, name="old", content={}, time=old), lambda r: r)
     cli("init")
     code, out, err = cli("flush")
     assert code == 1 and "more than 7 days ago" in err

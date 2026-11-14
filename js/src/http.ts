@@ -1,9 +1,41 @@
 /** Minimal JSON client for the signafAIde HTTP API (SPEC §6). Built-in fetch only. */
 
-import { HEADER, clientHeader, detectAgent } from "./telemetry.js";
+import { HEADER, clientHeader } from "./telemetry.js";
 import { VERSION } from "./version.js";
 
-export const DEFAULT_URL = "http://127.0.0.1:7474";
+/** The hosted witness. Configurable with SIGNAFAIDE_URL (a self-hosted witness, or a local dev
+ * server such as http://127.0.0.1:7474); a release test fails if this is ever a loopback address. */
+export const DEFAULT_URL = "https://api.signafaide.com";
+
+/** Errors the SDK cannot fix by retrying: shipping stops until the configuration changes. */
+export const NON_RETRYABLE = new Set(["quota_exceeded", "invalid_key", "plan_required", "bad_signature", "invalid_record", "content_mismatch", "chain_conflict", "unknown_agent", "key_mismatch", "bad_response"]);
+
+/** A response, as the transport hands it to the client. */
+export interface TransportResponse {
+  status: number;
+  contentType: string;
+  text: string;
+}
+
+/** How a request is made. The default is `fetch`; the Node runtime passes one whose idle
+ * sockets do not keep the process alive. `signal` aborts it. */
+export type Transport = (req: { method: string; url: string; headers: Record<string, string>; body?: string; timeoutMs: number; signal?: AbortSignal }) => Promise<TransportResponse>;
+
+/** The fetch transport (browsers, edge runtimes, Node). */
+export const fetchTransport: Transport = async (req) => {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new Error("timeout")), req.timeoutMs);
+  const onAbort = () => ctrl.abort(new Error("aborted"));
+  if (req.signal?.aborted) onAbort();
+  else req.signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    const resp = await fetch(req.url, { method: req.method, headers: req.headers, body: req.body, signal: ctrl.signal });
+    return { status: resp.status, contentType: resp.headers.get("content-type") ?? "", text: await resp.text() };
+  } finally {
+    clearTimeout(timer);
+    req.signal?.removeEventListener("abort", onAbort);
+  }
+};
 
 /**
  * An error from the service or the SDK. `message` is the one-sentence fix.
@@ -28,20 +60,31 @@ export class SignafaideError extends Error {
   get retryable(): boolean {
     return this.code === "network" || this.code === "rate_limited" || this.status >= 500;
   }
+
+  /** The service refused for a reason retrying cannot change (quota, key, revoked agent key...). */
+  get permanent(): boolean {
+    return !this.retryable && NON_RETRYABLE.has(this.code);
+  }
 }
 
 export class Client {
   readonly url: string;
   readonly clientId: string;
+  readonly transport: Transport;
+  readonly signal?: AbortSignal;
 
   constructor(
     url: string = DEFAULT_URL,
     readonly apiKey?: string,
     readonly timeoutMs = 10_000,
     clientId?: string,
+    opts: { transport?: Transport; signal?: AbortSignal } = {},
   ) {
     this.url = url.replace(/\/+$/, "");
-    this.clientId = clientId ?? clientHeader({ agent: detectAgent() });
+    // The coding agent is detected only at set-up time (init, agent setup), never per request.
+    this.clientId = clientId ?? clientHeader({});
+    this.transport = opts.transport ?? fetchTransport;
+    this.signal = opts.signal;
   }
 
   async request(method: string, path: string, opts: { body?: unknown; auth?: boolean; query?: Record<string, string | undefined> } = {}): Promise<any> {
@@ -56,21 +99,17 @@ export class Client {
       if (!this.apiKey) throw new SignafaideError("No API key: run `signafaide init` or set SIGNAFAIDE_API_KEY.", { code: "invalid_key" });
       headers.Authorization = `Bearer ${this.apiKey}`;
     }
-    let resp: Response;
+    let resp: TransportResponse;
     try {
-      resp = await fetch(url, {
-        method,
-        headers,
-        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
+      resp = await this.transport({ method, url, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body), timeoutMs: this.timeoutMs, signal: this.signal });
     } catch (e) {
-      const reason = (e as { cause?: { code?: string } }).cause?.code ?? (e as Error).message;
-      throw new SignafaideError(`Cannot reach the signafAIde service at ${this.url} (${reason}); start it or set SIGNAFAIDE_URL.`, { code: "network" });
+      const err = e as { cause?: { code?: string }; code?: string; name?: string; message?: string };
+      const raw = err.cause?.code ?? err.code ?? err.message ?? String(e);
+      const reason = /abort|timeout/i.test(`${err.name} ${raw}`) ? `no answer within ${this.timeoutMs / 1000} s` : raw;
+      throw new SignafaideError(`Cannot reach the signafAIde service at ${this.url} (${reason}); check the network or SIGNAFAIDE_URL.`, { code: "network" });
     }
-    const text = await resp.text();
-    if (!resp.ok) throw serviceError(resp.status, text);
-    const ctype = resp.headers.get("content-type") ?? "";
+    const { status, text, contentType: ctype } = resp;
+    if (status < 200 || status >= 300) throw serviceError(status, text);
     return ctype.includes("json") || /^[[{]/.test(text) ? JSON.parse(text) : text;
   }
 
@@ -90,7 +129,7 @@ export class Client {
   }
 
   /** `{project, env}` of this API key (§6). */
-  project(): Promise<{ project: string; env: string }> {
+  project(): Promise<{ project: string; env: string; claimed?: boolean }> {
     return this.request("GET", "/v1/project");
   }
 

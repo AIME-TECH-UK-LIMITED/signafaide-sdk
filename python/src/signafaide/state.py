@@ -6,8 +6,11 @@ known go to ``_pending/<key fingerprint>/<agent>`` (or ``_pending/nokey/<agent>`
 when there is no key yet) and the whole chain is moved under its project once a
 sandbox response or a receipt names it.
 
-- ``agents/<agent>.key``                 private key (JSON with its ``created`` time, mode 0600)
-- ``agents/retired/<agent>.<key_id>.key`` keys replaced by ``signafaide keys rotate``
+- ``agents/<agent>.key``                 private key (JSON with its ``created`` time, mode 0600);
+                                         live chains use their own key, ``agents/live/<agent>.key``
+- ``agents/retired/<agent>.<key_id>.key`` keys replaced by ``signafaide keys rotate`` (``agents/live/retired/`` for live)
+- ``held/<chain>/<from>-<to>.jsonl``     records ``signafaide repair`` set aside (kept, verifiable)
+- ``blocked.json``                       chains the witness refused, with why (status, verify, replay)
 - ``chain/<chain>.jsonl``                one JCS line per record ``{envelope, key_id, sig, content, receipt?}``;
                                          in a ``_pending`` chain, unsigned drafts ``{draft, envelope, content, store_content}``
 - ``chain/<chain>.drafts.json``          draft hash -> signed record hash, once a pending chain was signed
@@ -40,10 +43,44 @@ _MARKERS = (".git", "pyproject.toml", "package.json")
 LOCK_STALE_S = 10.0
 LOCK_WAIT_S = 15.0
 PENDING = "_pending"
+SCOPES = ("", "live")
+#: A provider of agent keys from a secret store: ``(agent, scope) -> key file dict or JSON text, or None``.
+KeyProvider = Callable[[str, str], Any]
+
+
+def segment_bytes() -> int:
+    """A shipped chain file larger than this rolls into a sealed segment (SIGNAFAIDE_SEGMENT_BYTES)."""
+    try:
+        return int(os.environ.get("SIGNAFAIDE_SEGMENT_BYTES") or 0) or 64 * 1024 * 1024
+    except ValueError:
+        return 64 * 1024 * 1024
+
+
+def scope_of(bucket: str) -> str:
+    """Which agent key a chain uses: live chains have their own key (§8), everything else the default."""
+    return "live" if bucket.endswith("/live") else ""
+
+
+def agent_key_env_name(agent: str, scope: str = "") -> str:
+    """``SIGNAFAIDE_AGENT_KEY_<NAME>``: an agent's key file content from the environment or a secret store."""
+    return "SIGNAFAIDE_AGENT_KEY_" + ("LIVE_" if scope else "") + "".join(c if c.isalnum() else "_" for c in agent.upper())
 
 
 class StateError(Exception):
     """Local state is unusable; the message says how to fix it."""
+
+
+def fs_error(e: OSError, home: Path) -> Exception:
+    """A file-system error, said plainly: what could not be written, and how to fix it."""
+    import errno
+
+    if e.errno in (errno.EACCES, errno.EROFS, errno.EPERM):
+        why = "read-only file system" if e.errno == errno.EROFS else "permission denied"
+        return StateError(
+            f"cannot write signafAIde's local state in {home} ({why}). Set SIGNAFAIDE_HOME to a writable folder (for example a mounted "
+            "volume, or /tmp/signafaide on serverless) or SIGNAFAIDE_DISABLED=1 to turn recording off; see https://signafaide.com/docs/production"
+        )
+    return e
 
 
 def find_root(start: Optional[Path] = None) -> Path:
@@ -67,6 +104,8 @@ class State:
     def __init__(self, home: Path, root: Path):
         self.home = Path(home)
         self.root = Path(root)
+        #: Agent keys from a secret store, before the key files (``Recorder(key_provider=...)``).
+        self.key_provider: Optional[KeyProvider] = None
 
     @classmethod
     def discover(cls, home: Optional[str] = None) -> "State":
@@ -77,13 +116,46 @@ class State:
     # --- layout -------------------------------------------------------------
 
     def ensure(self) -> None:
-        for sub in ("agents", "chain", "outbox"):
-            (self.home / sub).mkdir(parents=True, exist_ok=True)
-        if self.home == self.root / ".signafaide":
-            ensure_gitignore(self.root / ".gitignore", ".signafaide/")
+        """Create the folders. ``.gitignore`` is never edited here: only ``signafaide init`` and
+        ``agent setup`` do that, so a CI checkout stays clean (§8)."""
+        try:
+            for sub in ("agents", "chain", "outbox"):
+                (self.home / sub).mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise fs_error(e, self.home) from None
 
-    def key_path(self, agent: str) -> Path:
-        return self.home / "agents" / f"{agent}.key"
+    def ignore_in_git(self, *extra: str) -> None:
+        """Add ``.signafaide/`` (and *extra*) to the project's .gitignore (init and agent setup only)."""
+        gi = self.root / ".gitignore"
+        if self.home == self.root / ".signafaide":
+            ensure_gitignore(gi, ".signafaide/")
+        for e in extra:
+            ensure_gitignore(gi, e)
+
+    def key_dir(self, scope: str = "") -> Path:
+        return self.home / "agents" / scope if scope else self.home / "agents"
+
+    def key_path(self, agent: str, scope: str = "") -> Path:
+        return self.key_dir(scope) / f"{agent}.key"
+
+    def provided_key(self, agent: str, scope: str = "") -> Optional[dict]:
+        """The key handed in for this agent (provider, then ``SIGNAFAIDE_AGENT_KEY_<NAME>``; a live
+        chain tries ``SIGNAFAIDE_AGENT_KEY_LIVE_<NAME>`` first), as ``{private_key, created}``, or None."""
+        v = self.key_provider(agent, scope) if self.key_provider else None
+        if v is None:
+            v = os.environ.get(agent_key_env_name(agent, scope)) or (os.environ.get(agent_key_env_name(agent)) if scope else None)
+        if not v:
+            return None
+        doc = v
+        if isinstance(v, str):
+            try:
+                doc = json.loads(v)
+            except ValueError:
+                raise StateError(f"{agent_key_env_name(agent, scope)} must hold the agent's key file (JSON with private_key and created), "
+                                 f"as `cat .signafaide/agents/{agent}.key` shows it") from None
+        if not isinstance(doc, dict) or not isinstance(doc.get("private_key"), str) or not _valid_time(doc.get("created")) or doc.get("agent", agent) != agent:
+            raise StateError(f'the key given for agent {agent} must be the agent\'s key file: {{"agent", "private_key", "created", ...}}')
+        return {"private_key": doc["private_key"], "created": doc["created"]}
 
     def chain_path(self, chain: str) -> Path:
         return self.home / "chain" / f"{chain}.jsonl"
@@ -97,10 +169,87 @@ class State:
         return sorted(str(p.relative_to(root).with_suffix("")) for p in root.glob("*/*/*.jsonl")) if root.is_dir() else []
 
     def agents(self) -> List[str]:
-        names = {p.stem for p in (self.home / "agents").glob("*.key")}
-        names |= {c.rsplit("/", 1)[1] for c in self.chains()}
-        names |= {p.name.split(".")[0] for p in self.retired_dir().glob("*.key")} if self.retired_dir().is_dir() else set()
+        names = {c.rsplit("/", 1)[1] for c in self.chains()}
+        for scope in SCOPES:
+            names |= {p.stem for p in self.key_dir(scope).glob("*.key")} if self.key_dir(scope).is_dir() else set()
+            names |= {p.name.split(".")[0] for p in self.retired_dir(scope).glob("*.key")} if self.retired_dir(scope).is_dir() else set()
+        for k, v in os.environ.items():
+            if k.startswith("SIGNAFAIDE_AGENT_KEY_") and v:
+                with contextlib.suppress(ValueError, AttributeError):
+                    a = json.loads(v).get("agent")
+                    if isinstance(a, str):
+                        names.add(a)
         return sorted(n for n in names if AGENT_RE.match(n))
+
+    # --- blocked chains, held segments ------------------------------------------
+
+    def blocked(self) -> Dict[str, dict]:
+        """Chains the witness refused, with why: ``{chain: {code, message, at, seq}}`` (blocked.json)."""
+        return _read_json(self.home / "blocked.json") or {}
+
+    def set_blocked(self, chain: str, info: Optional[dict]) -> None:
+        """Record (or, with None, clear) why the witness refuses a chain. Never raises (read-only disks)."""
+        try:
+            data = self.blocked()
+            if info is None:
+                if chain not in data:
+                    return
+                del data[chain]
+            else:
+                old = data.get(chain)
+                if old and all(old.get(k) == info.get(k) for k in ("code", "message", "seq")):
+                    return
+                data[chain] = {**info, "at": now()}
+            _write_json(self.home / "blocked.json", data)
+        except (OSError, StateError):
+            pass
+
+    def held_dir(self, chain: str) -> Path:
+        return self.home / "held" / chain
+
+    def held_segments(self) -> List[Tuple[str, Path, List[dict]]]:
+        """Every held segment: (chain, file, records)."""
+        root = self.home / "held"
+        out = []
+        for p in sorted(root.glob("*/*/*/*.jsonl")) if root.is_dir() else []:
+            chain = str(p.parent.relative_to(root))
+            out.append((chain, p, [_parse_line(p, ln) for ln in p.read_bytes().splitlines() if ln.strip()]))
+        return out
+
+    def hold_tail(self, chain: str, from_seq: int) -> Tuple[Path, List[dict]]:
+        """``signafaide repair``: move the chain's records from *from_seq* to the end (none of them
+        co-signed) into ``held/<chain>/<from>-<to>.jsonl``, and drop them from the outbox. The held
+        file is written and flushed before the chain file is cut, so a crash never loses a line."""
+        path = self.chain_path(chain)
+        with self.lock(chain):
+            cut: List[Tuple[int, dict]] = []
+            with open(path, "rb") as f:
+                for off, line in _reverse_lines(f):
+                    rec = _parse_line(path, line)
+                    if rec["envelope"]["seq"] < from_seq:
+                        break
+                    if "receipt" in rec:
+                        raise StateError(f"{chain} seq {rec['envelope']['seq']} has a receipt: co-signed records are never set aside")
+                    cut.append((off, rec))
+            cut.reverse()
+            if not cut:
+                raise StateError(f"{chain} has no records from seq {from_seq}")
+            recs = [r for _, r in cut]
+            d = self.held_dir(chain)
+            d.mkdir(parents=True, exist_ok=True)
+            out = d / f"{recs[0]['envelope']['seq']:012d}-{recs[-1]['envelope']['seq']:012d}.jsonl"
+            tmp = out.with_name(out.name + ".tmp")
+            with open(tmp, "wb") as f:
+                f.write("".join(jcs.dumps(r) + "\n" for r in recs).encode())
+                f.flush()
+                os.fsync(f.fileno())
+            tmp.replace(out)
+            with open(path, "r+b") as f:
+                f.truncate(cut[0][0])
+                f.flush()
+                os.fsync(f.fileno())
+            self.drop_outbox(chain, [r["envelope"]["seq"] for r in recs])
+        return out, recs
 
     # --- projects -------------------------------------------------------------
 
@@ -123,8 +272,8 @@ class State:
         projects[key_fingerprint(api_key)] = {"project": project, "env": env}
         self.save_config(projects=projects)
 
-    def adopt(self, src: str, dst: str, key: Callable[[str], SigningKey], wire: Callable[[dict], dict],
-              not_before: Optional[str] = None) -> List[Tuple[str, str]]:
+    def adopt(self, src: str, dst: str, key: Callable[..., SigningKey], wire: Callable[[dict], dict],
+              not_before: Optional[str] = None, bases: Optional[Dict[str, dict]] = None) -> List[Tuple[str, str]]:
         """Sign every draft chain of bucket *src* into *dst* (``<project>/<env>``) with its
         outbox (§8), keeping each record's time. Returns the chains left pending, with why:
         ``exists`` (that agent already has a chain under *dst*) or the first draft's time when
@@ -149,13 +298,18 @@ class State:
                 if too_old:
                     conflicts.append((f"{src}/{agent}", first))
                     continue
-                prev: Optional[str] = None
+                # The service already holds a chain for this agent that is not on this disk (an
+                # ephemeral disk lost it): the drafts continue after the service's head (§8).
+                base = (bases or {}).get(agent)
+                prev: Optional[str] = base["record_hash"] if base else None
+                offset = base["seq"] if base else 0
                 out = []
                 for d in lines:
                     if not d.get("draft"):
                         raise StateError(f"{path} holds a signed record; pending chains hold drafts only. Move it aside and run `signafaide verify`")
                     ref = d["envelope"]["ref"]
-                    rec = sign_draft(key(agent), d, project=project, env=env, prev=prev, ref=mapping.get(ref, ref) if ref else None)
+                    rec = sign_draft(key(agent, first), d, project=project, env=env, prev=prev, ref=mapping.get(ref, ref) if ref else None,
+                                     seq=d["envelope"]["seq"] + offset)
                     mapping[record_hash(d)] = prev = record_hash(rec)
                     out.append((rec, d.get("store_content")))
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -192,21 +346,24 @@ class State:
 
     # --- keys ---------------------------------------------------------------
 
-    def key_created(self, agent: str) -> Optional[str]:
+    def key_created(self, agent: str, scope: str = "") -> Optional[str]:
         """When the key was generated: the ``valid_from`` sent at registration, so
         records signed offline before registering still verify (§2.4)."""
+        given = self.provided_key(agent, scope)
+        if given:
+            return given["created"]
         try:
-            return json.loads(self.key_path(agent).read_text()).get("created")
+            return json.loads(self.key_path(agent, scope).read_text()).get("created")
         except (OSError, ValueError):
             return None
 
-    def retired_dir(self) -> Path:
-        return self.home / "agents" / "retired"
+    def retired_dir(self, scope: str = "") -> Path:
+        return self.key_dir(scope) / "retired"
 
-    def retired_keys(self, agent: str) -> List[Tuple[SigningKey, str]]:
+    def retired_keys(self, agent: str, scope: str = "") -> List[Tuple[SigningKey, str]]:
         """(key, created) of the agent's retired keys, newest first."""
         out = []
-        for p in self.retired_dir().glob(f"{agent}.*.key") if self.retired_dir().is_dir() else []:
+        for p in self.retired_dir(scope).glob(f"{agent}.*.key") if self.retired_dir(scope).is_dir() else []:
             if p.name.count(".") != 2:
                 continue
             try:
@@ -217,17 +374,17 @@ class State:
                 raise StateError(f"{p} is not a valid signafaide key file; restore it from backup") from None
         return sorted(out, key=lambda x: x[1], reverse=True)
 
-    def retired_at(self, agent: str, key_id: str) -> Optional[str]:
+    def retired_at(self, agent: str, key_id: str, scope: str = "") -> Optional[str]:
         """When the service retired this key (§2.4 rotation), once it said so; None before."""
         try:
-            v = json.loads((self.retired_dir() / f"{agent}.{key_id}.key").read_text()).get("retired")
+            v = json.loads((self.retired_dir(scope) / f"{agent}.{key_id}.key").read_text()).get("retired")
         except (OSError, ValueError):
             return None
         return v if isinstance(v, str) and _valid_time(v) else None
 
-    def mark_retired(self, agent: str, key_id: str, valid_to: str) -> bool:
+    def mark_retired(self, agent: str, key_id: str, valid_to: str, scope: str = "") -> bool:
         """Record the service's retirement time in a retired key's file (kept for keys export)."""
-        p = self.retired_dir() / f"{agent}.{key_id}.key"
+        p = self.retired_dir(scope) / f"{agent}.{key_id}.key"
         if not AGENT_RE.match(agent) or not _valid_time(valid_to) or not p.is_file():
             return False
         doc = json.loads(p.read_text())
@@ -241,56 +398,83 @@ class State:
         os.replace(tmp, p)
         return True
 
-    def rotate_key(self, agent: str) -> Tuple[SigningKey, SigningKey]:
+    def rotate_key(self, agent: str, scope: str = "") -> Tuple[SigningKey, SigningKey]:
         """Retire the agent's key and make a new one: (old, new). The next registration is
         signed by the old key (§2.4 rotation)."""
         if not AGENT_RE.match(agent):
             raise StateError(f"agent {agent!r} is invalid")
-        old = self.load_key(agent, create=False)
+        if self.provided_key(agent, scope):
+            raise StateError(f"agent {agent}'s key comes from {agent_key_env_name(agent, scope)} (or a key provider): make a new key with "
+                             "`signafaide keys rotate` on a machine with the key file, store the new file in your secret store, and keep the old one "
+                             f"as {agent}.<key id>.key in .signafaide/agents/{scope + '/' if scope else ''}retired/")
+        old = self.load_key(agent, create=False, scope=scope)
         if old is None:
             raise StateError(f"agent {agent} has no key to rotate; it gets one with its first record")
-        self.retired_dir().mkdir(parents=True, exist_ok=True)
-        self.key_path(agent).replace(self.retired_dir() / f"{agent}.{old.key_id}.key")
-        new = self.load_key(agent)
+        self.retired_dir(scope).mkdir(parents=True, exist_ok=True)
+        self.key_path(agent, scope).replace(self.retired_dir(scope) / f"{agent}.{old.key_id}.key")
+        new = self.load_key(agent, scope=scope)
         assert new is not None
         return old, new
 
     def agent_public_keys(self) -> List[dict]:
         """Every current and retired agent key: ``{agent, key_id, public_key, created, retired}``
         (``retired``: when the service retired it, or None)."""
-        out = []
+        out, seen = [], set()
         for agent in self.agents():
-            k = self.load_key(agent, create=False)
-            if k is not None:
-                out.append({"agent": agent, "key_id": k.key_id, "public_key": b64url(k.public_key), "created": self.key_created(agent), "retired": None})
-            for rk, created in self.retired_keys(agent):
-                out.append({"agent": agent, "key_id": rk.key_id, "public_key": b64url(rk.public_key), "created": created,
-                            "retired": self.retired_at(agent, rk.key_id)})
+            for scope in SCOPES:
+                k = self.load_key(agent, create=False, scope=scope)
+                if k is not None and k.key_id not in seen:
+                    seen.add(k.key_id)
+                    out.append({"agent": agent, "key_id": k.key_id, "public_key": b64url(k.public_key), "created": self.key_created(agent, scope), "retired": None})
+                for rk, created in self.retired_keys(agent, scope):
+                    if rk.key_id in seen:
+                        continue
+                    seen.add(rk.key_id)
+                    out.append({"agent": agent, "key_id": rk.key_id, "public_key": b64url(rk.public_key), "created": created,
+                                "retired": self.retired_at(agent, rk.key_id, scope)})
         return out
 
     def export_agent_keys(self) -> dict:
         """The §2.5 manifest of every current and retired key, each entry self-signed."""
-        keys = []
+        keys, seen = [], set()
         for agent in self.agents():
-            k = self.load_key(agent, create=False)
-            if k is not None:
-                keys.append(manifest_entry(agent, k, self.key_created(agent)))
-            # A retired key carries the time the service retired it, signed by that key (§2.5).
-            keys += [manifest_entry(agent, rk, created, self.retired_at(agent, rk.key_id)) for rk, created in self.retired_keys(agent)]
+            for scope in SCOPES:
+                k = self.load_key(agent, create=False, scope=scope)
+                if k is not None and k.key_id not in seen:
+                    seen.add(k.key_id)
+                    keys.append(manifest_entry(agent, k, self.key_created(agent, scope)))
+                # A retired key carries the time the service retired it, signed by that key (§2.5).
+                for rk, created in self.retired_keys(agent, scope):
+                    if rk.key_id not in seen:
+                        seen.add(rk.key_id)
+                        keys.append(manifest_entry(agent, rk, created, self.retired_at(agent, rk.key_id, scope)))
         return {"format": AGENT_KEYS_FORMAT, "keys": keys}
 
-    def load_key(self, agent: str, create: bool = True) -> Optional[SigningKey]:
-        path = self.key_path(agent)
+    def load_key(self, agent: str, create: bool = True, scope: str = "", created_at: Optional[str] = None) -> Optional[SigningKey]:
+        """*created_at*: for a key made now to sign records written earlier (drafts signed into a
+        live chain), its creation time, so it is valid from the first of them (§2.4)."""
+        given = self.provided_key(agent, scope)
+        if given:
+            try:
+                return SigningKey(b64url_decode(given["private_key"]))
+            except (ValueError, TypeError) as e:
+                raise StateError(f"the key given for agent {agent} ({agent_key_env_name(agent, scope)}) is not a valid key ({e})") from None
+        path = self.key_path(agent, scope)
         if not path.exists():
             if not create:
                 return None
             self.ensure()
             key = SigningKey.generate()
-            doc = {"agent": agent, "key_id": key.key_id, "public_key": b64url(key.public_key), "private_key": b64url(key.seed()), "created": now()}
+            t = now()
+            created = created_at if created_at and _valid_time(created_at) and created_at < t else t
+            doc = {"agent": agent, "key_id": key.key_id, "public_key": b64url(key.public_key), "private_key": b64url(key.seed()), "created": created}
             try:
+                path.parent.mkdir(parents=True, exist_ok=True)
                 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             except FileExistsError:  # another process won the race; use its key
-                return self.load_key(agent, create=False)
+                return self.load_key(agent, create=False, scope=scope)
+            except OSError as e:
+                raise fs_error(e, self.home) from None
             with os.fdopen(fd, "w") as f:
                 f.write(jcs.dumps(doc) + "\n")
             return key
@@ -305,7 +489,10 @@ class State:
     @contextlib.contextmanager
     def lock(self, chain: str) -> Iterator[None]:
         path = self.home / "chain" / f"{chain}.lock"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise fs_error(e, self.home) from None
         deadline = time.monotonic() + LOCK_WAIT_S
         while True:
             try:
@@ -313,7 +500,9 @@ class State:
                 os.write(fd, str(os.getpid()).encode())
                 os.close(fd)
                 break
-            except FileExistsError:
+            except OSError as e:
+                if not isinstance(e, FileExistsError):
+                    raise fs_error(e, self.home) from None
                 try:
                     if time.time() - path.stat().st_mtime > LOCK_STALE_S:
                         path.unlink()
@@ -349,21 +538,50 @@ class State:
 
     # --- chain --------------------------------------------------------------
 
-    def tail(self, chain: str) -> Tuple[int, Optional[str]]:
-        """(seq, record_hash) of the last record in the local chain, (0, None) if empty."""
+    def tail(self, chain: str) -> Tuple[int, Optional[str], Optional[str]]:
+        """(seq, record_hash, time) of the last record in the local chain (the last sealed
+        segment's when the chain file was just rolled), (0, None, None) if empty."""
+        for path in [self.chain_path(chain), *reversed(self.segments(chain))]:
+            if not path.exists():
+                continue
+            with open(path, "rb") as f:
+                for _, line in _reverse_lines(f):
+                    rec = _parse_line(path, line)
+                    return rec["envelope"]["seq"], record_hash(rec), rec["envelope"]["time"]
+        return 0, None, None
+
+    def segment_dir(self, chain: str) -> Path:
+        return self.home / "chain" / f"{chain}.segments"
+
+    def segments(self, chain: str) -> List[Path]:
+        """Sealed segments of a chain, oldest first."""
+        d = self.segment_dir(chain)
+        return sorted(d.glob("*.jsonl")) if d.is_dir() else []
+
+    def _maybe_roll(self, chain: str) -> None:
+        """Roll a large chain file into a sealed segment, under the chain lock. Only a fully
+        shipped file rolls (its last line has a receipt), so receipts never go into a segment."""
         path = self.chain_path(chain)
-        if not path.exists():
-            return 0, None
+        try:
+            if path.stat().st_size < segment_bytes():
+                return
+        except OSError:
+            return
         with open(path, "rb") as f:
-            for _, line in _reverse_lines(f):
-                rec = _parse_line(path, line)
-                return rec["envelope"]["seq"], record_hash(rec)
-        return 0, None
+            last = next((_parse_line(path, ln) for _, ln in _reverse_lines(f)), None)
+            if not last or "receipt" not in last:
+                return
+            f.seek(0)
+            first = _parse_line(path, f.readline())
+        d = self.segment_dir(chain)
+        d.mkdir(parents=True, exist_ok=True)
+        path.replace(d / f"{first['envelope']['seq']:012d}-{last['envelope']['seq']:012d}.jsonl")
+        path.write_bytes(b"")
 
     def append(
         self,
         chain: str,
-        build: Callable[[int, Optional[str]], dict],
+        build: Callable[[int, Optional[str], Optional[str]], dict],
         wire: Callable[[dict], dict],
         still_valid: Callable[[], bool] = lambda: True,
     ) -> Optional[dict]:
@@ -375,10 +593,13 @@ class State:
         with self.lock(chain):
             if not still_valid():
                 return None
-            seq, prev = self.tail(chain)
-            rec = build(seq + 1, prev)
-            with open(self.chain_path(chain), "ab") as f:
-                f.write((jcs.dumps(rec) + "\n").encode())
+            seq, prev, prev_time = self.tail(chain)
+            rec = build(seq + 1, prev, prev_time)
+            try:
+                with open(self.chain_path(chain), "ab") as f:
+                    f.write((jcs.dumps(rec) + "\n").encode())
+            except OSError as e:
+                raise fs_error(e, self.home) from None
             if not rec.get("draft"):  # a draft ships once it is signed (adopt)
                 self._write_outbox(chain, wire(rec))
         return rec
@@ -391,13 +612,13 @@ class State:
         tmp.replace(d / f"{rec['envelope']['seq']:012d}.json")
 
     def _lines(self, chain: str) -> Iterator[dict]:
-        path = self.chain_path(chain)
-        if not path.exists():
-            return
-        with open(path, "rb") as f:
-            for line in f:
-                if line.strip():
-                    yield _parse_line(path, line)
+        for path in [*self.segments(chain), self.chain_path(chain)]:
+            if not path.exists():
+                continue
+            with open(path, "rb") as f:
+                for line in f:
+                    if line.strip():
+                        yield _parse_line(path, line)
 
     def read_chain(self, chain: str) -> Iterator[dict]:
         """The records of a chain that name their project (drafts are skipped)."""
@@ -440,6 +661,7 @@ class State:
                         os.fsync(f.fileno())
                     tmp.replace(journal)
                     self._recover(chain)
+                    self._maybe_roll(chain)
         return len(filled_seqs)
 
     def reconcile_outbox(self, chain: str, wire: Callable[[dict], dict]) -> int:
@@ -527,7 +749,10 @@ class State:
 
     def save_config(self, **values: Any) -> None:
         self.ensure()
-        _write_json(self.home / "config.json", {**self.config(), **values})
+        try:
+            _write_json(self.home / "config.json", {**self.config(), **values})
+        except OSError as e:
+            raise fs_error(e, self.home) from None
 
     def sandbox(self) -> Optional[dict]:
         return _read_json(self.home / "sandbox.json")

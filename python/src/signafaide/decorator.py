@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
+import contextvars
 import dataclasses
 import datetime
 import decimal
@@ -53,12 +55,18 @@ class _Spec:
 
     def strict_check(self, rec: runtime.Recorder, d: dict) -> None:
         rec.strict_used = True
+        if rec.test:
+            return  # test mode never sends, so there is no receipt to wait for
         try:
             rec.ensure_receipt(d)
         except SignafaideError as e:
             raise NotRecorded(f"{e.message} (strict mode: {self.name} did not run)", code=e.code, status=e.status, docs=e.docs, body=e.body) from None
 
-    def call(self, args: Any, fn: Callable[[], Any]) -> Any:
+    def call(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None) -> Any:
+        """Run *fn* between a decision and an outcome. *output* picks the value the outcome
+        records from what *fn* returned (the tool's own return value, for adapters)."""
+        if runtime.recording_disabled():
+            return fn()
         rec, d = self.decide(args)
         if self.strict:
             self.strict_check(rec, d)
@@ -67,10 +75,12 @@ class _Spec:
         except BaseException as e:
             self.outcome(rec, d, _error(e))
             raise
-        self.outcome(rec, d, {"output": to_jsonable(out)})
+        self.outcome(rec, d, {"output": to_jsonable(output(out) if output else out)})
         return out
 
-    async def acall(self, args: Any, fn: Callable[[], Any]) -> Any:
+    async def acall(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None) -> Any:
+        if runtime.recording_disabled():
+            return await fn()
         rec, d = self.decide(args)
         if self.strict:
             await asyncio.get_running_loop().run_in_executor(None, self.strict_check, rec, d)
@@ -79,7 +89,7 @@ class _Spec:
         except BaseException as e:
             self.outcome(rec, d, _error(e))
             raise
-        self.outcome(rec, d, {"output": to_jsonable(out)})
+        self.outcome(rec, d, {"output": to_jsonable(output(out) if output else out)})
         return out
 
 
@@ -93,6 +103,8 @@ def record(
     meta: Optional[dict] = None,
 ) -> Any:
     """Record every call of *fn*: a ``decision`` before it runs, an ``outcome`` after.
+    ``agent`` names the chain (default: the project folder's name; give one explicitly in
+    production, one name per running instance).
 
     Use as ``@record`` or ``@record(agent=..., name=..., strict=True)``. Works on
     sync and async functions. Errors are recorded and re-raised unchanged.
@@ -121,7 +133,10 @@ def record(
 
 
 def note(name: str, content: dict, *, agent: Optional[str] = None, store_content: Optional[bool] = None) -> str:
-    """Write a ``note`` record (anything worth keeping that is not a tool call). Returns its hash."""
+    """Write a ``note`` record (anything worth keeping that is not a tool call). Returns its hash
+    (an empty string when recording is turned off with ``SIGNAFAIDE_DISABLED=1``)."""
+    if runtime.recording_disabled():
+        return ""
     rec = runtime.get().write("note", name, to_jsonable(content), agent=agent, store_content=store_content)
     return record_hash(rec)
 
@@ -178,25 +193,59 @@ def _is_langchain_tool(t: Any) -> bool:
 
 def _wrap_langchain(tool: Any, spec: _Spec) -> Any:
     """Copy the tool and record at ``run`` / ``arun``, which ``invoke`` /
-    ``ainvoke`` call exactly once per tool call."""
+    ``ainvoke`` call exactly once per tool call. The outcome holds the tool's own return value:
+    ``run`` wraps it in a ``ToolMessage`` when called with a tool call, so the value is taken
+    where the tool returns it (``_run`` / ``_arun``)."""
     telemetry.ADAPTERS.add("langchain")
     new = tool.model_copy() if hasattr(tool, "model_copy") else tool.copy()
-    run, arun = tool.run, tool.arun
+    run, arun = new.run, new.arun
+    returned: contextvars.ContextVar[Any] = contextvars.ContextVar("signafaide_lc_returned", default=_NOTHING)
+    for attr in ("_run", "_arun"):
+        inner = getattr(new, attr, None)
+        if inner is None:
+            continue
+        if attr == "_run":
+            def capture(*a: Any, _inner: Any = inner, **kw: Any) -> Any:
+                v = _inner(*a, **kw)
+                returned.set(v)
+                return v
+        else:
+            async def capture(*a: Any, _inner: Any = inner, **kw: Any) -> Any:  # type: ignore[misc]
+                v = await _inner(*a, **kw)
+                returned.set(v)
+                return v
+        # LangChain reads _run's signature to decide what to pass it (config, run_manager):
+        # the wrapper must show the same one.
+        functools.update_wrapper(capture, inner)
+        with contextlib.suppress(Exception):
+            object.__setattr__(new, attr, capture)
 
     def lc_input(tool_input: Any) -> Any:
         return {k: v for k, v in tool_input.items() if k not in _LC_EXTRA} if isinstance(tool_input, dict) else tool_input
 
+    def tool_value(out: Any) -> Any:
+        v = returned.get()
+        if v is not _NOTHING:
+            return v
+        # Not captured (a tool type that bypasses _run): a ToolMessage still yields its content.
+        return getattr(out, "content", out) if type(out).__name__ == "ToolMessage" else out
+
     @functools.wraps(run)
     def run_recorded(tool_input: Any, *args: Any, **kwargs: Any) -> Any:
-        return spec.call(lc_input(tool_input), lambda: run(tool_input, *args, **kwargs))
+        returned.set(_NOTHING)
+        return spec.call(lc_input(tool_input), lambda: run(tool_input, *args, **kwargs), tool_value)
 
     @functools.wraps(arun)
     async def arun_recorded(tool_input: Any, *args: Any, **kwargs: Any) -> Any:
-        return await spec.acall(lc_input(tool_input), lambda: arun(tool_input, *args, **kwargs))
+        returned.set(_NOTHING)
+        return await spec.acall(lc_input(tool_input), lambda: arun(tool_input, *args, **kwargs), tool_value)
 
     object.__setattr__(new, "run", run_recorded)
     object.__setattr__(new, "arun", arun_recorded)
     return new
+
+
+_NOTHING = object()
 
 
 # --- helpers --------------------------------------------------------------------

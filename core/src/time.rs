@@ -35,6 +35,20 @@ pub fn format(ms: i64) -> String {
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{milli:03}Z")
 }
 
+/// §2.2 monotonic time: the `time` a client writes for a new record. It is the machine's clock
+/// (`wall`), raised to the previous record's `time` in the chain and to the signing key's
+/// `valid_from` when the clock reads earlier (an NTP step back, a VM resumed). Returns the time
+/// and whether it was raised; when it was, the client keeps `wall` in the content's
+/// `meta.wall_time`, so the reading is not lost. A chain written this way never goes back.
+pub fn clamp(wall: &str, prev: Option<&str>, valid_from: Option<&str>) -> Result<(String, bool)> {
+    let w = parse(wall)?;
+    let mut t = w;
+    for floor in [prev, valid_from].into_iter().flatten() {
+        t = t.max(parse(floor)?);
+    }
+    Ok((format(t), t != w))
+}
+
 fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
@@ -80,6 +94,16 @@ mod tests {
             assert_eq!(format(parse(s).unwrap()), s);
         }
         assert_eq!(parse("1970-01-01T00:00:01.000Z").unwrap(), 1000);
+    }
+
+    #[test]
+    fn clamp_never_goes_back() {
+        let (t, raised) = clamp("2026-11-13T10:00:00.000Z", Some("2026-11-13T10:00:05.000Z"), Some("2026-11-13T09:00:00.000Z")).unwrap();
+        assert_eq!((t.as_str(), raised), ("2026-11-13T10:00:05.000Z", true));
+        let (t, raised) = clamp("2026-11-13T10:00:10.000Z", Some("2026-11-13T10:00:05.000Z"), None).unwrap();
+        assert_eq!((t.as_str(), raised), ("2026-11-13T10:00:10.000Z", false));
+        let (t, raised) = clamp("2026-11-13T10:00:00.000Z", None, Some("2026-11-13T10:00:00.001Z")).unwrap();
+        assert_eq!((t.as_str(), raised), ("2026-11-13T10:00:00.001Z", true));
     }
 
     #[test]

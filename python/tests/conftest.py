@@ -20,6 +20,8 @@ def project(tmp_path, monkeypatch):
     for k in list(os.environ):
         if k.startswith(AGENT_ENV):
             monkeypatch.delenv(k)  # tests decide which coding agent they run under
+    # The SDK turns test mode on by itself under pytest; these tests exercise the real recorder.
+    monkeypatch.setenv("SIGNAFAIDE_TEST", "0")
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
     monkeypatch.setattr(telemetry, "ADAPTERS", set())
     return root

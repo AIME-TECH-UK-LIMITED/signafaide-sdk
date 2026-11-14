@@ -25,6 +25,8 @@ export function useProject(opts: { optIn?: boolean } = {}): Ctx {
     // tests decide which coding agent they run under
     for (const k of Object.keys(process.env)) if (AGENT_ENV.some((p) => k.startsWith(p))) delete process.env[k];
     delete process.env.TERM_PROGRAM;
+    // The SDK turns test mode on by itself under Vitest; these tests exercise the real recorder.
+    process.env.SIGNAFAIDE_TEST = "0";
     ADAPTERS.clear();
     ctx.root = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfa-js-")), "Claims Project");
     fs.mkdirSync(path.join(ctx.root, ".git"), { recursive: true });
@@ -65,7 +67,9 @@ export const records = (agent = "claims-project") => getRecorder().state.readAll
 export const chainFile = (agent = "claims-project") => getRecorder().state.chainPath(chainOf(agent));
 
 export function errorFor(r: { errors: Record<string, any> }, agent = "claims-project"): any {
-  const found = Object.entries(r.errors).filter(([c]) => c.split("/")[2] === agent);
+  let found = Object.entries(r.errors).filter(([c]) => c.split("/")[2] === agent);
+  // Errors about the API key are named after the key, not a chain.
+  if (!found.length) found = Object.entries(r.errors).filter(([c]) => c.startsWith("API key "));
   if (found.length !== 1) throw new Error(`expected one error for ${agent}, got ${Object.keys(r.errors).join(", ")}`);
   return found[0][1];
 }

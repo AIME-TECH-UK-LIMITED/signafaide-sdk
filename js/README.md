@@ -49,7 +49,7 @@ const approve = record(approvePayout, { agent: "claims-bot", name: "approve_payo
 note("policy_loaded", { version: 3 }); // anything that is not a tool call
 ```
 
-The agent name defaults to the project folder name. It must match `^[a-z0-9][a-z0-9._-]{0,63}$`.
+Give each agent an explicit name, for example `wrapTools(tools, { agent: "claims-bot" })`; without one it is the project folder's name. It must match `^[a-z0-9][a-z0-9._-]{0,63}$`. In production, one agent name is one chain written by one running instance.
 
 ## Frameworks
 
@@ -93,7 +93,7 @@ record(fn, { name: "x", storeContent: true }); // one tool
 
 ## Offline
 
-Nothing waits on the network unless you use strict mode. With an API key, records go to `.signafaide/outbox/` and are shipped in batches: every 2 seconds, every 100 records, and once more when the process is about to exit. If the service can't be reached, they stay on disk and are retried with backoff. They ship on the next run or with `signafaide flush`. Records are never lost on exit, and the timer never keeps your process alive.
+Nothing waits on the network unless you use strict mode. With an API key, records go to `.signafaide/outbox/` and are shipped in batches, one request at a time: every 2 seconds, every 100 records, and once more when the process is about to exit, for at most 3 seconds (`exitFlushMs`, `SIGNAFAIDE_EXIT_FLUSH_MS`). If the service can't be reached, they stay on disk and are retried with a backoff that grows to a minute; a refusal retrying cannot fix (quota used up, a wrong or revoked key) stops sending until the configuration changes. A malformed `SIGNAFAIDE_API_KEY` is caught here and never sent. They ship on the next run or with `signafaide flush`. Records are never lost on exit, and background requests never keep your process alive.
 
 ## Errors
 
@@ -107,7 +107,7 @@ signafaide verify pack.json           # a pack from `signafaide export`
 signafaide verify pack.json --keys keys.json --json
 ```
 
-There is one line per check, then the result line: `PASS` or `FAIL` and how many checks ran, for example `PASS: 11 of 12 checks passed, 1 not checked (public timestamp)`. The exit code is 0 for PASS, 1 for FAIL and 2 when an input can't be read. Locally, before anything was co-signed, the witness's checks show `NOT CHECKED` ("nothing co-signed yet") and no request is made. Service keys come from `--keys <file|url>`, or by default from the service's `/.well-known/signafaide-keys.json`. `--trust-embedded-keys` uses the keys inside the pack and prints a warning. The drand BLS signature is checked too (through `@noble/curves`, a dependency).
+There is one line per check, then the result line: `PASS` or `FAIL` and how many checks passed, are pending and were not checked, for example `PASS: 11 of 12 checks passed, 1 pending (public timestamp)`. Pending means waiting for something that has not happened yet (an hourly anchor, or a public timestamp confirming); pending and not checked are never counted as passed. The exit code is 0 for PASS, 1 for FAIL and 2 when an input can't be read. Locally, a chain the witness refuses for good (or that an older SDK wrote with time going back) shows as `BLOCKED` with the reason and the next step, and always exits 1; `--fail-on-pending-send` also fails while records wait to be co-signed, for CI. Locally, before anything was co-signed, the witness's checks show `NOT CHECKED` ("nothing co-signed yet") and no request is made. Service keys come from `--keys <file|url>`, or by default from the service's `/.well-known/signafaide-keys.json`. `--trust-embedded-keys` uses the keys inside the pack and prints a warning. The drand BLS signature is checked too (through `@noble/curves`, a dependency).
 
 ```ts
 import { verify } from "signafaide";
@@ -128,7 +128,7 @@ const report = verifyPack(pack, serviceKeys, { drand: await loadDrandVerifier() 
 `record`, `wrapTools` and the CLI need Node 18+ because they keep local state on disk.
 
 
-**For an auditor** the agent keys must come from you, not from the pack (otherwise a service could add a key of its own): `signafaide keys export -o agent-keys.json` writes every agent key, each signed by itself. The auditor runs `signafaide verify pack.json --agent-keys agent-keys.json --head head.json` (`head.json` is your `.signafaide/head.json`, which catches records cut off at the end). Without `--agent-keys` the client-signature check says `NOT INDEPENDENT` and the result is FAIL; `--trust-embedded-agent-keys` accepts the pack's keys and says so in the result line. On your own machine, `signafaide verify pack.json` uses this project's agent keys automatically. Public timestamps are checked online (`--timestamp-check <url>`, default `https://mempool.space/api`); with `--offline` they show `NOT CHECKED`, never confirmed. `signafaide keys rotate --agent X` gives an agent a new key; the SDK signs the registration of the new key with the old one.
+**For an auditor** the agent keys must come from you, not from the pack (otherwise a service could add a key of its own): `signafaide keys export -o agent-keys.json` writes every agent key, each signed by itself. The auditor runs `npx signafaide verify pack.json --keys <witness>/.well-known/signafaide-keys.json --agent-keys agent-keys.json --head head.json` (`head.json` is your `.signafaide/head.json`, which catches records cut off at the end). Without `--agent-keys` the client-signature check says `NOT INDEPENDENT` and the result is FAIL; `--trust-embedded-agent-keys` accepts the pack's keys and says so in the result line. On your own machine, `signafaide verify pack.json` uses this project's agent keys automatically. Public timestamps are checked online (`--timestamp-check <url>`, default `https://mempool.space/api`); with `--offline` they show `NOT CHECKED`, never confirmed. `signafaide keys rotate --agent X` gives an agent a new key; the SDK signs the registration of the new key with the old one.
 
 ## Replay
 
@@ -156,16 +156,17 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 | command | does |
 |---|---|
 | `signafaide init` | the opt-in: creates a free sandbox if there is no key (no account, email or card), prints the claim link |
-| `signafaide status` | key and env, agents, last receipt, outbox size, quota |
-| `signafaide verify [pack.json] [--keys ...] [--agent-keys ...] [--head ...] [--offline] [--json]` | verifies; exit 0 PASS, 1 FAIL, 2 unreadable input |
-| `signafaide keys export [-o agent-keys.json]` / `signafaide keys rotate [--agent X]` | the agent-key file for auditors / a new key for an agent |
+| `signafaide status` | key and env, agents, last receipt, outbox size, quota; BLOCKED chains (exit 1) |
+| `signafaide repair [--agent X] [--dry-run]` | sets aside records no witness can take (kept in `.signafaide/held/`, still verified), gives the agent a new key and starts a new segment |
+| `signafaide verify [pack.json] [--keys ...] [--agent-keys ...] [--head ...] [--offline] [--fail-on-pending-send] [--json]` | verifies; exit 0 PASS, 1 FAIL or BLOCKED, 2 unreadable input |
+| `signafaide keys export [-o agent-keys.json]` / `signafaide keys rotate [--agent X] [--env test\|live]` | the agent-key file for auditors / a new key for an agent |
 | `signafaide export [--agent X] [--from T] [--to T] [-o pack.json]` | downloads a verification pack of the whole project (every agent); `--agent` narrows it to one |
 | `signafaide replay [--agent X] [--from T] [--to T] [--record H] [--html out.html] [--json]` | the verified timeline from the local chain; exit 1 on FAIL |
 | `signafaide compare --module file.mjs:fn [--agent X] [--name N] [--from T] [--to T] [--limit N] [--upload [--values]]` | re-runs recorded decisions with a candidate and compares; `--values` sends the values too (stored-content decisions only) |
 | `signafaide claim` | prints the claim link again |
 | `signafaide flush` | ships the outbox now (with no key it sends nothing and says so) |
 | `signafaide agent setup [--agent <name>]... [--url <witness>] [--dry-run] [--dir <project>]` | installs the MCP server and the skill in your coding agents; `--url` sets `SIGNAFAIDE_URL` in each MCP entry |
-| `signafaide mcp` | runs the MCP server over stdio |
+| `signafaide mcp` | runs the MCP server over stdio, when the separate `signafaide-mcp` package is installed (`agent setup` configures `npx -y signafaide-mcp@<version>` instead) |
 
 ## Coding agents
 
@@ -173,7 +174,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 npx signafaide agent setup
 ```
 
-finds the coding agents installed or in use and, for each one, adds the signafAIde MCP server (`npx -y signafaide mcp`) and a short skill that says when signafAIde fits, in that agent's own format. It merges into existing files, never overwrites what is there, and running it twice changes nothing. `--agent` picks agents (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `all`); `--dry-run` shows what would change; `--url <witness url>` writes `SIGNAFAIDE_URL` into each agent's MCP entry (a self-hosted witness). It ends with what is sent (nothing until a person opts in, then hashes only) and where the content stays.
+finds the coding agents installed or in use and, for each one, adds the signafAIde MCP server (`npx -y signafaide-mcp@<this version>`, a separate package so the SDK's own install stays small) and a short skill that says when signafAIde fits, in that agent's own format. It merges into existing files, never overwrites what is there, and running it twice changes nothing. `--agent` picks agents (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `all`); `--dry-run` shows what would change; `--url <witness url>` writes `SIGNAFAIDE_URL` into each agent's MCP entry (a self-hosted witness). It also adds `.signafaide/` to `.gitignore` and remembers which coding agent set the project up. It ends with what is sent (nothing until a person opts in, then hashes only), where the content stays, and a reminder to give agents explicit names.
 
 | agent | MCP server | instructions |
 |---|---|---|
@@ -194,7 +195,7 @@ Every request carries one header:
 X-Signafaide-Client: signafaide-js/0.1.0 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
 ```
 
-It holds the SDK and its version, the JavaScript runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `vercel-ai` or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables and kept in `.signafaide/config.json`. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
+It holds the SDK and its version, the JavaScript runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `vercel-ai` or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`, `signafaide agent setup`) and kept in `.signafaide/config.json`; it is never guessed per process, so a program started from a terminal inside a coding agent is not labelled as that agent. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
 
 The header and the events hold no content, file paths, hostnames or user names. `SIGNAFAIDE_TELEMETRY=0` removes the adapter, the coding agent and the strict-mode flag from the header, stops the coding agent being saved in `.signafaide/config.json`, and turns the events off. The SDK and its version, the runtime and its version, and how the call was made (`via`) are still sent.
 
@@ -203,12 +204,19 @@ The header and the events hold no content, file paths, hostnames or user names. 
 | variable | default |
 |---|---|
 | `SIGNAFAIDE_API_KEY` | read from the environment, then `.env`; created by `signafaide init`; none: local only |
-| `SIGNAFAIDE_URL` | `http://127.0.0.1:7474`; a self-hosted witness. Alone it sends nothing |
-| `SIGNAFAIDE_HOME` | `.signafaide/` in the project root |
+| `SIGNAFAIDE_URL` | `https://api.signafaide.com`; a self-hosted witness, or `http://127.0.0.1:7474` for a local dev server. Alone it sends nothing |
+| `SIGNAFAIDE_HOME` | `.signafaide/` in the project root; a mounted volume or `/tmp/signafaide` in production |
+| `SIGNAFAIDE_AGENT_KEY_<NAME>` | an agent's key file content from a secret store (or `keyProvider` in code) |
+| `SIGNAFAIDE_EXIT_FLUSH_MS` | `3000`: the longest a finished program is kept open to send; `0` never |
+| `SIGNAFAIDE_TEST` | test mode is on by itself under Vitest, Jest and `node --test` (records in a temporary folder, nothing sent); `1` forces it, `0` turns it off |
+| `SIGNAFAIDE_DISABLED` | `1`: wrapped functions run and nothing is recorded |
+| `SIGNAFAIDE_SEGMENT_BYTES` | `67108864`: a shipped chain file larger than this rolls into a sealed segment |
 | `SIGNAFAIDE_TELEMETRY` | `0` turns off the adapter, agent and strict fields and the events |
+
+Running in containers, with replicas, on read-only or ephemeral disks, on serverless or in CI: see the [production guide](https://signafaide.com/docs/production). A record's time never goes back along its chain: if the clock steps back, the record keeps the previous record's time and the clock's reading goes in `meta.wall_time`.
 
 Each project and env has its own chain per agent. A new key, for example a live key replacing the sandbox key, starts a fresh chain at seq 1. The old chain stays on disk, and `signafaide status` lists every chain.
 
-The project root is the nearest folder with `.signafaide/`, `.git`, `pyproject.toml` or `package.json`. `.signafaide/` is added to `.gitignore`. Agent keys live in `.signafaide/agents/<agent>.key` (mode 0600) and never leave the machine. Back them up. The Python and TypeScript SDKs share this folder and its formats.
+The project root is the nearest folder with `.signafaide/`, `.git`, `pyproject.toml` or `package.json`. `signafaide init` and `agent setup` add `.signafaide/` to `.gitignore` (never a running program). Agent keys live in `.signafaide/agents/<agent>.key` (sandbox) and `.signafaide/agents/live/<agent>.key` (live), mode 0600, and never leave the machine. Back them up. The Python and TypeScript SDKs share this folder and its formats.
 
-ESM and CommonJS, with types. Dependencies: `@noble/ed25519` and `@noble/hashes`; the MCP server also uses `@modelcontextprotocol/server` and `zod`, loaded only by `signafaide mcp`.
+ESM and CommonJS, with types. Dependencies: `@noble/ed25519`, `@noble/hashes` and `@noble/curves` (drand). The MCP server is the separate `signafaide-mcp` package, with the MCP SDK and `zod`, so `npm install signafaide` stays small.
