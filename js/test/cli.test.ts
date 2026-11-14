@@ -28,8 +28,8 @@ async function cli(...args: string[]): Promise<[number, string, string]> {
 }
 
 describe("cli", () => {
-  it("has the same commands as the Python CLI, plus the coding-agent ones", () => {
-    expect(Object.keys(COMMANDS).filter((c) => !["agent", "mcp"].includes(c))).toEqual(["init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush"]);
+  it("has the same commands as the Python CLI, plus the coding-agent ones and the MCP gateway", () => {
+    expect(Object.keys(COMMANDS).filter((c) => !["agent", "mcp", "gateway"].includes(c))).toEqual(["init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush"]);
   });
 
   it("init, then claim", async () => {

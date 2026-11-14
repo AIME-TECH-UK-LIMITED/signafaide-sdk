@@ -89,6 +89,12 @@ export const ERRORS: ErrorDoc[] = [
     fix: "Fix the cause in the message (often `network`), then call again. Use strict mode only where an action must never run unrecorded.",
   },
   {
+    code: "not_written",
+    status: 0,
+    means: "The gateway could not write the decision record on this machine, so it did not forward the tool call to the MCP server (it fails closed).",
+    fix: "Fix the cause in the message, usually a folder that cannot be written: set SIGNAFAIDE_HOME to a writable folder for the gateway, then call the tool again.",
+  },
+  {
     code: "no_receipts",
     status: 0,
     means: "The service accepted a batch but returned no receipts matching it.",

@@ -12,6 +12,7 @@ import { plural } from "./plural.js";
 import { configure, envOf, termsNotice, type Recorder } from "./runtime.js";
 import { StateError, findRoot } from "./state.js";
 import { AGENT_IDS, SETUP_NOTES, setup } from "./agents.js";
+import { runGateway } from "./gateway.js";
 import { KeysRequired } from "./verifier.js";
 import { VERSION } from "./version.js";
 
@@ -420,6 +421,48 @@ export const COMMANDS: Record<string, Command> = {
     },
   },
 
+  gateway: {
+    help:
+      "run an MCP server behind a recording proxy: every tool call that passes through it is recorded (a decision before the call is forwarded, an outcome when the answer arrives), " +
+      "and the server's tools are declared as the agent's recorded tools",
+    usage:
+      "gateway [--agent X] [--name-prefix P] [--strict | --strict-tools a,b] [--store-content] -- <command> [args...]\n" +
+      "  In the agent's MCP configuration, start the gateway in place of the server: {\"command\": \"npx\", \"args\": [\"-y\", \"signafaide\", \"gateway\", \"--agent\", \"support-bot\", \"--\", \"npx\", \"-y\", \"@modelcontextprotocol/server-filesystem\", \"/data\"]}\n" +
+      "  --agent: the agent's chain name (default: the project folder's name)\n" +
+      "  --name-prefix: put before each recorded tool name, for an agent with several servers (--name-prefix github.)\n" +
+      "  --strict: forward a call only once the witness has co-signed its decision; --strict-tools a,b: only for those tools\n" +
+      "  --store-content: send inputs and outputs to the witness too (default: hash-only)\n" +
+      "  A remote (HTTP) server: put a stdio bridge after the --, for example `signafaide gateway -- npx -y mcp-remote https://mcp.example.com/mcp`\n" +
+      "  A call that cannot be recorded is not forwarded. The gateway records every call that goes through it; a call the application makes around it is still not recorded, " +
+      "so the deployment has to make the gateway the only route to those tools.\n" +
+      "  Nothing is sent until the project has run `signafaide init` or has an API key. Only protocol messages go to stdout; diagnostics go to stderr.",
+    options: { agent: { type: "string" }, "name-prefix": { type: "string" }, strict: { type: "boolean" }, "strict-tools": { type: "string" }, "store-content": { type: "boolean" } },
+    async run(v, pos) {
+      if (!pos.length) {
+        err(`usage: signafaide ${(COMMANDS.gateway.usage ?? "").split("\n")[0]}`);
+        return 2;
+      }
+      const r = await runGateway({
+        command: pos[0],
+        args: pos.slice(1),
+        agent: v.agent,
+        namePrefix: v["name-prefix"],
+        strict: !!v.strict,
+        strictTools: typeof v["strict-tools"] === "string" ? v["strict-tools"].split(",").map((t: string) => t.trim()).filter(Boolean) : undefined,
+        storeContent: v["store-content"] ? true : undefined,
+      });
+      // The server was ended by a signal: end the same way, so the client sees what happened.
+      if (r.signal) {
+        try {
+          process.kill(process.pid, r.signal);
+        } catch {
+          /* falls through to the exit code */
+        }
+      }
+      return r.code;
+    },
+  },
+
   flush: {
     help: "ship the outbox now",
     async run() {
@@ -464,6 +507,10 @@ function help(): string {
   return ["usage: signafaide <command> [options]", "", ...Object.entries(COMMANDS).map(([c, d]) => `  ${c.padEnd(width)}  ${d.help}`)].join("\n");
 }
 
+/** Commands that end the process when they return: nothing they leave open (the client's stdin)
+ * may keep it alive. */
+export const EXIT_WHEN_DONE = new Set(["gateway"]);
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const [name, ...rest] = argv;
   if (name === "--version" || name === "-v") {
@@ -475,7 +522,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     (name && name !== "--help" && name !== "-h" ? err : out)(help());
     return name && name !== "--help" && name !== "-h" ? 1 : 0;
   }
-  if (rest.includes("--help") || rest.includes("-h")) {
+  // Options after `--` belong to the command the gateway runs.
+  const own = rest.includes("--") ? rest.slice(0, rest.indexOf("--")) : rest;
+  if (own.includes("--help") || own.includes("-h")) {
     out(`${cmd.help}\nusage: signafaide ${cmd.usage ?? name}`);
     return 0;
   }
