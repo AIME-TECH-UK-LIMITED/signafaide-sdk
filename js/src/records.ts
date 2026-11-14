@@ -244,12 +244,36 @@ export function makeRecord(key: SigningKey, f: RecordFields): SignedRecord {
  * (§8, an empty disk): records an earlier instance wrote but had not sent are not in the chain. */
 export const INSTANCE_START = "signafaide.instance_start";
 
-/** The content of an instance-start note continuing after the witness's head `seq`/`recordHash`. */
-/** The check 4 note (§7) naming the chains that continue in a new instance. */
+/** The name of the note an instance writes last on a clean stop (§8): its outbox was empty, so it
+ * had sent every record it wrote. An instance start right after it is a clean restart. */
+export const INSTANCE_STOP = "signafaide.instance_stop";
+
+/** The check 4 note (§7) naming the instance starts with no stop note right before them. */
 export const INSTANCE_NOTE = "a new instance continued the chain, so records an earlier instance wrote but had not sent are not known";
 
-export function instanceStartContent(seq: number, recordHash: string): Record<string, unknown> {
-  return { continues_after_seq: seq, continues_after: recordHash, earlier_unsent: "unknown" };
+/** The check 4 note (§7) naming the instance starts right after a stop note (clean restarts). */
+export const CLEAN_RESTART_NOTE = "a new instance continued the chain right after the earlier instance's signed stop note (a clean restart, nothing to warn about)";
+
+/** The content of an instance-start note continuing after the witness's head `seq`/`recordHash`.
+ * `afterStop`: the client saw that the head's record is a stop note. */
+export function instanceStartContent(seq: number, recordHash: string, afterStop = false): Record<string, unknown> {
+  return { continues_after_seq: seq, continues_after: recordHash, earlier_unsent: afterStop ? "none" : "unknown" };
+}
+
+/** The content of an instance-stop note written after the record `seq`/`recordHash`. */
+export function instanceStopContent(seq: number, recordHash: string): Record<string, unknown> {
+  return { stopped_after_seq: seq, stopped_after: recordHash, outbox: "empty" };
+}
+
+/** Whether `rec` is a stop note of `agent` whose hash is `hash` (the record a head names). */
+export function isStopNote(rec: any, agent: string, hash: string): boolean {
+  const e = rec?.envelope;
+  if (!e || e.kind !== "note" || e.name !== INSTANCE_STOP || e.agent !== agent) return false;
+  try {
+    return hashJson(e) === hash;
+  } catch {
+    return false;
+  }
 }
 
 export function recordHash(rec: { envelope: unknown }): string {

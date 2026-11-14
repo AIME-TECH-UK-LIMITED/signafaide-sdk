@@ -60,6 +60,9 @@ class _Spec:
         try:
             rec.ensure_receipt(d)
         except SignafaideError as e:
+            # Agent frameworks often swallow a tool's error (the model just sees a failed tool):
+            # say once, on stderr, that a strict tool did not run and how to fix it.
+            rec.warn_strict_refused(self.name, e)
             raise NotRecorded(f"{e.message} (strict mode: {self.name} did not run)", code=e.code, status=e.status, docs=e.docs, body=e.body) from None
 
     def call(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None) -> Any:

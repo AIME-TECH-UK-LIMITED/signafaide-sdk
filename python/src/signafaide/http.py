@@ -13,7 +13,7 @@ from .telemetry import HEADER, client_header
 
 #: The hosted witness. Configurable with SIGNAFAIDE_URL (a self-hosted witness, or a local dev
 #: server such as http://127.0.0.1:7474); a release test fails if this is ever a loopback address.
-DEFAULT_URL = "https://api.signafaide.com"
+DEFAULT_URL = "https://api.signafaide.co.uk"
 
 #: Errors the SDK cannot fix by retrying: shipping stops until the configuration changes.
 NON_RETRYABLE = frozenset({"quota_exceeded", "invalid_key", "plan_required", "bad_signature", "invalid_record", "content_mismatch",
@@ -110,6 +110,10 @@ class Client:
 
     def head(self, agent: str) -> dict:
         return self.request("GET", f"/v1/heads/{urllib.parse.quote(agent)}")
+
+    def record(self, record_hash: str) -> dict:
+        """``{record, receipt, anchor}`` of one record of the key's project."""
+        return self.request("GET", f"/v1/records/{urllib.parse.quote(record_hash)}")
 
     def export(self, agent: Optional[str] = None, from_: Optional[str] = None, to: Optional[str] = None) -> dict:
         """A verification pack (§7) of the whole project, or of one agent."""

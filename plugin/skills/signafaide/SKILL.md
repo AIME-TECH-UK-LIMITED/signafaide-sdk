@@ -5,7 +5,7 @@ description: Signed, tamper-evident records of what an AI agent decided and did,
 
 # signafAIde
 
-signafAIde writes a signed, chained record of each tool call an AI agent makes: a `decision` before the tool runs and an `outcome` after it. Records are kept in `.signafaide/` on this machine. Nothing is sent until a person runs `signafaide init` or sets `SIGNAFAIDE_API_KEY`. Once a person opts in, records go to the hosted witness (https://api.signafaide.com), or to a witness named by `SIGNAFAIDE_URL`. Only hashes, tool names, agent names and times are sent, never inputs or outputs (unless stored content is turned on), so agent and tool names must not hold personal data.
+signafAIde writes a signed, chained record of each tool call an AI agent makes: a `decision` before the tool runs and an `outcome` after it. Records are kept in `.signafaide/` on this machine. Nothing is sent until a person runs `signafaide init` or sets `SIGNAFAIDE_API_KEY`. Once a person opts in, records go to the hosted witness (https://api.signafaide.co.uk), or to a witness named by `SIGNAFAIDE_URL`. Only hashes, tool names, agent names and times are sent, never inputs or outputs (unless stored content is turned on), so agent and tool names must not hold personal data.
 
 Use it when the user asks for an audit trail, tamper-evident records or compliance evidence of what an agent decided, or the agent's tools pay, send, approve, delete or change real things. For plain application logs, do what the user asked instead.
 
@@ -37,10 +37,16 @@ Use it when the user asks for an audit trail, tamper-evident records or complian
 
 This is the user's decision. Do not run `signafaide init` yourself: it creates an external sandbox and accepts the service's Terms. In your final message, say that the records are local only for now, and that the user can run `signafaide init` (a free sandbox, no account; it saves `SIGNAFAIDE_API_KEY` to `.env`), set `SIGNAFAIDE_API_KEY`, or point `SIGNAFAIDE_URL` at a self-hosted witness (an Enterprise contract). Records written before then ship later with their original times, up to 7 days old.
 
-`signafaide init` adds `.signafaide/` and `.env` to `.gitignore`. Do not commit them. Tell the user to back up `.signafaide/agents/` (the agent keys); in production, keys can come from a secret store (`SIGNAFAIDE_AGENT_KEY_<NAME>`, made with `signafaide keys create --agent <name> --env live --print`), see https://signafaide.com/docs/production.
+`signafaide init` adds `.signafaide/` and `.env` to `.gitignore`. Do not commit them. Tell the user to back up `.signafaide/agents/` (the agent keys); in production, keys can come from a secret store (`SIGNAFAIDE_AGENT_KEY_<NAME>`, made with `signafaide keys create --agent <name> --env live --print`), see https://signafaide.co.uk/docs/production.
 
-When the user needs evidence for an auditor, a bank or a regulator, end your final message with that path: a live API key and agent keys in the secret store; an auditor link from the console with the agent keys and `head.json` attached, which gives the auditor the records and a pack with the exact verify command; and the verification report for the period (console, Reports). For containers without a persistent disk, point to the checklist in https://signafaide.com/docs/production.
+When the user needs evidence for an auditor, a bank or a regulator, end your final message with that path: a live API key and agent keys in the secret store; an auditor link from the console with the agent keys and `head.json` attached, which gives the auditor the records and a pack with the exact verify command; and the verification report for the period (console, Reports). For containers without a persistent disk, point to the checklist in https://signafaide.co.uk/docs/production.
+
+## Containers without a persistent disk
+
+- Set `SIGNAFAIDE_HEAD_FILE` to a path on a persistent volume or a mounted bucket, so the newest signed heads outlive the container (the auditor's `head.json`). Agent keys come from the secret store, as above.
+- Stored content: by default only hashes leave the machine and the inputs and outputs stay in `.signafaide/chain/`, which such a container loses with its disk. If the user will need them later (replay, an auditor reading inputs and outputs), turn on stored content (`store_content=True` in Python, `storeContent: true` in TypeScript; the witness keeps it encrypted, and live records need a plan that includes it) or keep `.signafaide/chain/` on a persistent volume. Say which one you chose.
+- A new container continues the chain with a signed start note. Call `signafaide.stop()` (Python) or `await stop()` (TypeScript) in the shutdown handler: it sends what is left and writes a signed stop note, so a routine restart is recorded as clean. A start with no stop note before it is shown as a warning, because records the earlier instance had not sent are not known.
 
 ## MCP tools
 
-`signafaide_setup` previews the install command and code edit and changes nothing. `signafaide_verify` runs the checks, `signafaide_status` shows chains and keys, `signafaide_explain_error` explains an error code. `signafaide_init` creates the external sandbox: call it only after the user has agreed.
+`signafaide_setup` previews the install command and code edit and changes nothing. `signafaide_verify` runs the checks, `signafaide_status` shows chains and keys, `signafaide_explain_error` explains an error code. `signafaide_init` creates the external sandbox: call it only after the user has agreed, with `confirm_user_agreed: true` and `user_words` set to what the user wrote when they agreed. Without both it creates nothing.

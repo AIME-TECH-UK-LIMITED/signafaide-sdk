@@ -89,4 +89,20 @@ describe.skipIf(!fs.existsSync(path.join(dist, "index.js")))("process exit (buil
     expect(p.status).toBe(0);
     expect(p.stdout).toMatch(/^signafaide \d/);
   });
+  it("round 6 (#51): with a head file, a program that ends by itself writes the signed stop note; without one it does not", async () => {
+    await new Recorder({ quiet: true, url: ctx.service.url }).createSandbox();
+    const script = `import { record, flush } from ${JSON.stringify(path.join(dist, "index.js"))};\nrecord(() => 1, { name: "x", agent: "risk-0" })();\nawait flush();\n`;
+    const names = () => [...ctx.service.project().records.values()].map(([r]: any) => `${r.envelope.seq} ${r.envelope.name}`);
+    let p = await run(script, { SIGNAFAIDE_URL: ctx.service.url });
+    expect(p.status, p.stderr).toBe(0);
+    expect(names()).toEqual(["1 x", "2 x"]);
+    p = await run(script, { SIGNAFAIDE_URL: ctx.service.url, SIGNAFAIDE_HEAD_FILE: path.join(ctx.root, "..", "vol", "head.json") });
+    expect(p.status, p.stderr).toBe(0);
+    expect(names()).toEqual(["1 x", "2 x", "3 x", "4 x", "5 signafaide.instance_stop"]);
+    expect(new Recorder({ quiet: true }).state.outboxSize()).toBe(0);
+    // Turned off by hand: no stop note.
+    p = await run(script, { SIGNAFAIDE_URL: ctx.service.url, SIGNAFAIDE_HEAD_FILE: path.join(ctx.root, "..", "vol", "head.json"), SIGNAFAIDE_INSTANCE_STOP: "0" });
+    expect(p.status, p.stderr).toBe(0);
+    expect(names().slice(5)).toEqual(["6 x", "7 x"]);
+  });
 });

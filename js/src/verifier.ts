@@ -11,7 +11,7 @@ import { hexToBytes } from "@noble/hashes/utils";
 import { HEX64, b64urlDecode, checkContent, hashJson, keyId, sha256Hex, verifyInclusion, verifySig } from "./crypto.js";
 import { parseJson } from "./jcs.js";
 import { base64Decode, blockAttestations, otsStatus } from "./ots.js";
-import { AGENT_RE, INSTANCE_NOTE, INSTANCE_START, MAX_CLOCK_SKEW_MS, draftErrors, keyEntryErrors, manifestErrors, receiptErrors, recordErrors, validProjectId, validTime, type AgentKeyEntry } from "./records.js";
+import { AGENT_RE, CLEAN_RESTART_NOTE, INSTANCE_NOTE, INSTANCE_START, INSTANCE_STOP, isStopNote, MAX_CLOCK_SKEW_MS, draftErrors, keyEntryErrors, manifestErrors, receiptErrors, recordErrors, validProjectId, validTime, type AgentKeyEntry } from "./records.js";
 import { plural } from "./plural.js";
 import { checkHeader, type BlockRoots } from "./timestamps.js";
 
@@ -480,7 +480,7 @@ export interface LocalInput {
   drafts?: number;
   /** Per chain id, the witness's signed head the chain continues after (§8: a chain this
    * machine started on an empty disk). */
-  bases?: Record<string, { head: any; head_sig: string }>;
+  bases?: Record<string, { head: any; head_sig: string; stop?: any }>;
 }
 
 /** Verify local state chain by chain. Unshipped records are fine; a chain must be
@@ -627,7 +627,7 @@ class Verifier {
   drafts = 0;
   nothingCosigned = false;
   /** Local state: chain id -> the witness's signed head a chain continues after (§8). */
-  localBases: Record<string, { head: any; head_sig: string }> = {};
+  localBases: Record<string, { head: any; head_sig: string; stop?: any }> = {};
 
   constructor(
     private serviceKeys: KeyDoc[],
@@ -813,6 +813,7 @@ class Verifier {
     let edge = 0;
     const based: string[] = [];
     const starts: string[] = [];
+    const clean: string[] = [];
     for (const agent of [...chains.keys()].sort()) {
       const chain = chains.get(agent)!;
       acc.checked += chain.size;
@@ -834,7 +835,14 @@ class Verifier {
           else if (this.x.filter.from !== null) acc.fail(x.label, `the pack is missing seq 1..${seq - 1} of agent ${agent}; its export's from filter is not after the agent's first key, so they belong in it`);
           else acc.fail(x.label, `the pack is missing seq 1..${seq - 1} of agent ${agent} and its export declares no from filter`);
         }
-        if (e.kind === "note" && e.name === INSTANCE_START) starts.push(`${agent} after seq ${seq - 1}`);
+        if (e.kind === "note" && e.name === INSTANCE_START) {
+          // Clean only when the record right before it is a stop note: in the pack, or (local
+          // state) kept with the witness's head this chain continues after.
+          const p = prev && prev.r.envelope.seq + 1 === seq ? prev.r.envelope : null;
+          const base = this.local && !prev ? this.localBases[agent] : undefined;
+          const afterStop = p ? p.kind === "note" && p.name === INSTANCE_STOP : !!base?.stop && base.head?.seq === seq - 1 && e.prev === base.head?.record_hash && isStopNote(base.stop, e.agent, base.head.record_hash);
+          (afterStop ? clean : starts).push(`${agent} after seq ${seq - 1}`);
+        }
         if ("receipt" in x.r) {
           const server = x.r.receipt.batch.server_time;
           if ((ms(e.time) as number) > (ms(server) as number) + MAX_CLOCK_SKEW_MS) acc.fail(x.label, `time ${e.time} is more than 300 s after its batch's server_time ${server}`);
@@ -844,6 +852,7 @@ class Verifier {
     }
     if (edge) acc.notes.push(`${plural(edge, "chain")} start after seq 1, as the export's from filter allows`);
     if (starts.length) acc.notes.push(`${INSTANCE_NOTE}: ${starts.join(", ")}`);
+    if (clean.length) acc.notes.push(`${CLEAN_RESTART_NOTE}: ${clean.join(", ")}`);
     if (based.length) acc.notes.push(`continues after a co-signed record this machine does not hold: ${based.join(", ")} (the witness's signed head, see signed heads)`);
     return chains;
   }

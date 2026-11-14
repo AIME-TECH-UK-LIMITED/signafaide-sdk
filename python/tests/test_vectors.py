@@ -221,7 +221,7 @@ def test_variants(v, bls):
         assert {c.id: c.value or c.status for c in r.checks} == case["expect"]["checks"], (case["name"], str(r))
         if "chain_note" in case["expect"]:
             assert case["expect"]["chain_note"] in r.check("chain").detail, (case["name"], str(r))
-    assert sum(1 for c in v["variants"] if "chain_note" in c["expect"]) == 1
+    assert sum(1 for c in v["variants"] if "chain_note" in c["expect"]) == 3  # an unclean start, a clean restart, a clean restart cut by the window
 
 
 def test_pack_without_bls_says_not_checked(v):

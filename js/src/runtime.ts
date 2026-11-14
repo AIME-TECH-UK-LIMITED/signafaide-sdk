@@ -11,7 +11,10 @@ import { plural } from "./plural.js";
 import {
   API_KEY_RE,
   AGENT_RE,
+  INSTANCE_STOP,
   MAX_CLOCK_SKEW_MS,
+  instanceStopContent,
+  isStopNote,
   agentName,
   clampTime,
   makeDraft,
@@ -78,12 +81,22 @@ export interface RecorderOptions {
   /** Called with the newest signed heads after every accepted batch, to keep them anywhere (an
    * object store, a database). An error it throws is reported and never stops recording. */
   onHead?: (heads: { head: Record<string, unknown>; head_sig: string }[]) => void | Promise<void>;
+  /** Write a signed stop note when the program ends with nothing left to send (§8), so the next
+   * instance's start is a clean restart. Default: on when a head file is set (an ephemeral
+   * container), or `SIGNAFAIDE_INSTANCE_STOP=1`; `SIGNAFAIDE_INSTANCE_STOP=0` turns it off.
+   * `stop()` always writes one. */
+  instanceStop?: boolean;
 }
 
 export interface FlushResult {
   shipped: number;
   left: number;
   errors: Record<string, SignafaideError>;
+}
+
+export interface StopResult extends FlushResult {
+  /** The chains whose stop note the witness co-signed. */
+  stopped: string[];
 }
 
 /** Why a chain cannot ship, found on this machine or said by the witness. */
@@ -120,6 +133,11 @@ export class Recorder {
   readonly test: boolean;
   /** A strict-mode tool ran in this process (client header). */
   strictUsed = false;
+  /** Write a stop note at a clean exit (see `RecorderOptions.instanceStop`). */
+  readonly instanceStop: boolean;
+  /** Agents this process wrote records for since its last stop note. */
+  private wrote = new Set<string>();
+  private toldStrict = false;
   /** @internal */ _url?: string;
   /** @internal */ _apiKey?: string;
   /** `<agent>\n<scope>` -> [key, the key file's identity when loaded] */
@@ -160,6 +178,8 @@ export class Recorder {
     this.state.keyProvider = opts.keyProvider;
     this.state.headFile = opts.headFile || process.env.SIGNAFAIDE_HEAD_FILE || undefined;
     this.onHead = opts.onHead;
+    const envStop = process.env.SIGNAFAIDE_INSTANCE_STOP;
+    this.instanceStop = envStop === "0" ? false : (opts.instanceStop ?? (envStop === "1" || !!this.state.headFile));
     this._url = opts.url;
     this._apiKey = opts.apiKey;
     this.storeContent = opts.storeContent ?? false;
@@ -393,6 +413,7 @@ export class Recorder {
     }
     this.pending++;
     this.exitFlushed = false;
+    if (name !== INSTANCE_STOP) this.wrote.add(agent);
     if (!apiKey && !this.toldLocal && !this.quiet && !this.test) {
       this.toldLocal = true;
       console.error(
@@ -456,8 +477,17 @@ export class Recorder {
       try {
         const sh = await client.head(a);
         const h = sh?.head;
-        if (h && Number.isInteger(h.seq) && h.seq > 0 && /^[0-9a-f]{64}$/.test(h.record_hash) && `${h.project}/${h.env}` === bucket && h.agent === a)
+        if (h && Number.isInteger(h.seq) && h.seq > 0 && /^[0-9a-f]{64}$/.test(h.record_hash) && `${h.project}/${h.env}` === bucket && h.agent === a) {
           out[a] = { seq: h.seq, record_hash: h.record_hash, signed: { head: h, head_sig: sh.head_sig } };
+          // Is the head's record the earlier instance's stop note (a clean restart, §8)? When the
+          // witness cannot say, the start note says "unknown" and counts as one with no stop.
+          try {
+            const got = (await client.record(h.record_hash))?.record;
+            if (isStopNote(got, a, h.record_hash)) out[a].stop = { envelope: got.envelope, key_id: got.key_id, sig: got.sig };
+          } catch (e) {
+            if (!(e instanceof SignafaideError)) throw e;
+          }
+        }
       } catch (e) {
         // No head (no records yet) or no agent at all (not registered yet): the chain starts at
         // seq 1; the shipper registers the key first (§2.4).
@@ -535,6 +565,44 @@ export class Recorder {
       }
       return { shipped, left: this.waiting(), errors };
     });
+  }
+
+  /** A clean stop (§8): ship everything, then write and ship a signed stop note for each agent
+   * this process wrote records for. The next instance's start right after it is a clean restart,
+   * with no "earlier unsent records are not known" warning. Nothing is written while any record
+   * is still unsent (the next start then carries the warning, as it should). Call it in the
+   * shutdown handler of an ephemeral container (SIGTERM); a program that ends by itself with a
+   * head file set does it at exit. */
+  async stop(timeoutMs = 10_000, mode: IoMode = "fg"): Promise<StopResult> {
+    const first = await this.flush(timeoutMs, mode);
+    const apiKey = this.apiKey;
+    const stopped: string[] = [];
+    if (this.test || !apiKey || first.left || Object.keys(first.errors).length) return { ...first, stopped };
+    const bucket = this.state.bucket(apiKey);
+    if (bucket.startsWith(PENDING + "/")) return { ...first, stopped };
+    for (const agent of [...this.wrote].sort()) {
+      const chain = `${bucket}/${agent}`;
+      const last = this.state.lastRecord(chain);
+      if (!last || !("receipt" in last) || (last.envelope.kind === "note" && last.envelope.name === INSTANCE_STOP)) continue;
+      this.write("note", INSTANCE_STOP, instanceStopContent(last.envelope.seq, recordHash(last)), { agent });
+      stopped.push(chain);
+    }
+    this.wrote.clear();
+    if (!stopped.length) return { ...first, stopped };
+    const second = await this.flush(timeoutMs, mode);
+    return { shipped: first.shipped + second.shipped, left: second.left, errors: second.errors, stopped: second.left ? [] : stopped };
+  }
+
+  /** One stderr line, the first time a strict tool is refused in this process (frameworks often
+   * swallow the tool's error): the tool, why, and the fix. */
+  warnStrictRefused(tool: string, err: SignafaideError): void {
+    if (this.toldStrict) return;
+    this.toldStrict = true;
+    const fix =
+      err.code === "no_key"
+        ? "there is no API key, and strict mode needs the witness's receipt. Fix: run `npx signafaide init` (a free sandbox) or set SIGNAFAIDE_API_KEY, or drop strict for this tool"
+        : err.message;
+    console.warn(`signafaide: WARNING strict tool "${tool}" was refused and did not run (${err.code}): ${fix}. Later strict refusals in this process are not printed again.`);
   }
 
   /** Strict mode: ship `rec`'s chain now and return its receipt, or throw. */
@@ -821,7 +889,8 @@ export class Recorder {
   /** The program has nothing left to do: one last attempt, held open at most `exitFlushMs`.
    * Background requests never keep the process alive, so they are cut off here. */
   private onBeforeExit = (): void => {
-    if (this.exitFlushed || !this.exitFlushMs || !this.apiKey || !this.waiting()) return;
+    const stop = this.instanceStop && this.wrote.size > 0 && !this.test;
+    if (this.exitFlushed || !this.exitFlushMs || !this.apiKey || (!this.waiting() && !stop)) return;
     this.exitFlushed = true; // one attempt; beforeExit fires again once it settles
     if (this.halted && this.halted.fp === this.configFp()) return;
     this.bgAbort.abort();
@@ -829,7 +898,18 @@ export class Recorder {
     const ctrl = new AbortController();
     this.exitAbort = ctrl;
     const timer = setTimeout(() => ctrl.abort(), this.exitFlushMs);
-    void this.flushLogged(this.exitFlushMs, "exit").finally(() => clearTimeout(timer));
+    const done = (): void => {
+      clearTimeout(timer);
+      this.exitFlushed = true; // a stop note written here does not ask for another attempt
+    };
+    if (!stop) void this.flushLogged(this.exitFlushMs, "exit").finally(done);
+    // A clean exit of an ephemeral instance: the stop note, when everything else was sent.
+    else void this.stop(this.exitFlushMs, "exit").then((r) => {
+      const errs = Object.entries(r.errors);
+      if (errs.length && !ctrl.signal.aborted) this.report("signafaide: " + errs.map(([a, e]) => (e.message.includes(a) ? e.message : `${a}: ${e.message}`)).join("; "));
+    }, (e) => {
+      if (!ctrl.signal.aborted) this.report(`signafaide: ${(e as Error).message}`);
+    }).finally(done);
   };
 
   private onExit = (): void => {

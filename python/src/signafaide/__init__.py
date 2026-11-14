@@ -42,6 +42,7 @@ __all__ = [
     "wrap_tool",
     "note",
     "flush",
+    "stop",
     "verify",
     "status",
     "replay",
@@ -109,6 +110,13 @@ def init(
 def flush(timeout: float = 10.0) -> dict:
     """Ship the outbox now. Returns ``{shipped, left, errors}``."""
     return runtime.get().flush(timeout)
+
+
+def stop(timeout: float = 10.0) -> dict:
+    """A clean stop of this instance (§8): ship everything, then write and ship a signed stop note
+    per agent, so the next instance's start is a clean restart. Call it in the shutdown handler of
+    an ephemeral container. Returns ``{shipped, left, errors, stopped}``."""
+    return runtime.get().stop(timeout)
 
 
 def status() -> dict:

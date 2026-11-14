@@ -168,7 +168,7 @@ describe("agent keys", () => {
 
 describe("release", () => {
   it("the default witness is the hosted service, never a loopback address", () => {
-    expect(DEFAULT_URL).toBe("https://api.signafaide.com");
+    expect(DEFAULT_URL).toBe("https://api.signafaide.co.uk");
     const host = new URL(DEFAULT_URL).hostname;
     expect(host === "localhost" || /^127\./.test(host) || host === "::1").toBe(false);
   });

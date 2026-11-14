@@ -282,13 +282,35 @@ def draft_errors(rec: Any) -> list:
 #: The name of the note a new instance writes first when it continues a chain its disk does not
 #: hold (§8): records an earlier instance wrote but had not sent are not in the chain.
 INSTANCE_START = "signafaide.instance_start"
-#: The check 4 note (§7) naming the chains that continue in a new instance.
+#: The name of the note an instance writes last on a clean stop (§8): its outbox was empty, so it
+#: had sent every record it wrote. An instance start right after it is a clean restart.
+INSTANCE_STOP = "signafaide.instance_stop"
+#: The check 4 note (§7) naming the instance starts with no stop note right before them.
 INSTANCE_NOTE = "a new instance continued the chain, so records an earlier instance wrote but had not sent are not known"
+#: The check 4 note (§7) naming the instance starts right after a stop note (clean restarts).
+CLEAN_RESTART_NOTE = "a new instance continued the chain right after the earlier instance's signed stop note (a clean restart, nothing to warn about)"
 
 
-def instance_start_content(seq: int, record_hash_: str) -> dict:
-    """The content of an instance-start note continuing after the witness's head *seq*."""
-    return {"continues_after_seq": seq, "continues_after": record_hash_, "earlier_unsent": "unknown"}
+def instance_start_content(seq: int, record_hash_: str, after_stop: bool = False) -> dict:
+    """The content of an instance-start note continuing after the witness's head *seq*.
+    *after_stop*: the client saw that the head's record is a stop note."""
+    return {"continues_after_seq": seq, "continues_after": record_hash_, "earlier_unsent": "none" if after_stop else "unknown"}
+
+
+def instance_stop_content(seq: int, record_hash_: str) -> dict:
+    """The content of an instance-stop note written after the record *seq*."""
+    return {"stopped_after_seq": seq, "stopped_after": record_hash_, "outbox": "empty"}
+
+
+def is_stop_note(rec: Any, agent: str, hash_: str) -> bool:
+    """Whether *rec* is a stop note of *agent* whose hash is *hash_* (the record a head names)."""
+    e = rec.get("envelope") if isinstance(rec, dict) else None
+    if not isinstance(e, dict) or e.get("kind") != "note" or e.get("name") != INSTANCE_STOP or e.get("agent") != agent:
+        return False
+    try:
+        return hash_json(e) == hash_
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def sign_draft(key: SigningKey, draft: dict, *, project: str, env: str, prev: Optional[str], ref: Optional[str], seq: Optional[int] = None) -> dict:

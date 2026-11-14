@@ -483,8 +483,15 @@ pub const AGENT_KEYS_FORMAT: &str = "signafaide-agent-keys/1";
 /// hold (§8): records an earlier instance wrote but had not sent are not in the chain.
 pub const INSTANCE_START: &str = "signafaide.instance_start";
 
-/// The check 4 note (§7) naming the chains that continue in a new instance.
+/// The name of the note an instance writes last on a clean stop (§8): its outbox was empty, so
+/// it had sent every record it wrote. An instance start right after it is a clean restart.
+pub const INSTANCE_STOP: &str = "signafaide.instance_stop";
+
+/// The check 4 note (§7) naming the instance starts with no stop note right before them.
 pub const INSTANCE_NOTE: &str = "a new instance continued the chain, so records an earlier instance wrote but had not sent are not known";
+
+/// The check 4 note (§7) naming the instance starts right after a stop note (clean restarts).
+pub const CLEAN_RESTART_NOTE: &str = "a new instance continued the chain right after the earlier instance's signed stop note (a clean restart, nothing to warn about)";
 
 /// §2.5 the agent-key manifest a customer gives auditors (`--agent-keys`).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

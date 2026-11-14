@@ -5,7 +5,7 @@ import { VERSION } from "./version.js";
 
 /** The hosted witness. Configurable with SIGNAFAIDE_URL (a self-hosted witness, or a local dev
  * server such as http://127.0.0.1:7474); a release test fails if this is ever a loopback address. */
-export const DEFAULT_URL = "https://api.signafaide.com";
+export const DEFAULT_URL = "https://api.signafaide.co.uk";
 
 /** Errors the SDK cannot fix by retrying: shipping stops until the configuration changes. */
 export const NON_RETRYABLE = new Set(["quota_exceeded", "invalid_key", "plan_required", "bad_signature", "invalid_record", "content_mismatch", "chain_conflict", "unknown_agent", "key_mismatch", "bad_response"]);
@@ -143,6 +143,11 @@ export class Client {
 
   head(agent: string): Promise<any> {
     return this.request("GET", `/v1/heads/${encodeURIComponent(agent)}`);
+  }
+
+  /** `{record, receipt, anchor}` of one record of the key's project. */
+  record(recordHash: string): Promise<any> {
+    return this.request("GET", `/v1/records/${encodeURIComponent(recordHash)}`);
   }
 
   /** A verification pack (§7) of the whole project, or of one agent. */

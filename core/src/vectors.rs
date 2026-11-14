@@ -187,6 +187,8 @@ enum Build {
     HugeRound,
     /// Seq 3 is an instance-start note (§8): a new instance continued after seq 2.
     InstanceStart,
+    /// Seq 2 is an instance-stop note and seq 3 the next instance's start note: a clean restart.
+    CleanRestart,
 }
 
 pub struct Fixture {
@@ -223,10 +225,15 @@ fn build(mode: Build) -> Fixture {
     let (ak, sk) = (agent_key(), service_key());
     let mut records: Vec<(SignedRecord, Hash)> = Vec::new();
     let mut prev = None;
-    for (i, (kind, name, time, mut content, store)) in sample_contents().into_iter().enumerate() {
-        let name = if mode == Build::InstanceStart && i == 2 {
-            content = json!({"continues_after_seq": 2, "continues_after": records[1].1, "earlier_unsent": "unknown"});
+    for (i, (mut kind, name, time, mut content, store)) in sample_contents().into_iter().enumerate() {
+        let name = if matches!(mode, Build::InstanceStart | Build::CleanRestart) && i == 2 {
+            let unsent = if mode == Build::CleanRestart { "none" } else { "unknown" };
+            content = json!({"continues_after_seq": 2, "continues_after": records[1].1, "earlier_unsent": unsent});
             INSTANCE_START
+        } else if mode == Build::CleanRestart && i == 1 {
+            kind = Kind::Note;
+            content = json!({"stopped_after_seq": 1, "stopped_after": records[0].1, "outbox": "empty"});
+            INSTANCE_STOP
         } else {
             name
         };
@@ -693,6 +700,14 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         p["anchors"] = json!([]);
     });
     let instance_start = build(Build::InstanceStart).pack;
+    let clean_restart = build(Build::CleanRestart).pack;
+    // The same clean restart exported from the start note on: the stop note is outside the pack,
+    // so the pack cannot show it and the start counts as one with no stop before it.
+    let mut cut_restart = build(Build::CleanRestart).pack;
+    cut_restart["filter"]["from"] = json!("2026-11-13T10:00:01.000Z");
+    let cut: Vec<Value> = cut_restart["records"].as_array().unwrap()[2..].to_vec();
+    cut_restart["records"] = json!(cut);
+    sign_export(&mut cut_restart);
     vec![
         ("independent service and agent keys, offline", valid.clone(), none()),
         ("young batches no anchor covers yet: anchors and public timestamp pending", not_yet_anchored, none()),
@@ -728,6 +743,8 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         ("checked by the service with its own key registry", valid.clone(), Inputs { agent_keys: Some(Value::Null), by_service: true, ..none() }),
         ("service keys fetched over plain http from a local address", valid, Inputs { service_keys_plain_http: true, ..none() }),
         ("a new instance continued the chain after seq 2 (an instance-start note)", instance_start, none()),
+        ("a clean restart: the start note at seq 3 follows a stop note at seq 2", clean_restart, none()),
+        ("a clean restart exported from its start note on: the stop note is outside the pack", cut_restart, none()),
     ]
 }
 
@@ -931,7 +948,7 @@ pub fn generate() -> Value {
             assert!(r.passed(), "{name}\n{}", r.to_text());
             t["expect"] = expected(&r);
             // The instance-start note (§7 check 4) is part of the expected chain detail.
-            if let Some(n) = r.checks[3].detail.split("; ").find(|n| n.starts_with(INSTANCE_NOTE)) {
+            if let Some(n) = r.checks[3].detail.split("; ").find(|n| n.starts_with(INSTANCE_NOTE) || n.starts_with(CLEAN_RESTART_NOTE)) {
                 t["expect"]["chain_note"] = json!(n);
             }
             t

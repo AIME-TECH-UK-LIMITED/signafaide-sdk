@@ -4,7 +4,7 @@ Signed, chained records of what your AI agents decided. Each record is signed wi
 
 - Nothing is sent until a person runs `signafaide init` or sets `SIGNAFAIDE_API_KEY`. After that each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them. Each content hash is salted with 16 random bytes that stay on your machine with the content, so the hash alone cannot be used to guess the content, even when it has only a few possible values.
 - The sandbox `init` creates needs no account, email or card.
-- To keep the evidence in your environment, self-host the witness and set `SIGNAFAIDE_URL` ([self-host](https://signafaide.com/docs/self-host)).
+- To keep the evidence in your environment, self-host the witness and set `SIGNAFAIDE_URL` ([self-host](https://signafaide.co.uk/docs/self-host)).
 - Apache-2.0, with a public protocol spec and an independent verifier.
 
 ```bash
@@ -88,7 +88,7 @@ Neither framework is a dependency: `wrap_tools` recognises the objects by their 
 def wire_funds(account: str, amount: float): ...
 ```
 
-The decision is shipped first, and the function runs only after the service has returned its receipt. If the service can't be reached or refuses the record, or there is no API key (`no_key`), `signafaide.NotRecorded` is raised and the function does not run.
+The decision is shipped first, and the function runs only after the service has returned its receipt. If the service can't be reached or refuses the record, or there is no API key (`no_key`), `signafaide.NotRecorded` is raised and the function does not run. Agent frameworks often turn a tool's error into a failed tool call and print nothing, so the first time a strict tool is refused in a process the SDK writes one warning line to stderr with the tool's name and the fix.
 
 ## Hash-only
 
@@ -102,6 +102,22 @@ signafaide.init(store_content=True)        # everything
 ## Offline
 
 Nothing waits on the network unless you use strict mode: writing a record never makes a request, and a wrong key or an unreachable witness is a warning, never an exception in your tool. A malformed `SIGNAFAIDE_API_KEY` is caught here and never sent. With an API key, records go to `.signafaide/outbox/` and are shipped in batches by a background thread: every 2 seconds, every 100 records, and once more on exit (at most 3 seconds). If the service can't be reached, they stay on disk and are retried with backoff; a refusal retrying cannot fix (quota used up, a revoked key) stops sending until the configuration changes. They ship on the next run or with `signafaide flush`. Records are never lost on exit. The delay shows as the gap between a record's `time` and its batch's `server_time`.
+
+## Containers that restart
+
+A container with no persistent disk continues its chain after the witness's head, and its first record is a signed start note. So that a routine restart is not read as a possible loss, end the instance with `signafaide.stop()`: it ships what is left and then writes a signed stop note. A start right after a stop note is a clean restart; a start with no stop note before it (a crash, a kill, an unreachable witness) is shown as a warning, because records the earlier instance had not sent are not known.
+
+```python
+import signal, sys, signafaide
+
+def on_term(signum, frame):
+    signafaide.stop()  # {shipped, left, errors, stopped}
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, on_term)
+```
+
+A program that ends by itself with `SIGNAFAIDE_HEAD_FILE` set writes the stop note at exit, within the exit limit above. `SIGNAFAIDE_INSTANCE_STOP=0` turns that off; `=1` turns it on without a head file.
 
 ## Errors
 
@@ -169,7 +185,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-python/0.1.0 (python 3.12.3; adapter=none; agent=claude-code; via=sdk)
+X-Signafaide-Client: signafaide-python/0.2.0 (python 3.12.3; adapter=none; agent=claude-code; via=sdk)
 ```
 
 It holds the SDK and its version, the Python runtime and its version, and the framework adapter in use (`langchain`, `openai-agents` or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`) and kept in `.signafaide/config.json`; it is never guessed per process. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
@@ -181,17 +197,18 @@ The header and the events hold no content, file paths, hostnames or user names. 
 | variable | default |
 |---|---|
 | `SIGNAFAIDE_API_KEY` | read from the environment, then `.env`; created by `signafaide init`; none: local only |
-| `SIGNAFAIDE_URL` | `https://api.signafaide.com`; a self-hosted witness, or `http://127.0.0.1:7474` for a local dev server. Alone it sends nothing |
+| `SIGNAFAIDE_URL` | `https://api.signafaide.co.uk`; a self-hosted witness, or `http://127.0.0.1:7474` for a local dev server. Alone it sends nothing |
 | `SIGNAFAIDE_HOME` | `.signafaide/` in the project root; a mounted volume or `/tmp/signafaide` in production |
 | `SIGNAFAIDE_AGENT_KEY_<NAME>` | an agent's key file content from a secret store (or `key_provider=` in `signafaide.init`); live keys can use `SIGNAFAIDE_AGENT_KEY_LIVE_<NAME>`, made with `signafaide keys create --env live --print` |
 | `SIGNAFAIDE_HEAD_FILE` | unset: a file outside `.signafaide/` (a persistent volume) that also keeps the newest signed heads, for containers whose disk does not last; or `on_head=` in `signafaide.init` |
+| `SIGNAFAIDE_INSTANCE_STOP` | unset: a signed stop note is written at a clean exit when a head file is set; `1` always, `0` never (see Containers that restart) |
 | `SIGNAFAIDE_EXIT_FLUSH_MS` | `3000`: the longest a finished program is kept open to send; `0` never |
 | `SIGNAFAIDE_TEST` | test mode is on by itself under pytest (records in a temporary folder, nothing sent); `1` forces it, `0` turns it off |
 | `SIGNAFAIDE_DISABLED` | `1`: wrapped functions run and nothing is recorded |
 | `SIGNAFAIDE_SEGMENT_BYTES` | `67108864`: a shipped chain file larger than this rolls into a sealed segment |
 | `SIGNAFAIDE_TELEMETRY` | `0` turns off the adapter, agent and strict fields and the events |
 
-Running in containers, with replicas, on read-only or ephemeral disks, on serverless or in CI: see the [production guide](https://signafaide.com/docs/production). A record's time never goes back along its chain: if the clock steps back, the record keeps the previous record's time and the clock's reading goes in `meta.wall_time`.
+Running in containers, with replicas, on read-only or ephemeral disks, on serverless or in CI: see the [production guide](https://signafaide.co.uk/docs/production). A record's time never goes back along its chain: if the clock steps back, the record keeps the previous record's time and the clock's reading goes in `meta.wall_time`.
 
 Each project and env has its own chain per agent. A new key, for example a live key replacing the sandbox key, starts a fresh chain at seq 1. The old chain stays on disk, and `signafaide status` lists every chain.
 

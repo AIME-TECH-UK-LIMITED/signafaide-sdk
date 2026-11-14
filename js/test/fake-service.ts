@@ -94,6 +94,10 @@ export class FakeService {
       if (this.headsUnknownAgent && !prj.agents.has(agent)) return err(400, "unknown_agent", `Agent '${agent}' is not registered in this project and env: call POST /v1/agents first.`);
       return err(404, "not_found", "This agent has no records.");
     }
+    if (method === "GET" && path.startsWith("/v1/records/")) {
+      const got = prj.records.get(path.slice("/v1/records/".length));
+      return got ? [200, { record: got[0], receipt: got[1], anchor: null }] : err(404, "not_found", "No record with this hash in this project.");
+    }
     if (method === "POST" && path === "/v1/agents") {
       const kid = keyId(b64urlDecode(body.public_key));
       for (const [name, keys] of prj.agents) if (name !== body.name && keys.has(kid)) return err(400, "invalid_record", "This key is registered to another agent.");

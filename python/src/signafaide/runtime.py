@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from ._plural import plural
 from .crypto import SigningKey, b64url, hash_json
 from .http import DEFAULT_URL, Client, SignafaideError
-from .records import (API_KEY_RE, AGENT_RE, MAX_CLOCK_SKEW_MS, agent_name, clamp_time, make_draft, make_record, now, parse_time, record_hash,
+from .records import (API_KEY_RE, AGENT_RE, INSTANCE_STOP, MAX_CLOCK_SKEW_MS, instance_stop_content, is_stop_note, agent_name, clamp_time, make_draft, make_record, now, parse_time, record_hash,
                       registration, valid_project_id, with_wall_time)
 from .state import PENDING, KeyProvider, State, StateError, agent_key_env_name, append_env_file, key_fingerprint, read_env_file, scope_of, wire_record
 from . import telemetry
@@ -72,6 +72,7 @@ class Recorder:
         exit_flush: Optional[float] = None,
         head_file: Optional[str] = None,
         on_head: Optional[Callable[[List[dict]], None]] = None,
+        instance_stop: Optional[bool] = None,
     ):
         self.test = test_mode()
         if home is None and self.test and not os.environ.get("SIGNAFAIDE_HOME"):
@@ -89,6 +90,14 @@ class Recorder:
         #: Called with the newest signed heads after every accepted batch, to keep them anywhere
         #: (an object store, a database). An exception it raises is logged and never stops recording.
         self.on_head = on_head
+        #: Write a signed stop note when the program ends with nothing left to send (§8), so the
+        #: next instance's start is a clean restart. Default: on when a head file is set (an
+        #: ephemeral container) or ``SIGNAFAIDE_INSTANCE_STOP=1``; ``SIGNAFAIDE_INSTANCE_STOP=0``
+        #: turns it off. ``stop()`` always writes one.
+        env_stop = os.environ.get("SIGNAFAIDE_INSTANCE_STOP")
+        self.instance_stop = False if env_stop == "0" else (instance_stop if instance_stop is not None else (env_stop == "1" or bool(self.state.head_file)))
+        self._wrote: Set[str] = set()  # agents this process wrote records for since its last stop note
+        self._told_strict = False
         self._url = url
         self._api_key = api_key
         self.store_content = store_content
@@ -351,6 +360,8 @@ class Recorder:
             if rec is not None:
                 break
         self._pending += 1
+        if name != INSTANCE_STOP:
+            self._wrote.add(agent)
         if not api_key and not self._told_local and not self.quiet and not self.test:
             self._told_local = True
             print(
@@ -421,6 +432,14 @@ class Recorder:
             seq, rh = h.get("seq"), h.get("record_hash")
             if isinstance(seq, int) and seq > 0 and isinstance(rh, str) and re.fullmatch(r"[0-9a-f]{64}", rh) and f"{h.get('project')}/{h.get('env')}" == bucket and h.get("agent") == a:
                 out[a] = {"seq": seq, "record_hash": rh, "signed": {"head": h, "head_sig": sh.get("head_sig")}}
+                # Is the head's record the earlier instance's stop note (a clean restart, §8)? When
+                # the witness cannot say, the start note says "unknown" and counts as one with no stop.
+                try:
+                    got = (client.record(rh) or {}).get("record")
+                except SignafaideError:
+                    got = None
+                if is_stop_note(got, a, rh):
+                    out[a]["stop"] = {"envelope": got["envelope"], "key_id": got.get("key_id"), "sig": got.get("sig")}
         return out
 
     def _waiting(self) -> int:
@@ -469,6 +488,46 @@ class Recorder:
                     if e.retryable or e.code in PROJECT_WIDE:
                         break  # the same error applies to every chain
         return {"shipped": shipped, "left": self._waiting(), "errors": errors}
+
+    def stop(self, timeout: float = 10.0, *, background: bool = False) -> dict:
+        """A clean stop (§8): ship everything, then write and ship a signed stop note for each
+        agent this process wrote records for. The next instance's start right after it is a clean
+        restart, with no "earlier unsent records are not known" warning. Nothing is written while
+        any record is still unsent (the next start then carries the warning, as it should). Call
+        it in the shutdown handler of an ephemeral container (SIGTERM); a program that ends by
+        itself with a head file set does it at exit. Returns ``{shipped, left, errors, stopped}``;
+        ``stopped`` lists the chains whose stop note the witness co-signed."""
+        first = self.flush(timeout, background=background)
+        api_key = self.api_key
+        stopped: List[str] = []
+        if self.test or not api_key or first["left"] or first["errors"]:
+            return {**first, "stopped": stopped}
+        bucket = self.state.bucket(api_key)
+        if bucket.startswith(PENDING + "/"):
+            return {**first, "stopped": stopped}
+        for agent in sorted(self._wrote):
+            chain = f"{bucket}/{agent}"
+            last = self.state.last_record(chain) if self.state.chain_path(chain).exists() else None
+            if not last or "receipt" not in last or (last["envelope"]["kind"] == "note" and last["envelope"]["name"] == INSTANCE_STOP):
+                continue
+            self.write("note", INSTANCE_STOP, instance_stop_content(last["envelope"]["seq"], record_hash(last)), agent=agent)
+            stopped.append(chain)
+        self._wrote.clear()
+        if not stopped:
+            return {**first, "stopped": stopped}
+        second = self.flush(timeout, background=background)
+        return {"shipped": first["shipped"] + second["shipped"], "left": second["left"], "errors": second["errors"], "stopped": [] if second["left"] else stopped}
+
+    def warn_strict_refused(self, tool: str, err: SignafaideError) -> None:
+        """One stderr line, the first time a strict tool is refused in this process (frameworks
+        often swallow the tool's error): the tool, why, and the fix."""
+        if self._told_strict:
+            return
+        self._told_strict = True
+        fix = ("there is no API key, and strict mode needs the witness's receipt. Fix: run `signafaide init` (a free sandbox) or set "
+               "SIGNAFAIDE_API_KEY, or drop strict for this tool") if err.code == "no_key" else err.message
+        print(f"signafaide: WARNING strict tool \"{tool}\" was refused and did not run ({err.code}): {fix}. Later strict refusals in this process are not printed again.",
+              file=sys.stderr)
 
     def ensure_receipt(self, rec: dict, timeout: float = 10.0) -> dict:
         """Strict mode: ship *rec*'s chain now and return its receipt, or raise."""
@@ -752,14 +811,24 @@ class Recorder:
         self._stopped = True
         self._wake.set()
         limit = self.exit_flush if timeout is None else timeout
-        if not limit or not self.api_key or not self._waiting():
+        stop = self.instance_stop and bool(self._wrote) and not self.test
+        if not limit or not self.api_key or not (self._waiting() or stop):
             return
         if self._halted is not None and self._halted[0] == self._config_fp():
             return
         self._deadline = time.monotonic() + limit
         self._deadline_limit = limit
         try:
-            self._flush_logged(limit, background=True)
+            if stop:
+                # A clean exit of an ephemeral instance: the stop note, when everything else was sent.
+                try:
+                    result = self.stop(limit, background=True)
+                    if result["errors"]:
+                        self._report("signafaide: " + "; ".join(str(e) if a in str(e) else f"{a}: {e}" for a, e in result["errors"].items()))
+                except Exception as e:  # noqa: BLE001  never fail the program's exit
+                    self._report(f"signafaide: {e}")
+            else:
+                self._flush_logged(limit, background=True)
         finally:
             self._deadline = None
         left = self._waiting()

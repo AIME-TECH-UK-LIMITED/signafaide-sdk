@@ -24,6 +24,8 @@ beforeEach(async () => {
 });
 afterEach(() => client.close());
 
+const AGREED = { confirm_user_agreed: true, user_words: "yes, create the sandbox" };
+
 async function call(name: string, args: Record<string, unknown> = {}): Promise<[string, boolean]> {
   const r = await client.callTool({ name, arguments: args });
   return [(r.content as { text: string }[]).map((c) => c.text).join("\n"), !!r.isError];
@@ -61,6 +63,8 @@ describe("mcp server", () => {
     expect(tools[0].description).toContain("changes no file, creates nothing and sends nothing");
     expect(tools[1].description).toContain("Creates an external sandbox");
     expect(tools[1].description).toContain("ask the user and call it only after they agree");
+    expect(tools[1].description).toContain("creates nothing unless confirm_user_agreed is true");
+    expect(Object.keys((tools[1].inputSchema as any).properties)).toEqual(["directory", "confirm_user_agreed", "user_words"]);
   });
 
   it("setup: python with uv, a preview that changes nothing; signafaide_init creates the sandbox once", async () => {
@@ -81,14 +85,24 @@ describe("mcp server", () => {
     expect(out).toContain("{v, kind, project, env, agent, seq, prev, time, name, content_hash, ref}");
     expect(out).toContain("Content: hash-only by default. The full inputs and outputs stay in .signafaide/chain/<project>/<env>/<agent>.jsonl");
     expect(out).toContain("store_content=True sends the content too, encrypted at rest (live records need the Team plan)");
-    expect(out).toContain("https://signafaide.com/docs/self-host");
+    expect(out).toContain("https://signafaide.co.uk/docs/self-host");
     expect(out.split("\n").at(-1)).toBe("Nothing was changed, created or sent by this preview.");
     expect(ctx.service.calls).toEqual([]);
     expect(fs.existsSync(path.join(ctx.root, ".env"))).toBe(false);
     expect(fs.existsSync(path.join(ctx.root, ".signafaide"))).toBe(false);
     expect(fs.existsSync(path.join(ctx.root, ".gitignore"))).toBe(false);
 
-    [out, err] = await call("signafaide_init");
+    // #49: the consent gate is an argument, not only a description.
+    for (const args of [{}, { confirm_user_agreed: true }, { confirm_user_agreed: true, user_words: " " }, { confirm_user_agreed: false, user_words: "yes" }, { user_words: "yes, go ahead" }]) {
+      [out, err] = await call("signafaide_init", args);
+      expect(err, JSON.stringify(args)).toBe(true);
+      expect(out).toContain("nothing was created");
+      expect(out).toContain("confirm_user_agreed: true and user_words");
+      expect(out).toContain(`${ctx.service.url}/legal/terms`);
+    }
+    expect(ctx.service.calls).toEqual([]);
+    expect(fs.existsSync(path.join(ctx.root, ".env"))).toBe(false);
+    [out, err] = await call("signafaide_init", AGREED);
     expect(err).toBe(false);
     expect(out).toMatch(/Created a sandbox at .*claim link.*\/claim\//);
     expect(out).toContain(`Tell the human: By creating a sandbox you agree to the signafAIde Terms (${ctx.service.url}/legal/terms) and Privacy notice (${ctx.service.url}/legal/privacy).`);
@@ -140,7 +154,7 @@ describe("mcp server", () => {
 
   it("setup: a Python script with no dependency file is Python, even next to a package.json that only holds signafaide", async () => {
     write("agent.py", "def issue_refund(ticket_id, amount):\n    return {}\n");
-    write("package.json", JSON.stringify({ dependencies: { signafaide: "file:signafaide-0.1.0.tgz" } }));
+    write("package.json", JSON.stringify({ dependencies: { signafaide: "file:signafaide-0.2.0.tgz" } }));
     let [out] = await call("signafaide_setup");
     expect(out).toContain("Language: python");
     expect(out).toContain("agent.py:1 issue_refund");
@@ -213,7 +227,7 @@ describe("mcp server", () => {
     expect(out).toContain("co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, or self-host");
     expect(out.split("\n").at(-1)).toBe("PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)");
     expect(ctx.service.calls).toEqual([]);
-    await call("signafaide_init");
+    await call("signafaide_init", AGREED);
     [out] = await call("signafaide_verify");
     expect(out).toContain("shipped 3 waiting records first");
     expect(out).toMatch(/Client signatures +PASS/);
@@ -233,7 +247,7 @@ describe("mcp server", () => {
     let [out] = await call("signafaide_claim_link");
     expect(out).toContain("No sandbox in this project: records stay local");
     write("requirements.txt", "");
-    await call("signafaide_init");
+    await call("signafaide_init", AGREED);
     [out] = await call("signafaide_claim_link");
     expect(out).toMatch(/^Claim link for the human: http.*\/claim\//);
     [out] = await call("signafaide_status");

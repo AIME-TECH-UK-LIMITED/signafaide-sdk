@@ -37,7 +37,7 @@ def _mask(key: Optional[str]) -> str:
 
 
 def _site(url: str) -> str:
-    """The website of a witness: https://api.signafaide.com -> https://signafaide.com."""
+    """The website of a witness: https://api.signafaide.co.uk -> https://signafaide.co.uk."""
     import urllib.parse
 
     u = urllib.parse.urlsplit(url)
@@ -81,7 +81,7 @@ def _upgrade_at_limit(rec: runtime.Recorder, errors) -> None:
 
 
 @command("init", "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link. "
-         "The witness is https://api.signafaide.com unless SIGNAFAIDE_URL names another (a self-hosted witness, or http://127.0.0.1:7474 "
+         "The witness is https://api.signafaide.co.uk unless SIGNAFAIDE_URL names another (a self-hosted witness, or http://127.0.0.1:7474 "
          "for a local one); an existing key is read from SIGNAFAIDE_API_KEY. Adds .signafaide/ and .env to .gitignore")
 def cmd_init(a: argparse.Namespace) -> int:
     rec = _recorder()

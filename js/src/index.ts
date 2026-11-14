@@ -13,7 +13,7 @@
 import { installNodeCrypto } from "./nodecrypto.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { configure, getRecorder, type FlushResult, type Recorder, type RecorderOptions } from "./runtime.js";
+import { configure, getRecorder, type FlushResult, type Recorder, type RecorderOptions, type StopResult } from "./runtime.js";
 import { parseJson } from "./jcs.js";
 import { checkContent, verifySig } from "./crypto.js";
 import { plural } from "./plural.js";
@@ -41,7 +41,7 @@ export * from "./core.js";
 
 installNodeCrypto();
 export { NotRecorded, note, record, toJsonable, wrapTool, wrapTools, type RecordOptions, type WrapOptions } from "./record.js";
-export { Recorder, configure, getRecorder, recordingDisabled, testMode, type Blocked, type FlushResult, type RecorderOptions } from "./runtime.js";
+export { Recorder, configure, getRecorder, recordingDisabled, testMode, type Blocked, type FlushResult, type RecorderOptions, type StopResult } from "./runtime.js";
 export { State, StateError } from "./state.js";
 export { Entry, Replay, loadServiceKeys, replay, type ReplayOptions } from "./replay.js";
 export { ExperimentReport, VerificationFailed, compare, recordedValue, type CompareOptions, type ExperimentRow } from "./experiments.js";
@@ -73,6 +73,13 @@ export function flush(timeoutMs?: number): Promise<FlushResult> {
   return getRecorder().flush(timeoutMs);
 }
 
+/** A clean stop of this instance (§8): ship everything, then write and ship a signed stop note
+ * per agent, so the next instance's start is a clean restart. Call it in the shutdown handler of
+ * an ephemeral container. */
+export function stop(timeoutMs?: number): Promise<StopResult> {
+  return getRecorder().stop(timeoutMs);
+}
+
 /** Key, env, agents, last receipts and outbox size. */
 export function status() {
   return getRecorder().status();
@@ -100,8 +107,8 @@ export interface VerifyOptions {
 }
 
 /** The signed heads local chains continue after (§8, chains started on an empty disk). */
-function chainBases(st: State, chainIds: string[]): Record<string, { head: any; head_sig: string }> {
-  const out: Record<string, { head: any; head_sig: string }> = {};
+function chainBases(st: State, chainIds: string[]): Record<string, { head: any; head_sig: string; stop?: any }> {
+  const out: Record<string, { head: any; head_sig: string; stop?: any }> = {};
   for (const c of new Set(chainIds)) {
     const b = st.chainBase(c);
     if (b) out[c] = b;

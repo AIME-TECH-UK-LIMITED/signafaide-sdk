@@ -43,10 +43,10 @@ export function SETUP_NOTES(url?: string): string[] {
     "what leaves the machine after that: only hashes (hash-only by default). Full inputs and outputs stay in .signafaide/chain/<project>/<env>/<agent>.jsonl; storeContent (TypeScript) or store_content=True (Python) sends the content too, encrypted at rest (live records need the Team plan).",
     url
       ? `witness: ${url} (SIGNAFAIDE_URL in each MCP entry); it needs an API key from that instance, or \`signafaide init\` against it`
-      : "witness: https://api.signafaide.com by default; a self-hosted witness (Enterprise contract) is set with --url <witness url> (https://signafaide.com/docs/self-host)",
+      : "witness: https://api.signafaide.co.uk by default; a self-hosted witness (Enterprise contract) is set with --url <witness url> (https://signafaide.co.uk/docs/self-host)",
     "strict mode: wrap tools that move money, freeze, delete or send with strict: true (strict=True in Python), so they run only once the witness has co-signed the decision",
     "for an auditor: a live key, agent keys in a secret store (signafaide keys create --agent <name> --env live --print), an auditor link with the keys and head.json attached, and the verification report for the period",
-    "agent names: give each agent an explicit name, e.g. wrapTools(tools, { agent: \"claims-bot\" }) or wrap_tools(tools, agent=\"claims-bot\"); otherwise the folder name is used. Production set-up: https://signafaide.com/docs/production",
+    "agent names: give each agent an explicit name, e.g. wrapTools(tools, { agent: \"claims-bot\" }) or wrap_tools(tools, agent=\"claims-bot\"); otherwise the folder name is used. Production set-up: https://signafaide.co.uk/docs/production",
   ];
 }
 

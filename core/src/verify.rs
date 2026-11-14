@@ -509,7 +509,7 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         }
     }
     let mut edge = 0;
-    let mut starts: Vec<String> = Vec::new();
+    let (mut starts, mut clean): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
     for (agent, chain) in &chains {
         acc[3].checked += chain.len();
         let mut prev: Option<&Rec> = None;
@@ -534,7 +534,10 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
                 None => {}
             }
             if e.kind == Kind::Note && e.name == INSTANCE_START {
-                starts.push(format!("{agent} after seq {}", seq - 1));
+                // Clean only when the record right before it is in the pack and is a stop note.
+                let after_stop = matches!(prev, Some(p) if p.r.envelope.seq + 1 == seq && p.r.envelope.kind == Kind::Note && p.r.envelope.name == INSTANCE_STOP);
+                let list = if after_stop { &mut clean } else { &mut starts };
+                list.push(format!("{agent} after seq {}", seq - 1));
             }
             let server = &x.r.receipt.batch.server_time;
             if e.time_ms() > time::parse(server).unwrap_or(i64::MAX - MAX_CLOCK_SKEW_MS) + MAX_CLOCK_SKEW_MS {
@@ -548,6 +551,9 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
     }
     if !starts.is_empty() {
         acc[3].notes.push(format!("{INSTANCE_NOTE}: {}", starts.join(", ")));
+    }
+    if !clean.is_empty() {
+        acc[3].notes.push(format!("{CLEAN_RESTART_NOTE}: {}", clean.join(", ")));
     }
 
     // 5. Merkle proofs

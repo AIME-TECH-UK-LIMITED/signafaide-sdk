@@ -26,7 +26,7 @@ from . import ots
 from ._plural import plural
 from .bitcoin import check_header
 from .crypto import HEX64, b64url, b64url_decode, check_content, hash_json, key_id, sha256_hex, verify_inclusion, verify_sig
-from .records import AGENT_RE, INSTANCE_NOTE, INSTANCE_START, MAX_CLOCK_SKEW_MS, draft_errors, key_entry_errors, manifest_errors, parse_time, receipt_errors, record_errors, valid_project_id
+from .records import AGENT_RE, CLEAN_RESTART_NOTE, INSTANCE_NOTE, INSTANCE_START, INSTANCE_STOP, is_stop_note, MAX_CLOCK_SKEW_MS, draft_errors, key_entry_errors, manifest_errors, parse_time, receipt_errors, record_errors, valid_project_id
 
 CHECKS = [
     ("schema", "Envelope schema"),
@@ -849,6 +849,7 @@ class _Verifier:
         edge = 0
         based: List[str] = []
         starts: List[str] = []
+        clean: List[str] = []
         for agent, chain in sorted(chains.items()):
             acc.checked += len(chain)
             prev = None
@@ -878,7 +879,16 @@ class _Verifier:
                     else:
                         acc.fail(label, f"the pack is missing seq 1..{seq - 1} of agent {agent} and its export declares no from filter")
                 if e["kind"] == "note" and e["name"] == INSTANCE_START:
-                    starts.append(f"{agent} after seq {seq - 1}")
+                    # Clean only when the record right before it is a stop note: in the pack, or
+                    # (local state) kept with the witness's head this chain continues after.
+                    if prev is not None and prev[1]["envelope"]["seq"] + 1 == seq:
+                        pe = prev[1]["envelope"]
+                        after_stop = pe["kind"] == "note" and pe["name"] == INSTANCE_STOP
+                    else:
+                        b = (self.local_bases.get(agent) or {}) if self.local and prev is None else {}
+                        bh = b.get("head") or {}
+                        after_stop = bool(b.get("stop")) and bh.get("seq") == seq - 1 and e["prev"] == bh.get("record_hash") and is_stop_note(b["stop"], e["agent"], bh.get("record_hash"))
+                    (clean if after_stop else starts).append(f"{agent} after seq {seq - 1}")
                 if "receipt" in r:
                     server = r["receipt"]["batch"]["server_time"]
                     if _epoch_ms(e["time"]) > _epoch_ms(server) + MAX_CLOCK_SKEW_MS:
@@ -888,6 +898,8 @@ class _Verifier:
             acc.notes.append(f"{plural(edge, 'chain')} start after seq 1, as the export's from filter allows")
         if starts:
             acc.notes.append(f"{INSTANCE_NOTE}: {', '.join(starts)}")
+        if clean:
+            acc.notes.append(f"{CLEAN_RESTART_NOTE}: {', '.join(clean)}")
         if based:
             acc.notes.append(f"continues after a co-signed record this machine does not hold: {', '.join(based)} (the witness's signed head, see signed heads)")
         return chains

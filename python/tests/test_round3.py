@@ -313,6 +313,6 @@ def test_gitignore_only_at_set_up(recorder, project):
 
 
 def test_default_witness_is_the_hosted_service():
-    assert DEFAULT_URL == "https://api.signafaide.com"
+    assert DEFAULT_URL == "https://api.signafaide.co.uk"
     host = DEFAULT_URL.split("://")[1].split("/")[0]
     assert host != "localhost" and not host.startswith("127.")

@@ -53,7 +53,7 @@ export function fsError(e: unknown, home: string): Error {
   if (code === "EACCES" || code === "EROFS" || code === "EPERM") {
     return new StateError(
       `cannot write signafAIde's local state in ${home} (${code === "EROFS" ? "read-only file system" : "permission denied"}). ` +
-        "Set SIGNAFAIDE_HOME to a writable folder (for example a mounted volume, or /tmp/signafaide on serverless) or SIGNAFAIDE_DISABLED=1 to turn recording off; see https://signafaide.com/docs/production",
+        "Set SIGNAFAIDE_HOME to a writable folder (for example a mounted volume, or /tmp/signafaide on serverless) or SIGNAFAIDE_DISABLED=1 to turn recording off; see https://signafaide.co.uk/docs/production",
     );
   }
   return e as Error;
@@ -113,6 +113,8 @@ export interface Base {
   seq: number;
   record_hash: string;
   signed?: SignedHead;
+  /** The record the head names, when it is the earlier instance's stop note (a clean restart). */
+  stop?: { envelope: unknown; key_id: string; sig: string };
 }
 
 /** Project root: nearest folder with `.signafaide`, else with .git / pyproject.toml /
@@ -319,7 +321,7 @@ export class State {
               seq: base.seq + 1,
               prev,
               name: INSTANCE_START,
-              content: instanceStartContent(base.seq, base.record_hash),
+              content: instanceStartContent(base.seq, base.record_hash, !!base.stop),
               ref: null,
               time: first,
             });
@@ -338,7 +340,8 @@ export class State {
           writeJson(this.mapPath(`${dst}/${agent}`), mapping);
           // The witness's signed head this chain continues after: the local verify reports the
           // chain as continuing after it instead of missing seq 1..N.
-          if (base?.signed) writeJson(this.basePath(`${dst}/${agent}`), base.signed);
+          // With the earlier instance's stop note, when the head names one (a clean restart).
+          if (base?.signed) writeJson(this.basePath(`${dst}/${agent}`), base.stop ? { ...base.signed, stop: base.stop } : base.signed);
           const fd = fs.openSync(target + ".tmp", "w");
           fs.writeSync(fd, out.map(([r]) => canonicalize(r) + "\n").join(""));
           fs.fsyncSync(fd);
@@ -358,8 +361,14 @@ export class State {
 
   /** The witness's signed head `chain` continues after, when this machine started it on an
    * empty disk (§8). */
-  chainBase(chain: string): SignedHead | undefined {
-    return readJson<SignedHead>(this.basePath(chain)) ?? undefined;
+  chainBase(chain: string): (SignedHead & { stop?: Base["stop"] }) | undefined {
+    return readJson<SignedHead & { stop?: Base["stop"] }>(this.basePath(chain)) ?? undefined;
+  }
+
+  /** The last record of a local chain, or undefined when it is empty. */
+  lastRecord(chain: string): SignedRecord | undefined {
+    const all = this.readChain(chain);
+    return all[all.length - 1];
   }
 
   private mapPath(chain: string): string {

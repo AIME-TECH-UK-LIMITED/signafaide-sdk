@@ -220,7 +220,15 @@ fn variants_pass_with_their_values() {
     }
     // The instance-start note (§8) names the chain and the seq it continues after.
     let notes: Vec<&str> = variants.iter().filter_map(|t| t["expect"]["chain_note"].as_str()).collect();
-    assert_eq!(notes, vec![format!("{INSTANCE_NOTE}: agent-a after seq 2").as_str()]);
+    assert_eq!(
+        notes,
+        vec![
+            format!("{INSTANCE_NOTE}: agent-a after seq 2").as_str(),
+            format!("{CLEAN_RESTART_NOTE}: agent-a after seq 2").as_str(),
+            // The stop note is outside the exported window: the pack cannot show it.
+            format!("{INSTANCE_NOTE}: agent-a after seq 2").as_str(),
+        ]
+    );
 }
 
 #[test]

@@ -58,6 +58,9 @@ class Spec {
       await rec.ensureReceipt(d);
     } catch (e) {
       const err = e instanceof SignafaideError ? e : new SignafaideError((e as Error).message);
+      // Agent frameworks often swallow a tool's error (the model just sees a failed tool): say
+      // once, on stderr, that a strict tool did not run and how to fix it.
+      rec.warnStrictRefused(this.name, err);
       throw new NotRecorded(`${err.message} (strict mode: ${this.name} did not run)`, { code: err.code, status: err.status, docs: err.docs, body: err.body });
     }
   }

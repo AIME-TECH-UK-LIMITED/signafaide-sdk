@@ -4,7 +4,7 @@ signafAIde records the decisions AI agents make. Each record is signed with the 
 
 - **Local first:** with no API key, records are signed, chained and verified in `.signafaide/`, and nothing is sent. Sending starts only when a person runs `signafaide init` (a sandbox: no account, email or card) or sets `SIGNAFAIDE_API_KEY`.
 - **Hashes, not content:** after the opt-in, each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs, unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them. Each content hash is salted with 16 random bytes that stay on your machine with the content, so the hash alone cannot be used to guess the content, even when it has only a few possible values.
-- **Your environment:** the default witness is the hosted service (`https://api.signafaide.com`). A self-hosted witness, under an Enterprise contract, is set with `SIGNAFAIDE_URL` ([self-host guide](https://signafaide.com/docs/self-host)). Running in production: [production guide](https://signafaide.com/docs/production).
+- **Your environment:** the default witness is the hosted service (`https://api.signafaide.co.uk`). A self-hosted witness, under an Enterprise contract, is set with `SIGNAFAIDE_URL` ([self-host guide](https://signafaide.co.uk/docs/self-host)). Running in production: [production guide](https://signafaide.co.uk/docs/production).
 - **Independent checks:** the protocol is a public spec with test vectors, and the verifier checks a verification pack without our service.
 
 ## What is here
@@ -15,7 +15,8 @@ signafAIde records the decisions AI agents make. Each record is signed with the 
 | [`spec/vectors.json`](spec/vectors.json) | test vectors every implementation reproduces byte for byte |
 | [`python/`](python/README.md) | the Python SDK and CLI (`signafaide` on PyPI) |
 | [`js/`](js/README.md) | the TypeScript SDK, CLI and `agent setup` for coding agents (`signafaide` on npm), and the MCP server (`signafaide-mcp`, in `js/mcp`) |
-| [`scripts/release-check.mjs`](scripts/release-check.mjs) | run before a release: the default witness is the hosted service, versions agree, and the npm and PyPI names are claimed |
+| [`scripts/release-check.mjs`](scripts/release-check.mjs) | run before a release: the default witness is the hosted service, every version agrees and was bumped since the last tag, `CHANGELOG.md` has its entry, the verifier binary is built from this source, and the npm and PyPI names are claimed |
+| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.2.0`) |
 | [`verifier/`](verifier) | `signafaide-verify`, the standalone Rust verifier of a pack (also builds to WebAssembly) |
 | [`core/`](core) | the Rust protocol core shared by the verifier and the service |
 | [`plugin/`](plugin/README.md) | the Claude Code plugin: the MCP server and the skill |

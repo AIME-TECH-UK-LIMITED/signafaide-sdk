@@ -117,6 +117,9 @@ class FakeService:
                 # A witness before round 4 answered 400 for an agent that was never registered.
                 return err(400, "unknown_agent", f"Agent '{agent}' is not registered in this project and env: call POST /v1/agents first.")
             return err(404, "not_found", "This agent has no records.")
+        if method == "GET" and path.startswith("/v1/records/"):
+            got = prj["records"].get(path.rsplit("/", 1)[1])
+            return (200, {"record": got[0], "receipt": got[1], "anchor": None}) if got else err(404, "not_found", "No record with this hash in this project.")
         if method == "GET" and path == "/v1/usage":
             return 200, {"period": "2026-11", "used": prj["used"], "quota": 1000, "plan": prj.get("plan", "free")}
         if method == "GET" and path == "/v1/export":

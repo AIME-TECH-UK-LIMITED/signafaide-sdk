@@ -99,6 +99,7 @@ def test_head_file_hook_and_instance_start_note(recorder, service, project, monk
     assert v.ok, str(v)
     assert f"{INSTANCE_NOTE}: {chain} after seq 2" in v.check("chain").detail
     rec._stopped = True
+    rec.instance_stop = False  # nothing to write when the test process ends
 
 
 def test_on_head_that_raises_never_stops_recording(recorder, caplog):

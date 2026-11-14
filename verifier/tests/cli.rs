@@ -218,3 +218,36 @@ fn content_from_a_chain_directory() {
     let report: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(report["checks"][11]["checked"], 4);
 }
+
+/// Round 6 (#50): the binary names its release and lists every flag, so a stale build is caught.
+#[test]
+fn version_and_help_name_the_release_and_every_flag() {
+    let (code, out) = run(&["--version"]);
+    assert_eq!((code, out.trim()), (0, concat!("signafaide-verify ", env!("CARGO_PKG_VERSION"))));
+    let (code, help) = run(&["--help"]);
+    assert_eq!(code, 0, "{help}");
+    assert!(help.starts_with(concat!("signafaide-verify ", env!("CARGO_PKG_VERSION"), "\n")), "{help}");
+    for flag in ["--keys", "--agent-keys", "--head", "--content", "--timestamp-check", "--offline", "--trust-embedded-keys", "--trust-embedded-agent-keys", "--json", "--version", "--help"] {
+        assert!(help.contains(flag), "--help lacks {flag}: {help}");
+    }
+}
+
+/// Round 6 (#51): a clean restart (a start note right after a stop note) is reported as such; a
+/// start with no stop note before it keeps the warning.
+#[test]
+fn clean_and_unclean_restarts_are_told_apart() {
+    let v = vectors();
+    let keys = tmp("keys-r6.json", &v["keys_document"]);
+    let agent_keys = tmp("agent-keys-r6.json", &v["agent_keys_document"]);
+    let find = |name: &str| v["variants"].as_array().unwrap().iter().find(|c| c["name"].as_str().unwrap().starts_with(name)).unwrap()["pack"].clone();
+    let run_pack = |file: &str, pack: serde_json::Value| run(&[&tmp(file, &pack), "--keys", &keys, "--agent-keys", &agent_keys, "--offline"]);
+    let (code, out) = run_pack("clean.json", find("a clean restart: the start note"));
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("a clean restart, nothing to warn about): agent-a after seq 2") && !out.contains("had not sent are not known"), "{out}");
+    let (code, out) = run_pack("unclean.json", find("a new instance continued the chain after seq 2"));
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("had not sent are not known: agent-a after seq 2") && !out.contains("clean restart"), "{out}");
+    let (code, out) = run_pack("cut.json", find("a clean restart exported from its start note on"));
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("had not sent are not known: agent-a after seq 2"), "{out}");
+}

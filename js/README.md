@@ -4,7 +4,7 @@ Signed, chained records of what your AI agents decided. Each record is signed wi
 
 - Nothing is sent until a person runs `npx signafaide init` or sets `SIGNAFAIDE_API_KEY`. After that each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them. Each content hash is salted with 16 random bytes that stay on your machine with the content, so the hash alone cannot be used to guess the content, even when it has only a few possible values.
 - The sandbox `init` creates needs no account, email or card.
-- To keep the evidence in your environment, self-host the witness and set `SIGNAFAIDE_URL` ([self-host](https://signafaide.com/docs/self-host)).
+- To keep the evidence in your environment, self-host the witness and set `SIGNAFAIDE_URL` ([self-host](https://signafaide.co.uk/docs/self-host)).
 - Apache-2.0, with a public protocol spec and an independent verifier.
 
 ```bash
@@ -80,7 +80,7 @@ None of them is a dependency: `wrapTools` recognises the objects by their shape.
 const wireFunds = record(sendWire, { strict: true }); // now returns a Promise
 ```
 
-The decision is shipped first, and the function runs only after the service has returned its receipt. If the service can't be reached or refuses the record, or there is no API key (`no_key`), the call rejects with `NotRecorded` and the function does not run.
+The decision is shipped first, and the function runs only after the service has returned its receipt. If the service can't be reached or refuses the record, or there is no API key (`no_key`), the call rejects with `NotRecorded` and the function does not run. Agent frameworks often turn a tool's error into a failed tool call and print nothing, so the first time a strict tool is refused in a process the SDK writes one warning line to stderr with the tool's name and the fix.
 
 ## Hash-only
 
@@ -94,6 +94,21 @@ record(fn, { name: "x", storeContent: true }); // one tool
 ## Offline
 
 Nothing waits on the network unless you use strict mode. With an API key, records go to `.signafaide/outbox/` and are shipped in batches, one request at a time: every 2 seconds, every 100 records, and once more when the process is about to exit, for at most 3 seconds (`exitFlushMs`, `SIGNAFAIDE_EXIT_FLUSH_MS`). If the service can't be reached, they stay on disk and are retried with a backoff that grows to a minute; a refusal retrying cannot fix (quota used up, a wrong or revoked key) stops sending until the configuration changes. A malformed `SIGNAFAIDE_API_KEY` is caught here and never sent. They ship on the next run or with `signafaide flush`. Records are never lost on exit, and background requests never keep your process alive.
+
+## Containers that restart
+
+A container with no persistent disk continues its chain after the witness's head, and its first record is a signed start note. So that a routine restart is not read as a possible loss, end the instance with `await stop()`: it ships what is left and then writes a signed stop note. A start right after a stop note is a clean restart; a start with no stop note before it (a crash, a kill, an unreachable witness) is shown as a warning, because records the earlier instance had not sent are not known.
+
+```ts
+import { stop } from "signafaide";
+
+process.on("SIGTERM", async () => {
+  await stop(); // { shipped, left, errors, stopped }
+  process.exit(0);
+});
+```
+
+A program that ends by itself with `SIGNAFAIDE_HEAD_FILE` set writes the stop note at exit, within the exit limit above. `SIGNAFAIDE_INSTANCE_STOP=0` turns that off; `=1` turns it on without a head file.
 
 ## Errors
 
@@ -186,14 +201,14 @@ finds the coding agents installed or in use and, for each one, adds the signafAI
 | GitHub Copilot (VS Code) | `.vscode/mcp.json` | `.github/copilot-instructions.md` section |
 | Windsurf | `.devin/mcp_config.json` | `AGENTS.md` section |
 
-The MCP tools: `signafaide_setup` (a preview that changes, creates and sends nothing: the language and framework, the install command, the code edit and what a sandbox would send), `signafaide_init` (creates the external sandbox; its description asks the agent to get the person's agreement first), `signafaide_quickstart`, `signafaide_verify`, `signafaide_status`, `signafaide_explain_error` and `signafaide_claim_link`. The MCP server needs Node.js 20 or later.
+The MCP tools: `signafaide_setup` (a preview that changes, creates and sends nothing: the language and framework, the install command, the code edit and what a sandbox would send), `signafaide_init` (creates the external sandbox, and nothing unless the agent passes `confirm_user_agreed: true` and `user_words`, what the person wrote when they agreed), `signafaide_quickstart`, `signafaide_verify`, `signafaide_status`, `signafaide_explain_error` and `signafaide_claim_link`. The MCP server needs Node.js 20 or later.
 
 ## What is sent besides records
 
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-js/0.1.0 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
+X-Signafaide-Client: signafaide-js/0.2.0 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
 ```
 
 It holds the SDK and its version, the JavaScript runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `vercel-ai` or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`, `signafaide agent setup`) and kept in `.signafaide/config.json`; it is never guessed per process, so a program started from a terminal inside a coding agent is not labelled as that agent. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
@@ -205,17 +220,18 @@ The header and the events hold no content, file paths, hostnames or user names. 
 | variable | default |
 |---|---|
 | `SIGNAFAIDE_API_KEY` | read from the environment, then `.env`; created by `signafaide init`; none: local only |
-| `SIGNAFAIDE_URL` | `https://api.signafaide.com`; a self-hosted witness, or `http://127.0.0.1:7474` for a local dev server. Alone it sends nothing |
+| `SIGNAFAIDE_URL` | `https://api.signafaide.co.uk`; a self-hosted witness, or `http://127.0.0.1:7474` for a local dev server. Alone it sends nothing |
 | `SIGNAFAIDE_HOME` | `.signafaide/` in the project root; a mounted volume or `/tmp/signafaide` in production |
 | `SIGNAFAIDE_AGENT_KEY_<NAME>` | an agent's key file content from a secret store (or `keyProvider` in code); live keys can use `SIGNAFAIDE_AGENT_KEY_LIVE_<NAME>`, made with `signafaide keys create --env live --print` |
 | `SIGNAFAIDE_HEAD_FILE` | unset: a file outside `.signafaide/` (a persistent volume) that also keeps the newest signed heads, for containers whose disk does not last; or `onHead` in `configure()` |
+| `SIGNAFAIDE_INSTANCE_STOP` | unset: a signed stop note is written at a clean exit when a head file is set; `1` always, `0` never (see Containers that restart) |
 | `SIGNAFAIDE_EXIT_FLUSH_MS` | `3000`: the longest a finished program is kept open to send; `0` never |
 | `SIGNAFAIDE_TEST` | test mode is on by itself under Vitest, Jest and `node --test` (records in a temporary folder, nothing sent); `1` forces it, `0` turns it off |
 | `SIGNAFAIDE_DISABLED` | `1`: wrapped functions run and nothing is recorded |
 | `SIGNAFAIDE_SEGMENT_BYTES` | `67108864`: a shipped chain file larger than this rolls into a sealed segment |
 | `SIGNAFAIDE_TELEMETRY` | `0` turns off the adapter, agent and strict fields and the events |
 
-Running in containers, with replicas, on read-only or ephemeral disks, on serverless or in CI: see the [production guide](https://signafaide.com/docs/production). A record's time never goes back along its chain: if the clock steps back, the record keeps the previous record's time and the clock's reading goes in `meta.wall_time`.
+Running in containers, with replicas, on read-only or ephemeral disks, on serverless or in CI: see the [production guide](https://signafaide.co.uk/docs/production). A record's time never goes back along its chain: if the clock steps back, the record keeps the previous record's time and the clock's reading goes in `meta.wall_time`.
 
 Each project and env has its own chain per agent. A new key, for example a live key replacing the sandbox key, starts a fresh chain at seq 1. The old chain stays on disk, and `signafaide status` lists every chain.
 

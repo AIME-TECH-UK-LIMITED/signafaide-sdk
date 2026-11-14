@@ -1,6 +1,8 @@
 //! signafaide-verify <pack.json> --keys <file|url> --agent-keys <file|url> [--head head.json]
 //!   [--content <dir|file>] [--timestamp-check <explorer API>] [--offline] [--json]
 //!
+//! signafaide-verify --version | --help
+//!
 //! Exit code 0 = PASS, 1 = FAIL, 2 = the inputs could not be read.
 
 use signafaide_verify::{heights_in, is_loopback_url, verify_text, Inputs};
@@ -9,7 +11,9 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-const USAGE: &str = "usage: signafaide-verify <pack.json> --keys <file|url> --agent-keys <file|url> [--head head.json] [--content <dir|file>] [--timestamp-check <explorer API URL>] [--offline] [--trust-embedded-keys] [--trust-embedded-agent-keys] [--json]";
+const USAGE: &str = "usage: signafaide-verify <pack.json> --keys <file|url> --agent-keys <file|url> [--head head.json] [--content <dir|file>] [--timestamp-check <explorer API URL>] [--offline] [--trust-embedded-keys] [--trust-embedded-agent-keys] [--json]\n       signafaide-verify --version | --help";
+/// The SDK release this binary was built from (the release check compares it with the packages).
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Esplora-style API (`GET /block-height/{h}`, `GET /block/{hash}/header`); blockstream.info/api works too.
 const DEFAULT_BITCOIN: &str = "https://mempool.space/api";
 
@@ -52,7 +56,14 @@ fn parse_args() -> Result<Args, String> {
             "--trust-embedded-keys" => a.trust_embedded = true,
             "--trust-embedded-agent-keys" => a.trust_embedded_agent_keys = true,
             "--json" => a.json = true,
-            "-h" | "--help" => return Err(USAGE.into()),
+            "-h" | "--help" => {
+                println!("signafaide-verify {VERSION}\n{USAGE}");
+                std::process::exit(0);
+            }
+            "-V" | "--version" => {
+                println!("signafaide-verify {VERSION}");
+                std::process::exit(0);
+            }
             s if s.starts_with('-') => return Err(format!("unknown option {s}\n{USAGE}")),
             s if pack.is_none() => pack = Some(s.to_string()),
             s => return Err(format!("unexpected argument {s}\n{USAGE}")),

@@ -27,7 +27,7 @@ const err = (s: string): void => console.error(s);
 const recorder = (): Recorder => configure({ quiet: true, via: "cli" });
 const mask = (k?: string | null): string => (k ? `${k.slice(0, 13)}...` : "none");
 
-/** The website of a witness: https://api.signafaide.com -> https://signafaide.com. */
+/** The website of a witness: https://api.signafaide.co.uk -> https://signafaide.co.uk. */
 export function siteOf(url: string): string {
   const u = new URL(url);
   return `${u.protocol}//${u.host.replace(/^api\./, "")}`;
@@ -118,7 +118,7 @@ export const COMMANDS: Record<string, Command> = {
   init: {
     help:
       "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link. " +
-      "The witness is https://api.signafaide.com unless SIGNAFAIDE_URL names another (a self-hosted witness, or http://127.0.0.1:7474 for a local one). " +
+      "The witness is https://api.signafaide.co.uk unless SIGNAFAIDE_URL names another (a self-hosted witness, or http://127.0.0.1:7474 for a local one). " +
       "Adds .signafaide/ and .env to .gitignore",
     usage: "init   (environment: SIGNAFAIDE_URL=<witness url>, SIGNAFAIDE_API_KEY=<existing key>)",
     async run() {

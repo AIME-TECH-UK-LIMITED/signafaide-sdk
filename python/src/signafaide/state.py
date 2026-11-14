@@ -78,7 +78,7 @@ def fs_error(e: OSError, home: Path) -> Exception:
         why = "read-only file system" if e.errno == errno.EROFS else "permission denied"
         return StateError(
             f"cannot write signafAIde's local state in {home} ({why}). Set SIGNAFAIDE_HOME to a writable folder (for example a mounted "
-            "volume, or /tmp/signafaide on serverless) or SIGNAFAIDE_DISABLED=1 to turn recording off; see https://signafaide.com/docs/production"
+            "volume, or /tmp/signafaide on serverless) or SIGNAFAIDE_DISABLED=1 to turn recording off; see https://signafaide.co.uk/docs/production"
         )
     return e
 
@@ -314,7 +314,7 @@ class State:
                     # says so, signed, since an earlier instance may have written records it never
                     # sent (§8).
                     note = make_record(key(agent, first), kind="note", project=project, env=env, agent=agent, seq=base["seq"] + 1, prev=prev,
-                                       name=INSTANCE_START, content=instance_start_content(base["seq"], base["record_hash"]), ref=None, time=first)
+                                       name=INSTANCE_START, content=instance_start_content(base["seq"], base["record_hash"], bool(base.get("stop"))), ref=None, time=first)
                     prev = record_hash(note)
                     offset += 1
                     out.append((note, lines[0].get("store_content")))
@@ -331,7 +331,8 @@ class State:
                 if base and isinstance(base.get("signed"), dict):
                     # The witness's signed head this chain continues after: the local verify
                     # reports the chain as continuing after it instead of missing seq 1..N.
-                    _write_json(self._base_path(f"{dst}/{agent}"), base["signed"])
+                    # With the earlier instance's stop note, when the head names one (a clean restart).
+                    _write_json(self._base_path(f"{dst}/{agent}"), {**base["signed"], "stop": base["stop"]} if base.get("stop") else base["signed"])
                 tmp = target.with_name(target.name + ".tmp")
                 with open(tmp, "wb") as f:
                     f.write("".join(jcs.dumps(r) + "\n" for r, _ in out).encode())
@@ -350,6 +351,13 @@ class State:
         """The witness's signed head ``{head, head_sig}`` that *chain* continues after, when
         this machine started it on an empty disk (§8), else None."""
         return _read_json(self._base_path(chain))
+
+    def last_record(self, chain: str) -> Optional[dict]:
+        """The last record of a local chain, or None when it is empty."""
+        last = None
+        for last in self.read_chain(chain):
+            pass
+        return last
 
     def _map_path(self, chain: str) -> Path:
         return self.home / "chain" / f"{chain}.drafts.json"

@@ -1,6 +1,6 @@
 {
   "name": "signafaide",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Signed, chained records of what your AI agents decided. Hash-only by default.",
   "license": "Apache-2.0",
   "type": "module",

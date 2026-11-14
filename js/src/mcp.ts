@@ -142,13 +142,30 @@ export function createServer(root: string = process.cwd()): McpServer {
         "Creates an external sandbox project on the signafAIde service (or the SIGNAFAIDE_URL witness), saves its API key to .env and returns the claim link. " +
         "From then on record hashes (never content) are sent there, and records written earlier ship with their original times. " +
         "This is an external side effect: ask the user and call it only after they agree. Without it, records stay local and still verify. " +
-        "Creating a sandbox means the user agrees to the signafAIde Terms and Privacy notice (<service>/legal/terms and <service>/legal/privacy, where <service> is SIGNAFAIDE_URL or the signafAIde service): show them both links when you ask, and pass on the notice this tool returns.",
-      inputSchema: z.object({ directory }),
+        "Creating a sandbox means the user agrees to the signafAIde Terms and Privacy notice (<service>/legal/terms and <service>/legal/privacy, where <service> is SIGNAFAIDE_URL or the signafAIde service): show them both links when you ask, and pass on the notice this tool returns. " +
+        "It creates nothing unless confirm_user_agreed is true and user_words holds what the user wrote when they agreed.",
+      inputSchema: z.object({
+        directory,
+        confirm_user_agreed: z
+          .boolean()
+          .optional()
+          .describe("Set to true only after the user, in this conversation, agreed to create the sandbox and to the Terms and Privacy notice. Never set it on your own judgement."),
+        user_words: z.string().optional().describe("The user's own words when they agreed, quoted from the conversation (for example \"yes, create the sandbox\")."),
+      }),
     },
-    ({ directory: dir }) =>
+    ({ directory: dir, confirm_user_agreed, user_words }) =>
       guard(async () => {
         const rec = open(dir);
         if (rec.apiKey) return keyLine(rec) + " Nothing was created.";
+        const words = (user_words ?? "").trim();
+        if (confirm_user_agreed !== true || words.length < 2) {
+          const legal = legalLinks({}, rec.url);
+          throw new Error(
+            "nothing was created. signafaide_init needs the user's agreement as arguments: confirm_user_agreed: true and user_words (what the user wrote when they agreed). " +
+              `Ask the user first: creating a sandbox at ${rec.url} sends record hashes there and accepts the signafAIde Terms (${legal.terms_url}) and Privacy notice (${legal.privacy_url}). ` +
+              "If they have not agreed, do not call this tool again; records stay local and still verify.",
+          );
+        }
         rec.rememberAgent();
         await rec.createSandbox();
         const claim = rec.state.sandbox()?.claim_url;

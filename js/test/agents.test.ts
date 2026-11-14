@@ -206,7 +206,7 @@ describe("skill text", () => {
     expect(head).toContain("Nothing is sent until a person runs `signafaide init` or sets `SIGNAFAIDE_API_KEY`");
     expect(head).toContain("Only hashes, tool names, agent names and times are sent, never inputs or outputs");
     expect(head).toContain("agent and tool names must not hold personal data");
-    expect(head).toContain("the hosted witness (https://api.signafaide.com)");
+    expect(head).toContain("the hosted witness (https://api.signafaide.co.uk)");
     for (const hype of ["revolution", "best-in-class", "seamless", "effortless", "world-class", "Why not", "!\n", "! ", "**"]) expect(SKILL_BODY).not.toContain(hype);
     expect(SKILL_BODY.split("\n").length).toBeLessThan(50);
   });
@@ -219,7 +219,7 @@ describe("skill text", () => {
   it("names the witness it was set up with (--url), not the hosted one", () => {
     const body = skillBody("https://witness.internal.example.com");
     expect(body).toContain("the witness at `https://witness.internal.example.com`");
-    expect(body).not.toContain("api.signafaide.com");
+    expect(body).not.toContain("api.signafaide.co.uk");
     expect(instructionsSection("https://witness.internal.example.com")).toContain("https://witness.internal.example.com");
   });
 
