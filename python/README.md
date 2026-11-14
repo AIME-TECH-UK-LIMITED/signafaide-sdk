@@ -81,6 +81,33 @@ agent = Agent(name="support", tools=signafaide.wrap_tools([lookup_order]))
 
 Neither framework is a dependency: `wrap_tools` recognises the objects by their shape.
 
+## Recording everything an agent can call
+
+Wrapping records the tools you wrap. Two things cover the rest: the gateway records every MCP tool call with no wrapper at all, and a tool declaration says in the chain which tools the agent has and which of them are recorded.
+
+MCP tools: the gateway. It is part of the `signafaide` npm package (Node.js 18 or later) and works with an agent written in any language. In the agent's MCP configuration, start the gateway in place of the server:
+
+```json
+{"command": "npx", "args": ["-y", "signafaide", "gateway", "--agent", "support-bot", "--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "/data"]}
+```
+
+It runs the server, relays every message unchanged, declares the server's tools as recorded, and writes a `decision` before each `tools/call` is forwarded and an `outcome` when the answer arrives, into the same `.signafaide/` folder this SDK uses. A call that cannot be recorded is not forwarded. `--strict` (or `--strict-tools a,b`) forwards a call only once the witness has co-signed its decision; `--name-prefix github.` keeps the tool names of several servers apart; `--store-content` sends inputs and outputs too. A remote (HTTP) server goes behind a stdio bridge such as [`mcp-remote`](https://github.com/geelen/mcp-remote):
+
+```bash
+npx -y signafaide gateway --agent support-bot -- npx -y mcp-remote https://mcp.example.com/mcp
+```
+
+Framework tools: tool declarations. `wrap_tools` declares the tools it wraps as recorded, with the first recorded call. Give the full list of the tools your code hands the agent, and the ones you did not wrap are declared as not recorded:
+
+```python
+tools = signafaide.wrap_tools([refund, lookup_order], agent="support-bot")
+signafaide.declare_tools(["refund", "lookup_order", "web_search"], agent="support-bot")   # web_search is not wrapped
+```
+
+`signafaide verify` then has a coverage line for each agent: `all 3 declared tools are recorded`, or `1 declared tool is not recorded: web_search`, or that no tool list was declared. It is a note, never a failure. A declaration is one signed note for the list and one for each tool in the agent's chain, so n tools are n + 1 records, counted like every other record, each time a process starts or the list changes. `declare_tools=False` or `SIGNAFAIDE_DECLARE_TOOLS=0` turns off the one `wrap_tools` writes.
+
+What this shows, and what it does not. The gateway records every call that goes through it; a call the application makes around it is still not recorded, so the deployment has to make the gateway the only route to those tools. A declaration is the program's own signed statement of its tools: evidence of what it said it had, not proof that the list is complete.
+
 ## Strict mode: no receipt, no action
 
 ```python
@@ -185,7 +212,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-python/0.2.1 (python 3.12.3; adapter=none; agent=claude-code; via=sdk)
+X-Signafaide-Client: signafaide-python/0.3.0 (python 3.12.3; adapter=none; agent=claude-code; via=sdk)
 ```
 
 It holds the SDK and its version, the Python runtime and its version, and the framework adapter in use (`langchain`, `openai-agents` or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`) and kept in `.signafaide/config.json`; it is never guessed per process. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
@@ -205,6 +232,7 @@ The header and the events hold no content, file paths, hostnames or user names. 
 | `SIGNAFAIDE_EXIT_FLUSH_MS` | `3000`: the longest a finished program is kept open to send; `0` never |
 | `SIGNAFAIDE_TEST` | test mode is on by itself under pytest (records in a temporary folder, nothing sent); `1` forces it, `0` turns it off |
 | `SIGNAFAIDE_DISABLED` | `1`: wrapped functions run and nothing is recorded |
+| `SIGNAFAIDE_DECLARE_TOOLS` | `0`: `wrap_tools` does not declare the tools it wraps (`declare_tools()` still does) |
 | `SIGNAFAIDE_SEGMENT_BYTES` | `67108864`: a shipped chain file larger than this rolls into a sealed segment |
 | `SIGNAFAIDE_TELEMETRY` | `0` turns off the adapter, agent and strict fields and the events |
 

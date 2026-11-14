@@ -16,7 +16,7 @@ signafAIde records the decisions AI agents make. Each record is signed with the 
 | [`python/`](python/README.md) | the Python SDK and CLI (`signafaide` on PyPI) |
 | [`js/`](js/README.md) | the TypeScript SDK, CLI and `agent setup` for coding agents (`signafaide` on npm), and the MCP server (`signafaide-mcp`, in `js/mcp`) |
 | [`scripts/release-check.mjs`](scripts/release-check.mjs) | run before a release: the default witness is the hosted service, every version agrees and was bumped since the last tag, `CHANGELOG.md` has its entry, the verifier binary is built from this source, and the npm and PyPI names are claimed |
-| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.2.1`) |
+| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.3.0`) |
 | [`verifier/`](verifier) | `signafaide-verify`, the standalone Rust verifier of a pack (also builds to WebAssembly) |
 | [`core/`](core) | the Rust protocol core shared by the verifier and the service |
 | [`plugin/`](plugin/README.md) | the Claude Code plugin: the MCP server and the skill |
@@ -29,6 +29,15 @@ npm install signafaide            # TypeScript or JavaScript
 ```
 
 Wrap the tools that act, run the agent, then `signafaide verify` (`npx signafaide verify` for TypeScript). See the [Python](python/README.md) and [TypeScript](js/README.md) READMEs.
+
+## Recording everything an agent can call
+
+Wrapping records the tools a developer wraps. Two things cover the rest.
+
+- MCP tools: `signafaide gateway -- <the MCP server's command>` (in the `signafaide` npm package) runs an MCP server behind a recording proxy. The agent's MCP client starts the gateway in place of the server, for example `npx -y signafaide gateway --agent support-bot -- npx -y @modelcontextprotocol/server-filesystem /data`. Every tool call that passes through is recorded, a decision before the call is forwarded and an outcome when the answer arrives, and a call that cannot be recorded is not forwarded. A remote (HTTP) server goes behind a stdio bridge: `npx -y signafaide gateway -- npx -y mcp-remote https://mcp.example.com/mcp`.
+- Framework tools: `wrap_tools` / `wrapTools` declare the tools they wrap as recorded, and `declare_tools([...])` / `declareTools([...])` takes the agent's full tool list, so the tools that are not wrapped are declared as not recorded. The declaration is a signed note per tool in the agent's chain (ordinary records, counted like any other), and every verifier reports it per agent, for example `all 4 declared tools are recorded` or `1 declared tool is not recorded: web_search`. It is a note, never a failure.
+
+What this shows, and what it does not: the gateway records every call that goes through it; a call the application makes around it is still not recorded, so the deployment has to make the gateway the only route to those tools. A declaration is the program's own signed statement of its tools: evidence of what it said it had, not proof that the list is complete. Details: [TypeScript](js/README.md), [Python](python/README.md), spec §2.6, §7 and §8.
 
 ## Verify without our service
 

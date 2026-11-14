@@ -1,6 +1,6 @@
 {
   "name": "signafaide-mcp",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "The signafAIde MCP server for coding agents (Claude Code, Codex, Cursor, Gemini CLI, Copilot, Windsurf).",
   "license": "Apache-2.0",
   "type": "module",

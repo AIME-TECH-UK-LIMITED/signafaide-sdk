@@ -9,6 +9,52 @@ The record format changed between v0.1.1 and v0.1.2 (salted content hashes) and 
 (packs name their project), before any public release. Records and packs written by a version
 verify with that version and later ones unless an entry below says otherwise.
 
+## v0.3.0 (2026-11-14)
+
+Recording everything an agent can call: the gateway for MCP tools, and tool declarations.
+
+- `signafaide gateway [--agent X] [--name-prefix P] [--strict | --strict-tools a,b] [--store-content] -- <command> [args...]`
+  (TypeScript CLI): an MCP stdio proxy. The agent's MCP client starts the gateway in place of the
+  MCP server; the gateway runs the server, relays every JSON-RPC line unchanged in both
+  directions, and writes a `decision` before each `tools/call` is forwarded and an `outcome` when
+  the answer arrives (the result, a JSON-RPC error, an `isError` result, a cancellation, or the
+  server exiting first). A call that cannot be recorded is not forwarded: the client gets a
+  JSON-RPC error that says so. `--strict` and `--strict-tools` forward a call only once the
+  witness has co-signed its decision. It ends with the server's exit code or signal, and writes
+  only protocol lines to stdout. A remote (HTTP) server goes behind a stdio bridge, for example
+  `signafaide gateway -- npx -y mcp-remote https://mcp.example.com/mcp`.
+- Tool declarations (spec section 2.6). Three reserved `note` names say which tools an agent has
+  and which of them are recorded: `signafaide.tools` starts a declaration,
+  `signafaide.tool/<tool name>` is a recorded tool and `signafaide.tool_unrecorded/<tool name>`
+  one that is not. Only the envelopes carry it, so it works for hash-only records. The gateway
+  declares the tools of its server, from the `tools/list` answers the client was shown.
+- `declare_tools(names, unrecorded=[...])` (Python) and `declareTools(names, { unrecorded: [...] })`
+  (TypeScript) take the agent's full tool list: a tool is declared recorded when the SDK wrapped
+  it in this process, and not recorded otherwise.
+- `wrap_tools` and `wrapTools` (with the LangChain, OpenAI Agents and Vercel AI adapters) now
+  declare the tools they wrap as recorded, with the first recorded call. This adds one note for
+  the list and one for each tool to the agent's chain each time a process starts or the list
+  changes; they are ordinary records and count towards the quota. `declare_tools=False`,
+  `declareTools: false` or `SIGNAFAIDE_DECLARE_TOOLS=0` turns it off.
+- The verifiers (Rust, Python, TypeScript) report tool coverage per agent, as notes that never
+  fail a pack: `coverage: <agent>: all 4 declared tools are recorded`, `... 1 declared tool is not
+  recorded: web_search`, `... 2 recorded tools are not in the declared tool list: ...`, or that no
+  tool list was declared. The JSON output has a `coverage` object. The Rust core has
+  `signafaide_core::coverage` for the same result from envelopes alone.
+- Local state: `.signafaide/tools/<agent>.json` keeps the tools each source (the application, each
+  gateway) last declared, so every declaration lists the agent's whole tool list. The Python and
+  TypeScript SDKs share the format.
+- Spec: section 2.6 (tool declarations), tool coverage in section 7, the client rules and the
+  gateway in section 8, `via=gateway` in the client header. Vectors: eight new variants, a
+  `tool_names` list, and `expect.coverage` and `expect.coverage_lines` on the pack and every
+  variant. No existing vector changed.
+- What it shows and what it does not: the gateway records every call that goes through it; a call
+  the application makes around it is still not recorded, so the deployment has to make the
+  gateway the only route to those tools. A declaration is the program's own signed statement of
+  its tools, not proof that the list is complete.
+- The skill, the plugin and the MCP server's setup steps tell a coding agent to put the gateway in
+  front of the MCP servers the application's agent uses and to declare the full tool list.
+
 ## v0.2.1 (2026-11-14)
 
 First release published to npm and PyPI.
