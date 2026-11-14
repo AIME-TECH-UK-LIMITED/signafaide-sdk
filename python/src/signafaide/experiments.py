@@ -166,7 +166,7 @@ def compare(
     Never writes records and never calls recorded tools: candidates must be side-effect free.
     """
     rec = runtime.get()
-    agent = agent or rec.default_agent
+    agent = agent or rec.only_agent() or rec.default_agent
     chain = chain or agent_chain(rec, agent)
     lo, hi = time_arg(since, "since"), time_arg(until, "until", end=True)
     report = verify_chain(rec, chain, keys)

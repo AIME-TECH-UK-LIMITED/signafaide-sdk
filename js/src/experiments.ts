@@ -148,7 +148,7 @@ export interface CompareOptions {
  */
 export async function compare(candidate: (input: any) => unknown, opts: CompareOptions = {}): Promise<ExperimentReport> {
   const rec = getRecorder();
-  const agent = opts.agent ?? rec.defaultAgent;
+  const agent = opts.agent ?? rec.onlyAgent() ?? rec.defaultAgent;
   const chain = opts.chain ?? agentChain(rec, agent);
   const lo = timeArg(opts.since, "since");
   const hi = timeArg(opts.until, "until", true);

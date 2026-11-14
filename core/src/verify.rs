@@ -61,6 +61,10 @@ pub struct Check {
     pub failures: Vec<Failure>,
 }
 
+/// The one definition of "pending" (§7), printed under the checks whenever one is pending.
+pub const PENDING_MEANS: &str =
+    "pending: co-signed, waiting for the public timestamp (an anchor is made every hour and usually confirms within a few hours); never counted as passed";
+
 /// Whether the keys came from a source independent of the pack.
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Independent {
@@ -132,6 +136,10 @@ impl Report {
             if c.failures.len() > 20 {
                 out += &format!("      ... and {} more\n", c.failures.len() - 20);
             }
+        }
+        if self.checks.iter().any(|c| c.status == Status::Pending) {
+            out += PENDING_MEANS;
+            out.push('\n');
         }
         out += &self.result_line();
         out.push('\n');

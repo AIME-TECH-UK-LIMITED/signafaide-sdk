@@ -73,7 +73,7 @@ class FakeService:
         if prj is None:
             return err(401, "invalid_key", "The API key is not valid; run `signafaide init` for a new sandbox key.")
         if method == "GET" and path == "/v1/project":
-            return 200, {"project": prj["project"], "env": prj["env"], "claimed": bool(prj.get("claimed"))}
+            return 200, {"project": prj["project"], "env": prj["env"], "claimed": bool(prj.get("claimed")), "name": prj.get("name")}
         if method == "POST" and path == "/v1/agents":
             pk = body["public_key"]
             kid = key_id(b64url_decode(pk))
@@ -111,9 +111,14 @@ class FakeService:
                 return self.submit(prj, body.get("records") or [])
         if method == "GET" and path.startswith("/v1/heads/"):
             agent = path.rsplit("/", 1)[1]
-            return (200, prj["heads"][agent]) if agent in prj["heads"] else err(404, "not_found", "This agent has no records.")
+            if agent in prj["heads"]:
+                return 200, prj["heads"][agent]
+            if getattr(self, "heads_unknown_agent", False) and agent not in prj["agents"]:
+                # A witness before round 4 answered 400 for an agent that was never registered.
+                return err(400, "unknown_agent", f"Agent '{agent}' is not registered in this project and env: call POST /v1/agents first.")
+            return err(404, "not_found", "This agent has no records.")
         if method == "GET" and path == "/v1/usage":
-            return 200, {"period": "2026-11", "used": prj["used"], "quota": 1000}
+            return 200, {"period": "2026-11", "used": prj["used"], "quota": 1000, "plan": prj.get("plan", "free")}
         if method == "GET" and path == "/v1/export":
             return 200, self.export(prj, query.get("agent"), query.get("from"), query.get("to"))
         if method == "POST" and path == "/v1/experiments":

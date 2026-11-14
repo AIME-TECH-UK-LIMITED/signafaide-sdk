@@ -28,6 +28,8 @@ export class FakeService {
   fail: Reply | null = null;
   /** Answer every POST /v1/records with this until cleared (a refusal that persists). */
   failAlways: Reply | null = null;
+  /** Answer `unknown_agent` (400) for heads of agents never registered, as witnesses did before round 4. */
+  headsUnknownAgent = false;
   /** Monthly allowance per project; null: unlimited. */
   quota: number | null = null;
   url = "";
@@ -80,10 +82,14 @@ export class FakeService {
     }
     const prj = this.projects.get((auth ?? "").replace(/^Bearer /, ""));
     if (!prj) return err(401, "invalid_key", "The API key is not valid; run `signafaide init` for a new sandbox key.");
-    if (method === "GET" && path === "/v1/project") return [200, { project: prj.project, env: prj.env, claimed: !!prj.claimed }];
+    if (method === "GET" && path === "/v1/project") return [200, { project: prj.project, env: prj.env, claimed: !!prj.claimed, name: prj.name ?? null }];
     if (method === "GET" && path.startsWith("/v1/heads/")) {
       const sh = prj.heads.get(decodeURIComponent(path.slice("/v1/heads/".length)));
-      return sh ? [200, sh] : err(404, "not_found", "This agent has no records.");
+      if (sh) return [200, sh];
+      // A witness before round 4 answered 400 for an agent that was never registered.
+      const agent = decodeURIComponent(path.slice("/v1/heads/".length));
+      if (this.headsUnknownAgent && !prj.agents.has(agent)) return err(400, "unknown_agent", `Agent '${agent}' is not registered in this project and env: call POST /v1/agents first.`);
+      return err(404, "not_found", "This agent has no records.");
     }
     if (method === "POST" && path === "/v1/agents") {
       const kid = keyId(b64urlDecode(body.public_key));
@@ -115,7 +121,7 @@ export class FakeService {
       }
       return this.submit(prj, body.records ?? []);
     }
-    if (method === "GET" && path === "/v1/usage") return [200, { period: "2026-11", used: prj.used, quota: 1000 }];
+    if (method === "GET" && path === "/v1/usage") return [200, { period: "2026-11", used: prj.used, quota: 1000, plan: prj.plan ?? "free" }];
     if (method === "GET" && path === "/v1/export") return [200, this.export(prj, q.agent, q.from, q.to)];
     if (method === "POST" && path === "/v1/experiments") {
       this.experiments.push(body);

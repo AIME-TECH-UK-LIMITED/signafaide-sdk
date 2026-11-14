@@ -72,7 +72,8 @@ def test_clean_pack_passes(pack, keys):
     assert s["anchor"] == s["ots"] == "pending"
     assert ": 8 of 12 checks passed, 2 pending (anchors, public timestamp), 2 not checked (drand rounds, content hashes);" in r.result_line
     lines = str(r).splitlines()
-    assert lines[0].startswith("signafAIde pack prj_") and no_counts(lines[-1]).startswith("PASS" + SCOPE) and len(lines) == 14
+    assert lines[0].startswith("signafAIde pack prj_") and no_counts(lines[-1]).startswith("PASS" + SCOPE) and len(lines) == 15
+    assert lines[-2].startswith("pending: co-signed, waiting for the public timestamp")
     assert lines[-1].endswith(pack["generated"])
     assert lines[1].startswith(" 1. Envelope schema") and "PASS" in lines[1]
     assert "no anchors in the pack yet" in r.check("anchor").detail

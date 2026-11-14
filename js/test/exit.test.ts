@@ -47,7 +47,8 @@ describe.skipIf(!fs.existsSync(path.join(dist, "index.js")))("process exit (buil
     });
     expect(p.status, p.stderr).toBe(0);
     expect(p.stderr).toContain("2 records kept");
-    expect(rec.state.outboxSize()).toBe(2);
+    // A chain new to this disk waits as drafts until the witness's head is known (#11).
+    expect(rec.status().outbox).toBe(2);
     expect((await rec.flush()).shipped).toBe(2);
   });
 

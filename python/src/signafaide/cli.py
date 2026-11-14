@@ -36,6 +36,50 @@ def _mask(key: Optional[str]) -> str:
     return f"{key[:13]}..." if key else "none"
 
 
+def _site(url: str) -> str:
+    """The website of a witness: https://api.signafaide.com -> https://signafaide.com."""
+    import urllib.parse
+
+    u = urllib.parse.urlsplit(url)
+    host = u.netloc[4:] if u.netloc.startswith("api.") else u.netloc
+    return f"{u.scheme}://{host}"
+
+
+#: One plain line each, never in --json output. The verify one shows at most once a week.
+UPGRADE_LIMIT = "upgrade: Solo ($19 a month) takes 100,000 live records a month and keeps recording past them at $5 per 100,000: {site}/pricing"
+UPGRADE_VERIFY = "upgrade: Solo ($19 a month) adds a verification report for a period and auditor links up to 90 days: {site}/pricing"
+HINT_EVERY_S = 7 * 86_400
+
+
+def _upgrade_after_verify(rec: runtime.Recorder) -> None:
+    """After a passing verify on a live key of a Free organisation: one line, once a week."""
+    from datetime import datetime, timezone
+
+    if not (rec.api_key or "").startswith("sfa_live_"):
+        return
+    cfg = rec.state.config()
+    last = cfg.get("upgrade_hint")
+    now = datetime.now(timezone.utc)
+    try:
+        if last and (now - datetime.fromisoformat(str(last).replace("Z", "+00:00"))).total_seconds() < HINT_EVERY_S:
+            return
+    except ValueError:
+        pass
+    try:
+        if (rec.client(timeout=3).usage() or {}).get("plan") != "free":
+            return
+        rec.state.save_config(upgrade_hint=now.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+    except (SignafaideError, StateError):
+        return
+    print(UPGRADE_VERIFY.format(site=_site(rec.url)))
+
+
+def _upgrade_at_limit(rec: runtime.Recorder, errors) -> None:
+    """When a live key hit the Free plan's monthly allowance: one line."""
+    if (rec.api_key or "").startswith("sfa_live_") and any(getattr(e, "code", None) == "quota_exceeded" for e in errors):
+        print(UPGRADE_LIMIT.format(site=_site(rec.url)))
+
+
 @command("init", "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link. "
          "The witness is https://api.signafaide.com unless SIGNAFAIDE_URL names another (a self-hosted witness, or http://127.0.0.1:7474 "
          "for a local one); an existing key is read from SIGNAFAIDE_API_KEY. Adds .signafaide/ and .env to .gitignore")
@@ -71,14 +115,27 @@ def cmd_status(a: argparse.Namespace) -> int:
         print(f"key: {_mask(s['api_key'])}" + (f" (env {s['env']})" if s["env"] else
               "; records stay on this machine (signed and chained, nothing is sent). `signafaide init` creates a free sandbox and sends hashes; or set SIGNAFAIDE_API_KEY"))
     print(f"service: {s['url']}")
+    project: dict = {}
+    if s["api_key"]:
+        try:
+            project = rec.client(timeout=5).project() or {}
+        except SignafaideError:
+            project = {}
+    name = project.get("name") if isinstance(project.get("name"), str) and project.get("name") else None
+    if project.get("project"):
+        print(f"project: {name} ({project['project']}, {project.get('env')})" if name else f"project: {project['project']} ({project.get('env')})")
     print(f"home: {s['home']}")
     if not s["chains"]:
         print("chains: none yet; decorate a function with @signafaide.record")
     blocked = []
     for c in s["chains"]:
-        last = f"last receipt seq {c['receipt_seq']} at {c['receipt_time']}" if c["receipt_seq"] else "no receipt yet"
+        last = (f"last receipt seq {c['receipt_seq']} at {c['receipt_time']}" if c["receipt_seq"]
+                else "drafts, signed for the project when they ship" if c["chain"].startswith("_pending/") else "no receipt yet")
         other = "" if c["current"] or not c["waiting"] else f"; {c['waiting']} waiting for the key of that project"
-        print(f"chain {c['chain']}: key {c['key_id']}, {plural(c['records'], 'record')}, {last}{other}" + ("; BLOCKED" if c["blocked"] else ""))
+        shown = c["chain"]
+        if name and shown.startswith(f"{project['project']}/"):
+            shown = f"{name}/{shown[len(project['project']) + 1:]}"
+        print(f"chain {shown}: key {c['key_id']}, {plural(c['records'], 'record')}, {last}{other}" + ("; BLOCKED" if c["blocked"] else ""))
         if c["blocked"]:
             b = c["blocked"]
             blocked.append(f"BLOCKED {c['chain']}: {b['reason']}; {plural(b['records'], 'record')} cannot ship. Next: {b['next']}")
@@ -96,11 +153,14 @@ def cmd_status(a: argparse.Namespace) -> int:
         try:
             u = rec.client(timeout=5).usage()
             print(f"quota: {u.get('used')} of {u.get('quota')} used in {u.get('period')}")
+            q, used = u.get("quota"), u.get("used")
+            if u.get("plan") == "free" and isinstance(q, int) and isinstance(used, int) and used >= q and s["api_key"].startswith("sfa_live_"):
+                print(UPGRADE_LIMIT.format(site=_site(rec.url)))
         except SignafaideError as e:
             print(f"quota: unknown ({e})")
         if not claimed and s["api_key"].startswith("sfa_test_") and sandbox.get("claim_url"):
             try:
-                claimed = (rec.client(timeout=5).project() or {}).get("claimed") is True
+                claimed = project.get("claimed") is True
                 if claimed:
                     rec.state.save_sandbox({**sandbox, "claimed": True})
             except SignafaideError:
@@ -169,6 +229,8 @@ def cmd_verify(a: argparse.Namespace) -> int:
         return 2
     print(json.dumps(report.to_dict(), indent=2) if a.json else str(report), flush=True)
     rec.event("verify")
+    if report.ok and not a.json:
+        _upgrade_after_verify(rec)
     return 0 if report.ok else 1
 
 
@@ -232,7 +294,7 @@ def cmd_export(a: argparse.Namespace) -> int:
 
 
 def _replay_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--agent", help="agent name (default: this project's folder name)")
+    p.add_argument("--agent", help="agent name (default: the only agent with records here, else this project's folder name)")
     p.add_argument("--from", dest="from_", help="YYYY-MM-DD or RFC 3339 start time")
     p.add_argument("--to", help="YYYY-MM-DD (inclusive) or RFC 3339 end time (exclusive)")
     p.add_argument("--record", help="one record hash (or a prefix of 8+ characters) and its decision or outcome")
@@ -257,7 +319,7 @@ def cmd_replay(a: argparse.Namespace) -> int:
 
 def _compare_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--module", required=True, help="the candidate: path/to/file.py:function or package.module:function")
-    p.add_argument("--agent", help="agent name (default: this project's folder name)")
+    p.add_argument("--agent", help="agent name (default: the only agent with records here, else this project's folder name)")
     p.add_argument("--name", help="only decisions of this action or tool name")
     p.add_argument("--from", dest="from_", help="YYYY-MM-DD or RFC 3339 start time")
     p.add_argument("--to", help="YYYY-MM-DD (inclusive) or RFC 3339 end time (exclusive)")
@@ -339,6 +401,7 @@ def cmd_flush(a: argparse.Namespace) -> int:
           + (f"; {plural(local, 'record')} kept on this machine only (see above)" if local else ""))
     for b in rec.diagnose():
         print(f"BLOCKED {b['chain']}: {plural(b['records'], 'record')} cannot ship as they are. Next: {b['next']}")
+    _upgrade_at_limit(rec, r["errors"].values())
     return 1 if r["errors"] else 0
 
 

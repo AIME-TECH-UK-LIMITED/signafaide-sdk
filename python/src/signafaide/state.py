@@ -121,6 +121,11 @@ class State:
         try:
             for sub in ("agents", "chain", "outbox"):
                 (self.home / sub).mkdir(parents=True, exist_ok=True)
+            # Inside the folder itself: nothing in it (agent keys above all) is ever committed,
+            # even before `signafaide init` adds the folder to the project's .gitignore (§8).
+            gi = self.home / ".gitignore"
+            if not gi.exists():
+                gi.write_text("*\n")
         except OSError as e:
             raise fs_error(e, self.home) from None
 
@@ -314,6 +319,10 @@ class State:
                     out.append((rec, d.get("store_content")))
                 target.parent.mkdir(parents=True, exist_ok=True)
                 _write_json(self._map_path(f"{dst}/{agent}"), mapping)
+                if base and isinstance(base.get("signed"), dict):
+                    # The witness's signed head this chain continues after: the local verify
+                    # reports the chain as continuing after it instead of missing seq 1..N.
+                    _write_json(self._base_path(f"{dst}/{agent}"), base["signed"])
                 tmp = target.with_name(target.name + ".tmp")
                 with open(tmp, "wb") as f:
                     f.write("".join(jcs.dumps(r) + "\n" for r, _ in out).encode())
@@ -324,6 +333,14 @@ class State:
                 tmp.replace(target)
                 path.unlink()
         return conflicts
+
+    def _base_path(self, chain: str) -> Path:
+        return self.home / "chain" / f"{chain}.base.json"
+
+    def chain_base(self, chain: str) -> Optional[dict]:
+        """The witness's signed head ``{head, head_sig}`` that *chain* continues after, when
+        this machine started it on an empty disk (§8), else None."""
+        return _read_json(self._base_path(chain))
 
     def _map_path(self, chain: str) -> Path:
         return self.home / "chain" / f"{chain}.drafts.json"
@@ -497,14 +514,14 @@ class State:
         while True:
             try:
                 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                os.write(fd, str(os.getpid()).encode())
+                os.write(fd, lock_stamp().encode())
                 os.close(fd)
                 break
             except OSError as e:
                 if not isinstance(e, FileExistsError):
                     raise fs_error(e, self.home) from None
                 try:
-                    if time.time() - path.stat().st_mtime > LOCK_STALE_S:
+                    if lock_age(path) > LOCK_STALE_S:
                         path.unlink()
                         continue
                 except FileNotFoundError:
@@ -760,6 +777,36 @@ class State:
     def save_sandbox(self, info: dict) -> None:
         self.ensure()
         _write_json(self.home / "sandbox.json", info)
+
+
+def _boot_id() -> str:
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:
+        return ""
+
+
+def lock_stamp() -> str:
+    """A lock file's content: ``<pid> <boot id> <monotonic seconds>``. The monotonic clock is the
+    machine's (CLOCK_MONOTONIC, shared by every process since boot), so a step of the wall clock
+    never makes a held lock look stale or a stale one look fresh."""
+    return f"{os.getpid()} {_boot_id() or '-'} {time.monotonic():.3f}"
+
+
+def lock_age(path: Path) -> float:
+    """Seconds since the lock at *path* was taken: by the monotonic clock when it was written on
+    this machine since its last boot, else by the file's modification time."""
+    try:
+        parts = path.read_text().split()
+    except OSError:
+        parts = []
+    boot = _boot_id()
+    if len(parts) == 3 and boot and parts[1] == boot:
+        try:
+            return time.monotonic() - float(parts[2])
+        except ValueError:
+            pass
+    return time.time() - path.stat().st_mtime
 
 
 def key_fingerprint(api_key: str) -> str:

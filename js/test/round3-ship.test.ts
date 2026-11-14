@@ -3,7 +3,7 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { main, statusLines } from "../src/cli.js";
 import { flush, note, verify } from "../src/index.js";
 import { Recorder, configure, getRecorder } from "../src/runtime.js";
@@ -93,7 +93,7 @@ describe("BLOCKED chains", () => {
     note("b", {});
     note("c", {});
     const e = Object.values((await flush()).errors)[0];
-    expect(e.message).toMatch(/agent key [0-9a-f]{16} was revoked.*signafaide keys rotate --agent claims-project.*signafaide repair --agent claims-project/);
+    expect(e.message).toMatch(/agent key [0-9a-f]{16} was revoked.*Run `signafaide repair --agent claims-project`.*gives the agent a new key/);
     expect((await statusLines(rec())).join("\n")).toMatch(/BLOCKED .*claims-project: refused by the witness: .*revoked/);
     expect((await cli("status"))[0]).toBe(1);
     const [vcode, vout] = await cli("verify");

@@ -78,14 +78,18 @@ export class Client {
     readonly apiKey?: string,
     readonly timeoutMs = 10_000,
     clientId?: string,
-    opts: { transport?: Transport; signal?: AbortSignal } = {},
+    opts: { transport?: Transport; signal?: AbortSignal; timeoutLabel?: string } = {},
   ) {
     this.url = url.replace(/\/+$/, "");
     // The coding agent is detected only at set-up time (init, agent setup), never per request.
     this.clientId = clientId ?? clientHeader({});
     this.transport = opts.transport ?? fetchTransport;
     this.signal = opts.signal;
+    this.timeoutLabel = opts.timeoutLabel;
   }
+
+  /** Said instead of "no answer within <timeout> s" when the request shares a larger limit. */
+  readonly timeoutLabel?: string;
 
   async request(method: string, path: string, opts: { body?: unknown; auth?: boolean; query?: Record<string, string | undefined> } = {}): Promise<any> {
     const auth = opts.auth ?? true;
@@ -105,7 +109,7 @@ export class Client {
     } catch (e) {
       const err = e as { cause?: { code?: string }; code?: string; name?: string; message?: string };
       const raw = err.cause?.code ?? err.code ?? err.message ?? String(e);
-      const reason = /abort|timeout/i.test(`${err.name} ${raw}`) ? `no answer within ${this.timeoutMs / 1000} s` : raw;
+      const reason = /abort|timeout/i.test(`${err.name} ${raw}`) ? (this.timeoutLabel ?? `no answer within ${this.timeoutMs / 1000} s`) : raw;
       throw new SignafaideError(`Cannot reach the signafAIde service at ${this.url} (${reason}); check the network or SIGNAFAIDE_URL.`, { code: "network" });
     }
     const { status, text, contentType: ctype } = resp;
@@ -129,7 +133,7 @@ export class Client {
   }
 
   /** `{project, env}` of this API key (§6). */
-  project(): Promise<{ project: string; env: string; claimed?: boolean }> {
+  project(): Promise<{ project: string; env: string; claimed?: boolean; name?: string | null }> {
     return this.request("GET", "/v1/project");
   }
 
@@ -146,7 +150,7 @@ export class Client {
     return this.request("GET", "/v1/export", { query: { agent, from, to } });
   }
 
-  usage(): Promise<{ period: string; used: number; quota: number }> {
+  usage(): Promise<{ period: string; used: number; quota: number | null; plan?: string }> {
     return this.request("GET", "/v1/usage");
   }
 

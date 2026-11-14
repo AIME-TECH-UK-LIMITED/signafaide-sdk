@@ -50,6 +50,8 @@ class Client:
         self.url = url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        #: Said instead of "no answer within <timeout> s" when the timeout is a share of a larger limit.
+        self.timeout_label: Optional[str] = None
         # The coding agent is detected only at set-up time (init, agent setup), never per request.
         self.client_id = client_id or client_header()
 
@@ -78,7 +80,7 @@ class Client:
         except (urllib.error.URLError, OSError) as e:
             reason = getattr(e, "reason", e)
             if "timed out" in str(reason):
-                reason = f"no answer within {self.timeout:g} s"
+                reason = self.timeout_label or f"no answer within {self.timeout:g} s"
             raise SignafaideError(
                 f"Cannot reach the signafAIde service at {self.url} ({reason}); check the network or SIGNAFAIDE_URL.",
                 code="network",

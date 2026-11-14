@@ -85,7 +85,8 @@ def test_status_flush_verify_export(cli, project, service, tmp_path):
     signafaide.record(lambda x: x, name="act")(1)
     code, out, _ = cli("status")
     assert code == 0
-    assert "env test" in out and re.search(r"chain prj_\w+/test/claims-project: key [0-9a-f]{16}, 2 records", out)
+    # A chain new to this disk waits as drafts until the witness's head is known (#11).
+    assert "env test" in out and re.search(r"chain _pending/[0-9a-f]{16}/claims-project: key [0-9a-f]{16}, 2 records, drafts", out), out
     assert "outbox: 2 records waiting" in out and "quota: 0 of 1000" in out and "claim: " in out
 
     code, out, _ = cli("flush")

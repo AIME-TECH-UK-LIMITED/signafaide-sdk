@@ -20,7 +20,7 @@ export const ERRORS: ErrorDoc[] = [
     code: "bad_signature",
     status: 400,
     means: "A record's signature does not verify; its key was not active at the record's time, or was revoked before the service received it; or an agent registration's proof of possession or rotation signature is missing or wrong.",
-    fix: "Do not edit `.signafaide/` by hand. If an agent key file in `.signafaide/agents/` was replaced, restore it from backup. If the key was revoked, run `signafaide keys rotate --agent <name>`, then `signafaide repair --agent <name>` to set aside the records it signed after it ended (kept, still verifiable locally). To give an agent a new key otherwise, run `signafaide keys rotate` (the SDK signs the rotation with the old key), or have a developer or admin revoke the old key in the console first.",
+    fix: "Do not edit `.signafaide/` by hand. If an agent key file in `.signafaide/agents/` was replaced, restore it from backup. If the key was revoked, run `signafaide repair --agent <name>`: it sets aside the records the key signed after it ended (kept, still verifiable locally) and gives the agent a new key. To give an agent a new key otherwise, run `signafaide keys rotate` (the SDK signs the rotation with the old key), or have a developer or admin revoke the old key in the console first.",
   },
   {
     code: "unknown_agent",

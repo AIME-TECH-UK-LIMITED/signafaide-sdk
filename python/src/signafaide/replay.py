@@ -266,7 +266,7 @@ def replay(
     protocol times (``until`` exclusive); ``record`` (a record hash or a prefix of at least 8
     characters) shows that record and its decision or outcome. Never writes anything."""
     rec = runtime.get()
-    agent = agent or rec.default_agent
+    agent = agent or rec.only_agent() or rec.default_agent
     chain = chain or agent_chain(rec, agent)
     lo, hi = time_arg(since, "since"), time_arg(until, "until", end=True)
     report = verify_chain(rec, chain, keys)

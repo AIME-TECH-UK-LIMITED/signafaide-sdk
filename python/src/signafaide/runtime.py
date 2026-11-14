@@ -7,6 +7,7 @@ import contextvars
 import logging
 import os
 import re
+import shutil
 import sys
 import threading
 from typing import Dict, List, Optional, Set, Tuple
@@ -18,7 +19,7 @@ from .crypto import SigningKey, b64url, hash_json
 from .http import DEFAULT_URL, Client, SignafaideError
 from .records import (API_KEY_RE, AGENT_RE, MAX_CLOCK_SKEW_MS, agent_name, clamp_time, make_draft, make_record, now, parse_time, record_hash,
                       registration, valid_project_id, with_wall_time)
-from .state import PENDING, KeyProvider, State, StateError, append_env_file, key_fingerprint, read_env_file, scope_of, wire_record
+from .state import PENDING, KeyProvider, State, StateError, agent_key_env_name, append_env_file, key_fingerprint, read_env_file, scope_of, wire_record
 from . import telemetry
 
 log = logging.getLogger("signafaide")
@@ -75,6 +76,9 @@ class Recorder:
             import tempfile
 
             home = tempfile.mkdtemp(prefix="signafaide-test-")
+            # Test mode sends nothing and keeps nothing: the folder goes when the process ends.
+            # Registered before the shipper's own exit hook, so it runs after it.
+            atexit.register(shutil.rmtree, home, True)
         self.state = State.discover(home)
         self.state.key_provider = key_provider
         self._url = url
@@ -103,6 +107,7 @@ class Recorder:
         self._pending = 0
         self._next_attempt = 0.0  # monotonic time before which the background shipper waits
         self._deadline: Optional[float] = None  # monotonic: requests made now must end by then (exit)
+        self._deadline_limit = 0.0  # the exit limit that deadline came from, in seconds
         self._failing: Optional[str] = None
         self._atexit = False
         self._stopped = False
@@ -153,13 +158,18 @@ class Recorder:
         return "\n".join([self.url, self.api_key or "", *map(stamp, dirs)])
 
     def client(self, timeout: float = 10.0, api_key: Optional[str] = None) -> Client:
+        label = None
         if self._deadline is not None:
             import time
 
+            # At exit every request shares one limit: a timeout names that limit, not what was left of it.
+            label = f"no answer within the {self._deadline_limit:g} s allowed at exit (SIGNAFAIDE_EXIT_FLUSH_MS)"
             timeout = min(timeout, self._deadline - time.monotonic())
             if timeout <= 0:
-                raise SignafaideError(f"Cannot reach the signafAIde service at {self.url} (the exit time limit was reached); records stay in the outbox.", code="network")
-        return Client(self.url, api_key or self.api_key, timeout=timeout, client_id=self.client_id())
+                raise SignafaideError(f"Cannot reach the signafAIde service at {self.url} ({label}); records stay in the outbox.", code="network")
+        c = Client(self.url, api_key or self.api_key, timeout=timeout, client_id=self.client_id())
+        c.timeout_label = label
+        return c
 
     def agent(self) -> str:
         """The coding agent stored when the project was set up (``init``, ``agent setup``). Never
@@ -185,6 +195,12 @@ class Recorder:
             self.client(timeout=2.0).event(name)
         except Exception:
             pass
+
+    def only_agent(self) -> Optional[str]:
+        """The one agent with records here, when there is exactly one (replay and compare
+        without ``--agent``), else None."""
+        names = {c.rsplit("/", 1)[1] for c in self.state.chains()}
+        return names.pop() if len(names) == 1 else None
 
     @property
     def default_agent(self) -> str:
@@ -303,7 +319,7 @@ class Recorder:
         sc = self.store_content if store_content is None else store_content
         api_key = self.api_key
         while True:
-            bucket = self.state.bucket(api_key)
+            bucket = self._write_bucket(api_key, agent)
             scope = scope_of(bucket)
             key = self.key(agent, scope)
             chain = f"{bucket}/{agent}"
@@ -323,7 +339,7 @@ class Recorder:
                     t, c = self._timed(content, prev_time, agent, scope)
                     return make_record(key, kind=kind, project=project, env=env, agent=agent, seq=seq, prev=prev, name=name, content=c, ref=r, time=t)
 
-            rec = self.state.append(chain, build, lambda r: wire_record(r, sc), still_valid=lambda b=bucket: self.state.bucket(api_key) == b)
+            rec = self.state.append(chain, build, lambda r: wire_record(r, sc), still_valid=lambda b=bucket: self._write_bucket(api_key, agent) == b)
             if rec is not None:
                 break
         self._pending += 1
@@ -338,6 +354,18 @@ class Recorder:
         if self._pending >= self.flush_size:
             self._wake.set()  # the shipper still honours its backoff
         return rec
+
+    def _write_bucket(self, api_key: Optional[str], agent: str) -> str:
+        """Where *agent*'s next record goes. A known project whose chain for *agent* is not on
+        this disk (an empty ``SIGNAFAIDE_HOME`` on Lambda or Cloud Run) may already have that
+        chain on the witness, so the record is a draft until the shipper has asked for the
+        witness's head and continues after it (§8). Writing never waits for the network."""
+        bucket = self.state.bucket(api_key)
+        if not api_key or bucket.startswith(PENDING + "/") or self.state.chain_path(f"{bucket}/{agent}").exists():
+            return bucket
+        # Drafts already written for this agent before the key was set continue in place.
+        nokey = f"{PENDING}/nokey"
+        return nokey if self.state.chain_path(f"{nokey}/{agent}").exists() else f"{PENDING}/{key_fingerprint(api_key)}"
 
     def _adopt_into(self, bucket: str, api_key: Optional[str], bases: Optional[Dict[str, dict]] = None) -> Dict[str, SignafaideError]:
         """Sign the draft chains written before the project was known into *bucket* (§8).
@@ -374,14 +402,17 @@ class Recorder:
         client = self.client(api_key=api_key)
         for a in sorted(agents):
             try:
-                h = (client.head(a) or {}).get("head") or {}
+                sh = client.head(a) or {}
             except SignafaideError as e:
-                if e.code == "not_found":
+                # No head (no records yet) or no agent at all (not registered yet): the chain
+                # starts at seq 1; the shipper registers the key first (§2.4).
+                if e.code in ("not_found", "unknown_agent"):
                     continue
                 raise
+            h = sh.get("head") or {}
             seq, rh = h.get("seq"), h.get("record_hash")
             if isinstance(seq, int) and seq > 0 and isinstance(rh, str) and re.fullmatch(r"[0-9a-f]{64}", rh) and f"{h.get('project')}/{h.get('env')}" == bucket and h.get("agent") == a:
-                out[a] = {"seq": seq, "record_hash": rh}
+                out[a] = {"seq": seq, "record_hash": rh, "signed": {"head": h, "head_sig": sh.get("head_sig")}}
         return out
 
     def _waiting(self) -> int:
@@ -456,9 +487,15 @@ class Recorder:
         msg = f"{e.message} (chain {chain})"
         if e.code == "bad_signature" and re.search(r"revoked|retired", e.message):
             if key_id == current:
-                msg = (f"{chain}: agent key {key_id} was revoked, so the witness refuses every record it signs. Give the agent a new key with "
-                       f"`signafaide keys rotate --agent {agent}`, then run `signafaide repair --agent {agent}` to set aside the records the revoked "
-                       "key signed after it ended (they stay on this machine and still verify locally).")
+                scope = scope_of(chain.rsplit("/", 1)[0])
+                if self.state.provided_key(agent, scope):
+                    msg = (f"{chain}: agent key {key_id} was revoked, so the witness refuses every record it signs. Put a new key for {agent} in "
+                           f"{agent_key_env_name(agent, scope)} (or your key provider), then run `signafaide repair --agent {agent}`: it sets aside the "
+                           "records the revoked key signed after it ended, kept on this machine and still verifiable.")
+                else:
+                    msg = (f"{chain}: agent key {key_id} was revoked, so the witness refuses every record it signs. Run `signafaide repair --agent {agent}`: "
+                           "it sets aside the records the revoked key signed after it ended, kept on this machine and still verifiable, and gives the "
+                           "agent a new key.")
             else:
                 msg = (f"{chain}: records signed by agent key {key_id} after it was revoked or retired cannot be co-signed, and new records wait "
                        f"behind them. Run `signafaide repair --agent {agent}`: it sets them aside (kept on this machine, still verifiable) so the "
@@ -657,6 +694,7 @@ class Recorder:
         if self._halted is not None and self._halted[0] == self._config_fp():
             return
         self._deadline = time.monotonic() + limit
+        self._deadline_limit = limit
         try:
             self._flush_logged(limit, background=True)
         finally:
@@ -707,6 +745,8 @@ class Recorder:
             if cur is not None and c0:
                 created[cur.key_id] = c0
             nxt = f"run `signafaide repair --agent {agent}` (sets these records aside, kept and verifiable, and starts a new segment with a fresh key)"
+            wait = (f"fix the clock (NTP) and wait until it catches up with these records, which then ship, or run `signafaide repair --agent {agent}` "
+                    "(sets them aside, kept and verifiable, and starts a new segment with a fresh key)")
             found = None
             for i, r in enumerate(tail):
                 t, seq, kid = r["envelope"]["time"], r["envelope"]["seq"], r["key_id"]
@@ -722,6 +762,7 @@ class Recorder:
                     found = at("key_ended", f"seq {seq} is signed by key {kid} after it ended at {ended[kid]}")
                 elif parse_time(t).timestamp() * 1000 > now_ms + MAX_CLOCK_SKEW_MS:
                     found = at("clock_ahead", f"seq {seq} has time {t}, ahead of this machine's clock now: the clock was ahead when it was written")
+                    found["next"] = wait
                 if found:
                     break
                 prev_time = t
@@ -730,8 +771,10 @@ class Recorder:
                 i, first = next(((i, r) for i, r in enumerate(tail) if w.get("seq") is None or r["envelope"]["seq"] >= w["seq"]), (0, tail[0]))
                 msg = str(w.get("message") or "")
                 msg = msg[len(chain) + 2:] if msg.startswith(f"{chain}: ") else msg
+                msg = msg.rstrip(" .")  # the line goes on with "; <n> records cannot ship"
+                ahead = bool(re.search(r"ahead of the service clock|must not be in the future", msg))
                 found = {"chain": chain, "seq": first["envelope"]["seq"], "code": w.get("code"), "reason": f"refused by the witness: {msg}",
-                         "records": len(tail) - i, "next": nxt}
+                         "records": len(tail) - i, "next": wait if ahead else nxt}
             if found:
                 out.append(found)
         return out
@@ -815,7 +858,8 @@ class Recorder:
             "sandbox": self.state.sandbox(),
             "chains": chains,
             "held": [{"chain": c, "file": str(p), "records": len(r)} for c, p, r in self.state.held_segments()],
-            "outbox": self.state.outbox_size(),
+            # Drafts wait too: for the project, or for the witness's head of a chain new to this disk.
+            "outbox": self._waiting(),
         }
 
 

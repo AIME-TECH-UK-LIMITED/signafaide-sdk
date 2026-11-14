@@ -162,7 +162,7 @@ def test_revoked_key_blocked_then_repaired(recorder, service, capsys):
     signafaide.note("b", {})
     signafaide.note("c", {})
     (e,) = recorder.flush()["errors"].values()
-    assert "was revoked" in str(e) and "signafaide keys rotate --agent claims-project" in str(e) and "signafaide repair --agent claims-project" in str(e)
+    assert "was revoked" in str(e) and "keys rotate" not in str(e) and "signafaide repair --agent claims-project" in str(e)
     assert main(["status"]) == 1
     out = capsys.readouterr().out
     assert "BLOCKED" in out and "revoked" in out

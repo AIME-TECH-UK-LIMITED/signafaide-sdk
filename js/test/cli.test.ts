@@ -75,7 +75,8 @@ describe("cli", () => {
     let [code, out] = await cli("status");
     expect(code).toBe(0);
     expect(out).toContain("env test");
-    expect(out).toMatch(/chain prj_\w+\/test\/claims-project: key [0-9a-f]{16}, 2 records, no receipt yet/);
+    // A chain new to this disk waits as drafts until the witness's head is known (#11).
+    expect(out).toMatch(/chain _pending\/[0-9a-f]{16}\/claims-project: key [0-9a-f]{16}, 2 records, drafts, signed for the project when they ship/);
     expect(out).toContain("outbox: 2 records waiting");
     expect(out).toContain("quota: 0 of 1000");
     expect(out).toContain("claim: ");

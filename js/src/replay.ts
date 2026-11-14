@@ -72,7 +72,8 @@ export async function verifyChain(rec: Recorder, chain: string, keys?: string | 
   }
   const agentKeys: KeyDoc[] = st.agentPublicKeys().map((k) => ({ agent: k.agent, key_id: k.key_id, public_key: k.public_key, valid_from: null, valid_to: k.retired }));
   const heads = Object.fromEntries(Object.entries(st.chainHeads()).filter(([c]) => c === chain));
-  const report = verifyLocalState({ records, chainIds: records.map(() => chain), agentKeys, heads }, serviceKeys, await loadDrandVerifier());
+  const base = rec.state.chainBase(chain);
+  const report = verifyLocalState({ records, chainIds: records.map(() => chain), agentKeys, heads, bases: base ? { [chain]: base } : {} }, serviceKeys, await loadDrandVerifier());
   report.notes.unshift(`chain: ${chain}`, note);
   return report;
 }
@@ -259,7 +260,7 @@ export interface ReplayOptions {
  */
 export async function replay(opts: ReplayOptions = {}): Promise<Replay> {
   const rec = getRecorder();
-  const agent = opts.agent ?? rec.defaultAgent;
+  const agent = opts.agent ?? rec.onlyAgent() ?? rec.defaultAgent;
   const chain = opts.chain ?? agentChain(rec, agent);
   const lo = timeArg(opts.since, "since");
   const hi = timeArg(opts.until, "until", true);

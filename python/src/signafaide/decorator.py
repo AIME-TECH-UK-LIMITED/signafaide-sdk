@@ -199,20 +199,27 @@ def _wrap_langchain(tool: Any, spec: _Spec) -> Any:
     telemetry.ADAPTERS.add("langchain")
     new = tool.model_copy() if hasattr(tool, "model_copy") else tool.copy()
     run, arun = new.run, new.arun
-    returned: contextvars.ContextVar[Any] = contextvars.ContextVar("signafaide_lc_returned", default=_NOTHING)
+    returned: contextvars.ContextVar[Any] = contextvars.ContextVar("signafaide_lc_returned", default=None)
     for attr in ("_run", "_arun"):
         inner = getattr(new, attr, None)
         if inner is None:
             continue
+        # LangChain runs _run in a copy of the context when it is called with a tool call, so a
+        # value set there is lost on return. The context var holds a box (a list) instead: the
+        # copy shares the same box, and the value put in it is seen after `run` returns.
         if attr == "_run":
             def capture(*a: Any, _inner: Any = inner, **kw: Any) -> Any:
                 v = _inner(*a, **kw)
-                returned.set(v)
+                box = returned.get()
+                if isinstance(box, list):
+                    box[:] = [v]
                 return v
         else:
             async def capture(*a: Any, _inner: Any = inner, **kw: Any) -> Any:  # type: ignore[misc]
                 v = await _inner(*a, **kw)
-                returned.set(v)
+                box = returned.get()
+                if isinstance(box, list):
+                    box[:] = [v]
                 return v
         # LangChain reads _run's signature to decide what to pass it (config, run_manager):
         # the wrapper must show the same one.
@@ -224,28 +231,26 @@ def _wrap_langchain(tool: Any, spec: _Spec) -> Any:
         return {k: v for k, v in tool_input.items() if k not in _LC_EXTRA} if isinstance(tool_input, dict) else tool_input
 
     def tool_value(out: Any) -> Any:
-        v = returned.get()
-        if v is not _NOTHING:
-            return v
+        box = returned.get()
+        if isinstance(box, list) and box:
+            return box[0]
         # Not captured (a tool type that bypasses _run): a ToolMessage still yields its content.
         return getattr(out, "content", out) if type(out).__name__ == "ToolMessage" else out
 
     @functools.wraps(run)
     def run_recorded(tool_input: Any, *args: Any, **kwargs: Any) -> Any:
-        returned.set(_NOTHING)
+        returned.set([])
         return spec.call(lc_input(tool_input), lambda: run(tool_input, *args, **kwargs), tool_value)
 
     @functools.wraps(arun)
     async def arun_recorded(tool_input: Any, *args: Any, **kwargs: Any) -> Any:
-        returned.set(_NOTHING)
+        returned.set([])
         return await spec.acall(lc_input(tool_input), lambda: arun(tool_input, *args, **kwargs), tool_value)
 
     object.__setattr__(new, "run", run_recorded)
     object.__setattr__(new, "arun", arun_recorded)
     return new
 
-
-_NOTHING = object()
 
 
 # --- helpers --------------------------------------------------------------------

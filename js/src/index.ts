@@ -18,6 +18,7 @@ import { parseJson } from "./jcs.js";
 import { checkContent, verifySig } from "./crypto.js";
 import { plural } from "./plural.js";
 import { recordHash, type SignedRecord } from "./records.js";
+import type { State } from "./state.js";
 import { DEFAULT_TIMESTAMP_URL, lookupTimestamps } from "./timestamps.js";
 import {
   DRAND_NOT_CHECKED,
@@ -96,6 +97,16 @@ export interface VerifyOptions {
   /** Local state: fail (exit 1) when any record has not been co-signed yet, for CI. A BLOCKED
    * chain always fails. */
   failOnPendingSend?: boolean;
+}
+
+/** The signed heads local chains continue after (§8, chains started on an empty disk). */
+function chainBases(st: State, chainIds: string[]): Record<string, { head: any; head_sig: string }> {
+  const out: Record<string, { head: any; head_sig: string }> = {};
+  for (const c of new Set(chainIds)) {
+    const b = st.chainBase(c);
+    if (b) out[c] = b;
+  }
+  return out;
 }
 
 /** Records `signafaide repair` set aside: their signatures (with the key that signed them),
@@ -212,7 +223,7 @@ export async function verify(pack?: string | object | null, opts: VerifyOptions 
         chainIds.push(chain);
       }
     }
-    report = verifyLocalState({ records, chainIds, agentKeys, heads: st.chainHeads() }, keys ?? [], drand, keysPlain);
+    report = verifyLocalState({ records, chainIds, agentKeys, heads: st.chainHeads(), bases: chainBases(st, chainIds) }, keys ?? [], drand, keysPlain);
     notes.unshift(`local state: ${st.home}`);
     const unsent = records.filter((r) => !r.receipt).length;
     report.after.push(...notYet(unsent, records.length, !!rec.apiKey));

@@ -27,6 +27,33 @@ const err = (s: string): void => console.error(s);
 const recorder = (): Recorder => configure({ quiet: true, via: "cli" });
 const mask = (k?: string | null): string => (k ? `${k.slice(0, 13)}...` : "none");
 
+/** The website of a witness: https://api.signafaide.com -> https://signafaide.com. */
+export function siteOf(url: string): string {
+  const u = new URL(url);
+  return `${u.protocol}//${u.host.replace(/^api\./, "")}`;
+}
+
+/** One plain line each, never in --json output. The verify one shows at most once a week. */
+export const UPGRADE_LIMIT = (site: string): string =>
+  `upgrade: Solo ($19 a month) takes 100,000 live records a month and keeps recording past them at $5 per 100,000: ${site}/pricing`;
+export const UPGRADE_VERIFY = (site: string): string =>
+  `upgrade: Solo ($19 a month) adds a verification report for a period and auditor links up to 90 days: ${site}/pricing`;
+const HINT_EVERY_MS = 7 * 86_400_000;
+
+/** After a passing verify on a live key of a Free organisation: one line, once a week. */
+async function upgradeAfterVerify(rec: Recorder): Promise<void> {
+  if (!rec.apiKey?.startsWith("sfa_live_")) return;
+  const last = Date.parse(String(rec.state.config().upgrade_hint ?? ""));
+  if (Number.isFinite(last) && Date.now() - last < HINT_EVERY_MS) return;
+  try {
+    if ((await rec.client(3000).usage())?.plan !== "free") return;
+    rec.state.saveConfig({ upgrade_hint: new Date().toISOString() });
+  } catch {
+    return;
+  }
+  out(UPGRADE_VERIFY(siteOf(rec.url)));
+}
+
 /** The `status` report, also returned by the MCP `signafaide_status` tool. */
 export async function statusLines(rec: Recorder): Promise<string[]> {
   const lines: string[] = [];
@@ -39,13 +66,24 @@ export async function statusLines(rec: Recorder): Promise<string[]> {
           (s.env ? ` (env ${s.env})` : "; records stay on this machine (signed and chained, nothing is sent). `signafaide init` creates a free sandbox and sends hashes; or set SIGNAFAIDE_API_KEY"),
   );
   lines.push(`service: ${s.url}`);
+  let project: { project?: string; env?: string; claimed?: boolean; name?: string | null } = {};
+  if (s.api_key) {
+    try {
+      project = (await rec.client(5000).project()) ?? {};
+    } catch {
+      project = {};
+    }
+  }
+  const name = typeof project.name === "string" && project.name ? project.name : null;
+  if (project.project) lines.push(name ? `project: ${name} (${project.project}, ${project.env})` : `project: ${project.project} (${project.env})`);
   lines.push(`home: ${s.home}`);
   if (!s.chains.length) lines.push("chains: none yet; wrap a function with record()");
   const blocked: string[] = [];
   for (const c of s.chains) {
-    const last = c.receipt_seq ? `last receipt seq ${c.receipt_seq} at ${c.receipt_time}` : "no receipt yet";
+    const last = c.receipt_seq ? `last receipt seq ${c.receipt_seq} at ${c.receipt_time}` : c.chain.startsWith("_pending/") ? "drafts, signed for the project when they ship" : "no receipt yet";
     const other = c.current || !c.waiting ? "" : `; ${c.waiting} waiting for the key of that project`;
-    lines.push(`chain ${c.chain}: key ${c.key_id}, ${plural(c.records, "record")}, ${last}${other}${c.blocked ? "; BLOCKED" : ""}`);
+    const shown = name && project.project && c.chain.startsWith(`${project.project}/`) ? `${name}/${c.chain.slice(project.project.length + 1)}` : c.chain;
+    lines.push(`chain ${shown}: key ${c.key_id}, ${plural(c.records, "record")}, ${last}${other}${c.blocked ? "; BLOCKED" : ""}`);
     if (c.blocked) blocked.push(`BLOCKED ${c.chain}: ${c.blocked.reason}; ${plural(c.blocked.records, "record")} cannot ship. Next: ${c.blocked.next}`);
   }
   if (s.chains.some((c) => c.agent === rec.defaultAgent)) {
@@ -59,12 +97,13 @@ export async function statusLines(rec: Recorder): Promise<string[]> {
     try {
       const u = await rec.client(5000).usage();
       lines.push(`quota: ${u.used} of ${u.quota} used in ${u.period}`);
+      if (u.plan === "free" && typeof u.quota === "number" && u.used >= u.quota && s.api_key.startsWith("sfa_live_")) lines.push(UPGRADE_LIMIT(siteOf(rec.url)));
     } catch (e) {
       lines.push(`quota: unknown (${(e as Error).message})`);
     }
     if (!claimed && s.api_key.startsWith("sfa_test_") && s.sandbox?.claim_url) {
       try {
-        claimed = (await rec.client(5000).project())?.claimed === true;
+        claimed = project.claimed === true;
         if (claimed) rec.state.saveSandbox({ ...s.sandbox, claimed: true });
       } catch {
         /* shown as unclaimed */
@@ -178,6 +217,7 @@ export const COMMANDS: Record<string, Command> = {
       }
       out(v.json ? JSON.stringify(report, null, 2) : String(report));
       await rec.event("verify");
+      if (report.ok && !v.json) await upgradeAfterVerify(rec);
       return report.ok ? 0 : 1;
     },
   },
@@ -380,6 +420,7 @@ export const COMMANDS: Record<string, Command> = {
         .reduce((n, [c]) => n + rec.state.draftCount(c), 0);
       out(`shipped ${plural(r.shipped, "record")}, ${r.left - local} left in the outbox` + (local ? `; ${plural(local, "record")} kept on this machine only (see above)` : ""));
       for (const b of rec.diagnose()) out(`BLOCKED ${b.chain}: ${plural(b.records, "record")} cannot ship as they are. Next: ${b.next}`);
+      if (rec.apiKey.startsWith("sfa_live_") && Object.values(r.errors).some((e) => e.code === "quota_exceeded")) out(UPGRADE_LIMIT(siteOf(rec.url)));
       return Object.keys(r.errors).length ? 1 : 0;
     },
   },

@@ -26,7 +26,7 @@ import {
   type Receipt,
   type SignedRecord,
 } from "./records.js";
-import { PENDING, State, StateError, appendEnvFile, keyFingerprint, readEnvFile, scopeOf, type KeyProvider, type KeyScope } from "./state.js";
+import { PENDING, State, StateError, agentKeyEnvName, monotonicMs, appendEnvFile, keyFingerprint, readEnvFile, scopeOf, type Base, type KeyProvider, type KeyScope } from "./state.js";
 import { adapterField, clientHeader, detectAgent, telemetryEnabled } from "./telemetry.js";
 
 const BATCH_MAX = 1000; // §6: at most 1000 records per POST /v1/records
@@ -95,6 +95,13 @@ export interface Blocked {
 
 type IoMode = "fg" | "bg" | "exit";
 
+/** Test-mode folders, deleted when the process ends (one exit hook for all of them). */
+const testHomes = new Set<string>();
+function removeAtExit(dir: string): void {
+  if (!testHomes.size) process.once("exit", () => testHomes.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
+  testHomes.add(dir);
+}
+
 export class Recorder {
   readonly state: State;
   storeContent: boolean;
@@ -121,6 +128,7 @@ export class Recorder {
   private halted?: { fp: string; err: SignafaideError };
   private shipping: Promise<unknown> = Promise.resolve();
   private timer?: ReturnType<typeof setInterval>;
+  /** Monotonic ms (`monotonicMs`) before which the background shipper waits: a wall-clock step never shortens or stretches the backoff. */
   private nextAttempt = 0;
   private failures = 0;
   private failing?: string;
@@ -137,7 +145,10 @@ export class Recorder {
 
   constructor(opts: RecorderOptions = {}) {
     this.test = testMode();
-    const home = opts.home ?? (this.test && !process.env.SIGNAFAIDE_HOME ? fs.mkdtempSync(path.join(os.tmpdir(), "signafaide-test-")) : undefined);
+    const temp = opts.home === undefined && this.test && !process.env.SIGNAFAIDE_HOME ? fs.mkdtempSync(path.join(os.tmpdir(), "signafaide-test-")) : undefined;
+    // Test mode sends nothing and keeps nothing: the folder goes when the process ends.
+    if (temp) removeAtExit(temp);
+    const home = opts.home ?? temp;
     this.state = State.discover(home, opts.root);
     this.state.keyProvider = opts.keyProvider;
     this._url = opts.url;
@@ -201,7 +212,9 @@ export class Recorder {
     const mode = this.ioMode;
     const transport: Transport | undefined = typeof process !== "undefined" && process.versions?.node ? nodeTransport(() => mode !== "bg") : undefined;
     const signal = mode === "bg" ? this.bgAbort.signal : mode === "exit" ? this.exitAbort?.signal : undefined;
-    return new Client(this.url, apiKey, timeoutMs, this.clientId(), { transport, signal });
+    // At exit every request shares one limit: a timeout names that limit, not a share of it.
+    const timeoutLabel = mode === "exit" ? `no answer within the ${this.exitFlushMs / 1000} s allowed at exit (SIGNAFAIDE_EXIT_FLUSH_MS)` : undefined;
+    return new Client(this.url, apiKey, timeoutMs, this.clientId(), { transport, signal, timeoutLabel });
   }
 
   /** The coding agent stored when the project was set up (`init`, `agent setup`). It is never
@@ -236,6 +249,13 @@ export class Recorder {
   legal(): { terms_url: string; privacy_url: string } {
     const s = this.state.sandbox();
     return legalLinks(s ?? {}, s?.url ?? this.url);
+  }
+
+  /** The one agent with records here, when there is exactly one (replay and compare without
+   * `--agent`). */
+  onlyAgent(): string | undefined {
+    const names = new Set(this.state.chains().map((c) => c.split("/")[2]));
+    return names.size === 1 ? [...names][0] : undefined;
   }
 
   /** The agent name used when none is given: the project folder's name. Give agents explicit
@@ -344,7 +364,7 @@ export class Recorder {
     const apiKey = this.apiKey;
     let rec: SignedRecord | null = null;
     while (!rec) {
-      const bucket = this.state.bucket(apiKey);
+      const bucket = this.writeBucket(apiKey, agent);
       const scope = scopeOf(bucket);
       const key = this.key(agent, scope);
       const chain = `${bucket}/${agent}`;
@@ -360,7 +380,7 @@ export class Recorder {
             const [time, c] = this.timed(content, prevTime, agent, scope);
             return makeRecord(key, { kind, project, env, agent, seq, prev, name, content: c, ref: this.state.translateRef(chain, opts.ref), time });
           };
-      rec = this.state.append(chain, build, (r) => wireRecord(r, sc), () => this.state.bucket(apiKey) === bucket);
+      rec = this.state.append(chain, build, (r) => wireRecord(r, sc), () => this.writeBucket(apiKey, agent) === bucket);
     }
     this.pending++;
     this.exitFlushed = false;
@@ -376,10 +396,22 @@ export class Recorder {
     return rec;
   }
 
+  /** Where `agent`'s next record goes. A known project whose chain for `agent` is not on this
+   * disk (an empty `SIGNAFAIDE_HOME` on Lambda or Cloud Run) may already have that chain on the
+   * witness, so the record is a draft until the shipper has asked for the witness's head and
+   * continues after it (§8). Writing never waits for the network. */
+  private writeBucket(apiKey: string | undefined, agent: string): string {
+    const bucket = this.state.bucket(apiKey);
+    if (!apiKey || bucket.startsWith(PENDING + "/") || fs.existsSync(this.state.chainPath(`${bucket}/${agent}`))) return bucket;
+    // Drafts already written for this agent before the key was set continue in place.
+    const nokey = `${PENDING}/nokey`;
+    return fs.existsSync(this.state.chainPath(`${nokey}/${agent}`)) ? nokey : `${PENDING}/${keyFingerprint(apiKey)}`;
+  }
+
   /** Move pending chains (written before the project was known) under `bucket`. Returns the
    * chains that stay pending, with why (chain id -> error). `bases`: agent -> the service's head,
    * for a chain whose local file is gone (an ephemeral disk): its drafts continue after it. */
-  private adoptInto(bucket: string, apiKey: string | undefined, bases: Record<string, { seq: number; record_hash: string }> = {}): Record<string, SignafaideError> {
+  private adoptInto(bucket: string, apiKey: string | undefined, bases: Record<string, Base> = {}): Record<string, SignafaideError> {
     const out: Record<string, SignafaideError> = {};
     if (bucket.startsWith(PENDING + "/")) return out;
     const sources = [`${PENDING}/nokey`];
@@ -402,8 +434,8 @@ export class Recorder {
 
   /** The service's heads for pending agents that have no local chain under `bucket` yet (an
    * ephemeral disk lost it): their drafts continue the service's chain instead of conflicting. */
-  private async remoteBases(bucket: string, apiKey: string): Promise<Record<string, { seq: number; record_hash: string }>> {
-    const out: Record<string, { seq: number; record_hash: string }> = {};
+  private async remoteBases(bucket: string, apiKey: string): Promise<Record<string, Base>> {
+    const out: Record<string, Base> = {};
     const agents = new Set<string>();
     for (const c of this.state.chains()) {
       if (!c.startsWith(`${PENDING}/nokey/`) && !c.startsWith(`${PENDING}/${keyFingerprint(apiKey)}/`)) continue;
@@ -413,10 +445,15 @@ export class Recorder {
     const client = this.client(10_000, apiKey);
     for (const a of agents) {
       try {
-        const h = (await client.head(a))?.head;
-        if (h && Number.isInteger(h.seq) && h.seq > 0 && /^[0-9a-f]{64}$/.test(h.record_hash) && `${h.project}/${h.env}` === bucket && h.agent === a) out[a] = { seq: h.seq, record_hash: h.record_hash };
+        const sh = await client.head(a);
+        const h = sh?.head;
+        if (h && Number.isInteger(h.seq) && h.seq > 0 && /^[0-9a-f]{64}$/.test(h.record_hash) && `${h.project}/${h.env}` === bucket && h.agent === a)
+          out[a] = { seq: h.seq, record_hash: h.record_hash, signed: { head: h, head_sig: sh.head_sig } };
       } catch (e) {
-        if ((e as SignafaideError).code !== "not_found") throw e;
+        // No head (no records yet) or no agent at all (not registered yet): the chain starts at
+        // seq 1; the shipper registers the key first (§2.4).
+        const code = (e as SignafaideError).code;
+        if (code !== "not_found" && code !== "unknown_agent") throw e;
       }
     }
     return out;
@@ -460,7 +497,7 @@ export class Recorder {
       const key = this.apiKey;
       if (!key) return { shipped, left: this.waiting(), errors };
       const apiKey: string = key;
-      let bases: Record<string, { seq: number; record_hash: string }> = {};
+      let bases: Record<string, Base> = {};
       try {
         await this.resolveProject(apiKey);
         const bucket = this.state.bucket(apiKey);
@@ -518,9 +555,12 @@ export class Recorder {
     const agent = chain.split("/")[2];
     let msg = `${e.message} (chain ${chain})`;
     if (e.code === "bad_signature" && /revoked|retired/.test(e.message)) {
+      const scope = scopeOf(chain.split("/").slice(0, 2).join("/"));
       msg =
         keyId === current
-          ? `${chain}: agent key ${keyId} was revoked, so the witness refuses every record it signs. Give the agent a new key with \`signafaide keys rotate --agent ${agent}\`, then run \`signafaide repair --agent ${agent}\` to set aside the records the revoked key signed after it ended (they stay on this machine and still verify locally).`
+          ? this.state.providedKey(agent, scope)
+            ? `${chain}: agent key ${keyId} was revoked, so the witness refuses every record it signs. Put a new key for ${agent} in ${agentKeyEnvName(agent, scope)} (or your key provider), then run \`signafaide repair --agent ${agent}\`: it sets aside the records the revoked key signed after it ended, kept on this machine and still verifiable.`
+            : `${chain}: agent key ${keyId} was revoked, so the witness refuses every record it signs. Run \`signafaide repair --agent ${agent}\`: it sets aside the records the revoked key signed after it ended, kept on this machine and still verifiable, and gives the agent a new key.`
           : `${chain}: records signed by agent key ${keyId} after it was revoked or retired cannot be co-signed, and new records wait behind them. Run \`signafaide repair --agent ${agent}\`: it sets them aside (kept on this machine, still verifiable) so the new key's records ship.`;
     } else if (/signafaide repair/.test(e.message)) {
       msg = `${e.message} (chain ${chain})`; // the witness already said what to do
@@ -655,7 +695,7 @@ export class Recorder {
   /** One background attempt: never two at once, never inside the backoff, and never after a
    * refusal retrying cannot fix until the configuration (API key, URL, agent keys) changes. */
   private async tick(): Promise<void> {
-    if (this.closed || this.inFlight || Date.now() < this.nextAttempt) return;
+    if (this.closed || this.inFlight || monotonicMs() < this.nextAttempt) return;
     if (!this.apiKey || !this.waiting()) return; // no key: local only, nothing is sent
     const fp = this.configFp();
     if (this.halted) {
@@ -683,7 +723,7 @@ export class Recorder {
     }
     this.failures++;
     const base = Math.min(60_000, this.flushIntervalMs * 2 ** this.failures);
-    this.nextAttempt = Date.now() + base * (0.8 + Math.random() * 0.4);
+    this.nextAttempt = monotonicMs() + base * (0.8 + Math.random() * 0.4);
   }
 
   private async flushLogged(timeoutMs = 10_000, mode: IoMode = "fg"): Promise<FlushResult | null> {
@@ -779,6 +819,7 @@ export class Recorder {
       if (cur && c0) created.set(cur.keyId, c0);
       for (const [rk, c] of this.state.retiredKeys(agent, scope)) created.set(rk.keyId, c);
       const next = `run \`signafaide repair --agent ${agent}\` (sets these records aside, kept and verifiable, and starts a new segment with a fresh key)`;
+      const wait = `fix the clock (NTP) and wait until it catches up with these records, which then ship, or run \`signafaide repair --agent ${agent}\` (sets them aside, kept and verifiable, and starts a new segment with a fresh key)`;
       let found: Blocked | null = null;
       for (const r of tail) {
         const t = r.envelope.time;
@@ -786,15 +827,18 @@ export class Recorder {
         if (prevTime && t < prevTime) found = at("time_back", `seq ${r.envelope.seq} has time ${t}, earlier than the record before it (${prevTime}): the clock went back while an older SDK was writing`);
         else if (created.has(r.key_id) && t < created.get(r.key_id)!) found = at("before_key", `seq ${r.envelope.seq} has time ${t}, before its key ${r.key_id} was made (${created.get(r.key_id)})`);
         else if (ended.has(r.key_id) && t >= ended.get(r.key_id)!) found = at("key_ended", `seq ${r.envelope.seq} is signed by key ${r.key_id} after it ended at ${ended.get(r.key_id)}`);
-        else if (Date.parse(t) > nowMs + MAX_CLOCK_SKEW_MS) found = at("clock_ahead", `seq ${r.envelope.seq} has time ${t}, ahead of this machine's clock now: the clock was ahead when it was written`);
+        else if (Date.parse(t) > nowMs + MAX_CLOCK_SKEW_MS)
+          found = { ...at("clock_ahead", `seq ${r.envelope.seq} has time ${t}, ahead of this machine's clock now: the clock was ahead when it was written`), next: wait };
         if (found) break;
         prevTime = t;
       }
       const w = saved[chain];
       if (!found && w) {
         const first = tail.find((r) => w.seq === null || r.envelope.seq >= w.seq) ?? tail[0];
-        const msg = w.message.startsWith(`${chain}: `) ? w.message.slice(chain.length + 2) : w.message;
-        found = { chain, seq: first.envelope.seq, code: w.code, reason: `refused by the witness: ${msg}`, records: tail.length - tail.indexOf(first), next };
+        // The line goes on with "; <n> records cannot ship": no trailing full stop here.
+        const msg = (w.message.startsWith(`${chain}: `) ? w.message.slice(chain.length + 2) : w.message).replace(/[\s.]+$/, "");
+        const ahead = /ahead of the service clock|must not be in the future/.test(msg);
+        found = { chain, seq: first.envelope.seq, code: w.code, reason: `refused by the witness: ${msg}`, records: tail.length - tail.indexOf(first), next: ahead ? wait : next };
       }
       if (found) out.push(found);
     }
@@ -883,7 +927,8 @@ export class Recorder {
       sandbox: this.state.sandbox(),
       chains,
       held,
-      outbox: this.state.outboxSize(),
+      // Drafts wait too: for the project, or for the witness's head of a chain new to this disk.
+      outbox: this.waiting(),
     };
   }
 }

@@ -183,6 +183,10 @@ export interface ReportScope {
   byService: boolean;
 }
 
+/** The one definition of "pending" (§7), printed under the checks whenever one is pending. */
+export const PENDING_MEANS =
+  "pending: co-signed, waiting for the public timestamp (an anchor is made every hour and usually confirms within a few hours); never counted as passed";
+
 export class Report {
   /** Lines shown after the checks, before the result line: for local state, what still needs
    * the witness (co-signature, public timestamp). */
@@ -253,6 +257,7 @@ export class Report {
       out.push(...c.failures.slice(0, 20).map((f) => `      - ${f.item}: ${f.message}`));
       if (c.failures.length > 20) out.push(`      ... and ${c.failures.length - 20} more`);
     }
+    if (this.checks.some((c) => c.status === "pending")) out.push(PENDING_MEANS);
     out.push(...this.after);
     out.push(...this.blocked.map((b) => `BLOCKED ${b}`));
     out.push(this.resultLine);
@@ -473,6 +478,9 @@ export interface LocalInput {
   heads: Record<string, { head: any; head_sig: string }>;
   /** Drafts waiting for the project (§8): not a reason for "no records". */
   drafts?: number;
+  /** Per chain id, the witness's signed head the chain continues after (§8: a chain this
+   * machine started on an empty disk). */
+  bases?: Record<string, { head: any; head_sig: string }>;
 }
 
 /** Verify local state chain by chain. Unshipped records are fine; a chain must be
@@ -480,6 +488,7 @@ export interface LocalInput {
 export function verifyLocalState(local: LocalInput, serviceKeys: KeyDoc[], drand: DrandVerifier | null = null, serviceKeysPlainHttp = false): Report {
   const v = new Verifier(serviceKeys, local.agentKeys, new Map(), null, null, true, local.heads, drand);
   v.drafts = local.drafts ?? 0;
+  v.localBases = local.bases ?? {};
   const checks = v.run(local.records, [], local.chainIds);
   const report = new Report(checks, null, null, local.records.length, [], [], { service_keys: !serviceKeysPlainHttp, agent_keys: true });
   report.nothingCosigned = v.nothingCosigned;
@@ -617,6 +626,8 @@ class Verifier {
   private firstKey = new Map<string, number>();
   drafts = 0;
   nothingCosigned = false;
+  /** Local state: chain id -> the witness's signed head a chain continues after (§8). */
+  localBases: Record<string, { head: any; head_sig: string }> = {};
 
   constructor(
     private serviceKeys: KeyDoc[],
@@ -800,6 +811,7 @@ class Verifier {
       if (!held) chain.set(seq, x);
     }
     let edge = 0;
+    const based: string[] = [];
     for (const agent of [...chains.keys()].sort()) {
       const chain = chains.get(agent)!;
       acc.checked += chain.size;
@@ -814,7 +826,9 @@ class Verifier {
           const a = prev.r.envelope.seq + 1;
           acc.fail(x.label, this.local ? `the local chain is missing seq ${a}..${seq - 1}` : `the pack is missing seq ${a}..${seq - 1} of agent ${agent} (a gap inside the chain)`);
         } else if (seq > 1) {
-          if (this.local) acc.fail(x.label, `the local chain is missing seq 1..${seq - 1}`);
+          const base = this.local ? (this.localBases[agent]?.head ?? {}) : {};
+          if (this.local && base.seq === seq - 1 && base.record_hash === e.prev) based.push(`${agent} after seq ${seq - 1}`);
+          else if (this.local) acc.fail(x.label, `the local chain is missing seq 1..${seq - 1}`);
           else if (this.fromCuts(agent)) edge++;
           else if (this.x.filter.from !== null) acc.fail(x.label, `the pack is missing seq 1..${seq - 1} of agent ${agent}; its export's from filter is not after the agent's first key, so they belong in it`);
           else acc.fail(x.label, `the pack is missing seq 1..${seq - 1} of agent ${agent} and its export declares no from filter`);
@@ -827,6 +841,7 @@ class Verifier {
       }
     }
     if (edge) acc.notes.push(`${plural(edge, "chain")} start after seq 1, as the export's from filter allows`);
+    if (based.length) acc.notes.push(`continues after a co-signed record this machine does not hold: ${based.join(", ")} (the witness's signed head, see signed heads)`);
     return chains;
   }
 
@@ -998,6 +1013,16 @@ class Verifier {
       if (applies && have < h.seq) acc.fail(item, `the client's head is seq ${h.seq} but the pack ends at seq ${have} (records missing at the end)`);
     }
     if (newer) acc.notes.push(`${plural(newer, "client head")} newer than the export, not applied`);
+    for (const id of Object.keys(this.localBases).sort()) {
+      const sh = this.localBases[id] ?? ({} as any);
+      const head = sh.head ?? {};
+      const hh = hashJson(head);
+      const sig = sh.head_sig ?? "";
+      if (this.serviceKeys.length && !seen.has(`${hh}\n${sig}`)) {
+        seen.add(`${hh}\n${sig}`);
+        if (!this.anyKey("head", hh, sig, head.server_time)) acc.fail(`base ${id}#${head.seq}`, "head_sig: signature does not verify");
+      }
+    }
     for (const id of Object.keys(this.localHeads).sort()) {
       const sh = this.localHeads[id] ?? ({} as any);
       const head = sh.head ?? {};
@@ -1090,17 +1115,24 @@ class Verifier {
     }
     let stale = 0;
     let young = 0;
+    // Local state holds no anchors: a batch younger than the anchor window is pending (the same
+    // rule as a pack, judged at the time of the check); an older one is not checked here.
+    const refMs = this.local ? Date.now() : this.generatedMs;
     for (const [k, rc] of batches) {
       if (anchored.has(k.split("\n")[1])) continue;
       const t = ms(rc.batch.server_time);
-      if (!this.local && (t === null || this.generatedMs === null || t + ANCHOR_WINDOW_MS < this.generatedMs)) stale++;
+      if (t === null || refMs === null || t + ANCHOR_WINDOW_MS < refMs) stale++;
       else young++;
     }
     if (stale) {
       a10.notChecked = true;
-      a10.notes.push(`${plural(stale, "batch", "batches")} not timestamped: older than the 2-hour anchor window, and no anchor in the pack covers them`);
+      a10.notes.push(
+        this.local
+          ? `${plural(stale, "batch", "batches")} older than the 2-hour anchor window: local state holds no anchors, so verify an export (\`signafaide export\`) to check them`
+          : `${plural(stale, "batch", "batches")} not timestamped: older than the 2-hour anchor window, and no anchor in the pack covers them`,
+      );
     }
-    if (!anchors.length && !stale) {
+    if (!anchors.length && !stale && !(this.local && young)) {
       if (this.local) a10.notChecked = true;
       else a10.pending = true;
       a10.notes.push(this.local ? "local state holds no anchors" : "no anchors in the pack yet (an anchor is made every hour)");

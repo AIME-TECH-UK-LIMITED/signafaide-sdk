@@ -107,7 +107,8 @@ def test_note(recorder):
 
 def test_flush_ships_and_stores_receipts(recorder, service):
     signafaide.record(lambda x: x * 2, name="double")(2)
-    assert recorder.state.outbox_size() == 2
+    # A chain new to this disk waits as drafts until the witness's head is known (#11).
+    assert recorder._waiting() == 2
     r = signafaide.flush()
     assert r == {"shipped": 2, "left": 0, "errors": {}}
     assert all("receipt" in x for x in chain(recorder))
@@ -352,7 +353,7 @@ def test_records_survive_process_exit(project, dead_url, service):
     p = subprocess.run([sys.executable, "-c", code], cwd=project, env=env, capture_output=True, text=True, timeout=60)
     assert p.returncode == 0, p.stderr
     assert "2 records kept" in p.stderr
-    assert rec.state.outbox_size() == 2
+    assert rec._waiting() == 2
     assert rec.flush()["shipped"] == 2
 
 

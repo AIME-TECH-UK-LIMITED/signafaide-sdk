@@ -62,6 +62,38 @@ const LOCK_STALE_MS = 10_000;
 const LOCK_WAIT_MS = 15_000;
 export const PENDING = "_pending";
 
+/** Milliseconds of the machine's monotonic clock (CLOCK_MONOTONIC on Linux, shared by every
+ * process since boot; Python's time.monotonic reads the same clock). */
+export const monotonicMs = (): number => Number(process.hrtime.bigint() / 1_000_000n);
+
+function bootId(): string {
+  try {
+    return fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** A lock file's content: `<pid> <boot id> <monotonic seconds>`, so a step of the wall clock
+ * never makes a held lock look stale or a stale one look fresh (§8). */
+export function lockStamp(): string {
+  return `${process.pid} ${bootId() || "-"} ${(monotonicMs() / 1000).toFixed(3)}`;
+}
+
+/** How long ago the lock at `p` was taken: by the monotonic clock when it was written on this
+ * machine since its last boot, else by the file's modification time. */
+export function lockAgeMs(p: string): number {
+  let parts: string[] = [];
+  try {
+    parts = fs.readFileSync(p, "utf8").split(/\s+/).filter(Boolean);
+  } catch {
+    parts = [];
+  }
+  const boot = bootId();
+  if (parts.length === 3 && boot && parts[1] === boot && Number.isFinite(Number(parts[2]))) return monotonicMs() - Number(parts[2]) * 1000;
+  return Date.now() - fs.statSync(p).mtimeMs;
+}
+
 /** Names an API key in config.json without storing it: sha256, first 16 hex. */
 export const keyFingerprint = (apiKey: string): string => createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
 
@@ -73,6 +105,14 @@ export class StateError extends Error {
 export interface SignedHead {
   head: { project?: string; env?: string; agent: string; seq: number; record_hash: string; server_time: string };
   head_sig: string;
+}
+
+/** The witness's head a chain continues after (§8, an empty disk): its seq and record_hash, and
+ * the signed head itself, kept in `<chain>.base.json` for the local verify. */
+export interface Base {
+  seq: number;
+  record_hash: string;
+  signed?: SignedHead;
 }
 
 /** Project root: nearest folder with `.signafaide`, else with .git / pyproject.toml /
@@ -130,6 +170,10 @@ export class State {
   ensure(): void {
     try {
       for (const sub of ["agents", "chain", "outbox"]) fs.mkdirSync(path.join(this.home, sub), { recursive: true });
+      // Inside the folder itself: nothing in it (agent keys above all) is ever committed, even
+      // before `signafaide init` adds the folder to the project's .gitignore (§8).
+      const gi = path.join(this.home, ".gitignore");
+      if (!fs.existsSync(gi)) fs.writeFileSync(gi, "*\n");
     } catch (e) {
       throw fsError(e, this.home);
     }
@@ -236,7 +280,7 @@ export class State {
     key: (agent: string, firstTime?: string) => SigningKey,
     wire: (r: SignedRecord) => SignedRecord,
     notBefore?: string,
-    bases: Record<string, { seq: number; record_hash: string }> = {},
+    bases: Record<string, Base> = {},
   ): [string, string][] {
     const [project, env] = dst.split("/") as [string, "test" | "live"];
     const conflicts: [string, string][] = [];
@@ -273,6 +317,9 @@ export class State {
           }
           fs.mkdirSync(path.dirname(target), { recursive: true });
           writeJson(this.mapPath(`${dst}/${agent}`), mapping);
+          // The witness's signed head this chain continues after: the local verify reports the
+          // chain as continuing after it instead of missing seq 1..N.
+          if (base?.signed) writeJson(this.basePath(`${dst}/${agent}`), base.signed);
           const fd = fs.openSync(target + ".tmp", "w");
           fs.writeSync(fd, out.map(([r]) => canonicalize(r) + "\n").join(""));
           fs.fsyncSync(fd);
@@ -284,6 +331,16 @@ export class State {
       );
     }
     return conflicts;
+  }
+
+  private basePath(chain: string): string {
+    return path.join(this.home, "chain", `${chain}.base.json`);
+  }
+
+  /** The witness's signed head `chain` continues after, when this machine started it on an
+   * empty disk (§8). */
+  chainBase(chain: string): SignedHead | undefined {
+    return readJson<SignedHead>(this.basePath(chain)) ?? undefined;
   }
 
   private mapPath(chain: string): string {
@@ -546,24 +603,24 @@ export class State {
     } catch (e) {
       throw fsError(e, this.home);
     }
-    const deadline = Date.now() + LOCK_WAIT_MS;
+    const deadline = monotonicMs() + LOCK_WAIT_MS;
     for (;;) {
       try {
         const fd = fs.openSync(p, "wx", 0o600);
-        fs.writeSync(fd, String(process.pid));
+        fs.writeSync(fd, lockStamp());
         fs.closeSync(fd);
         break;
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw fsError(e, this.home);
         try {
-          if (Date.now() - fs.statSync(p).mtimeMs > LOCK_STALE_MS) {
+          if (lockAgeMs(p) > LOCK_STALE_MS) {
             fs.unlinkSync(p);
             continue;
           }
         } catch {
           continue;
         }
-        if (Date.now() > deadline) throw new StateError(`${p} is held by another process; delete it if no signafaide process is running`);
+        if (monotonicMs() > deadline) throw new StateError(`${p} is held by another process; delete it if no signafaide process is running`);
         sleepSync(2);
       }
     }
@@ -868,7 +925,7 @@ export class State {
   }
 
   /** `config.json`: settings kept with the project (the coding agent that set it up). */
-  config(): { agent?: string; projects?: Record<string, { project: string; env: string }> } {
+  config(): { agent?: string; projects?: Record<string, { project: string; env: string }>; upgrade_hint?: string } {
     return readJson(path.join(this.home, "config.json")) ?? {};
   }
 

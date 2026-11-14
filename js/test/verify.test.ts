@@ -76,7 +76,8 @@ describe("pack verifier", () => {
     const lines = String(r).split("\n");
     expect(lines[0]).toMatch(/^signafAIde pack prj_\w+ \(test\), 5 records$/);
     expect(lines[1]).toMatch(/^ 1\. Envelope schema +PASS +5 records$/);
-    expect(lines).toHaveLength(14);
+    expect(lines).toHaveLength(15);
+    expect(lines.at(-2)).toBe("pending: co-signed, waiting for the public timestamp (an anchor is made every hour and usually confirms within a few hours); never counted as passed");
     expect(noCounts(lines.at(-1))).toBe(`PASS${SCOPE}${pack.generated}`);
   });
 

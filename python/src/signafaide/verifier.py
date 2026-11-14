@@ -16,6 +16,7 @@ import base64
 import binascii
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -60,7 +61,7 @@ MAX_ROUND = (253_402_300_799 - QUICKNET_GENESIS) // 3 + 1
 ANCHOR_WINDOW_MS = 7_200_000
 #: Where keys came from, when not from an independent source (§7 result line).
 INDEPENDENT, FROM_PACK, PLAIN_HTTP = "independent", "taken from the pack", "fetched over plain http"
-#: py_ecc is optional (about 23 MB with its dependencies), so say plainly when it is missing.
+#: py_ecc is a dependency (about 23 MB with its own); if it cannot be imported, say so plainly.
 DRAND_NOT_CHECKED = "drand: not checked (BLS library not installed; pip install py_ecc)"
 
 
@@ -120,6 +121,9 @@ SHORT_NAMES = {
 #: The checks of the witness's part: locally, while nothing is co-signed, they are named together (§7).
 WITNESS_CHECKS = ("record_hash", "merkle", "batch_sig", "batch_chain", "head_sig", "drand", "anchor", "ots")
 NOTHING_COSIGNED = "nothing co-signed yet"
+#: The one definition of "pending" (§7), printed under the checks whenever one is pending.
+PENDING_MEANS = ("pending: co-signed, waiting for the public timestamp (an anchor is made every hour and usually confirms "
+                 "within a few hours); never counted as passed")
 
 
 def counts_text(checks: List[Tuple[str, str]], nothing_cosigned: bool = False) -> str:
@@ -223,6 +227,8 @@ class Report:
             out += [f"      - {f['item']}: {f['message']}" for f in c.failures[:20]]
             if len(c.failures) > 20:
                 out.append(f"      ... and {len(c.failures) - 20} more")
+        if any(c.status == PENDING for c in self.checks):
+            out.append(PENDING_MEANS)
         out += self.after
         out += [f"BLOCKED {b}" for b in self.blocked]
         out.append(self.result_line)
@@ -499,7 +505,8 @@ def verify_local(
     agent_keys = [{"agent": k["agent"], "key_id": k["key_id"], "public_key": k["public_key"], "valid_from": None, "valid_to": k.get("retired")}
                   for k in state.agent_public_keys()]
     heads = {c: h for c, h in state.chain_heads().items() if chains is None or c in chains}
-    v = _Verifier(service_keys, agent_keys, {}, project=None, env=None, local=True, local_heads=heads, drand=drand)
+    bases = {c: b for c in set(chain_ids) for b in [state.chain_base(c)] if b is not None} if hasattr(state, "chain_base") else {}
+    v = _Verifier(service_keys, agent_keys, {}, project=None, env=None, local=True, local_heads=heads, drand=drand, local_bases=bases)
     checks = v.run(records, [], chain_ids)
     return Report(checks, records=len(records), independent={"service_keys": not service_keys_plain_http, "agent_keys": True},
                   sources=(PLAIN_HTTP if service_keys_plain_http else INDEPENDENT, INDEPENDENT), nothing_cosigned=v.nothing_cosigned)
@@ -650,12 +657,16 @@ class _Verifier:
     project_name: Optional[str] = None
 
     def __init__(self, service_keys, agent_keys, contents, *, project, env, local, local_heads=None, drand=None,
-                 filter=None, export_heads=None, client_heads=None, bitcoin=None, not_independent=False, generated=None, export_sig=None):
+                 filter=None, export_heads=None, client_heads=None, bitcoin=None, not_independent=False, generated=None, export_sig=None,
+                 local_bases=None):
         self.service_keys = service_keys
         self.agent_keys = agent_keys
         self.contents = contents
         self.project, self.env, self.local = project, env, local
         self.local_heads = local_heads or {}
+        # Local state: chain id -> the witness's signed head a chain continues after (§8, a
+        # chain this machine started on an empty disk).
+        self.local_bases = local_bases or {}
         self.drand_verifier = drand
         self.filter = filter or {"agents": None, "from": None, "to": None}
         self.export_heads = export_heads or []
@@ -836,6 +847,7 @@ class _Verifier:
                 continue
             chain.setdefault(seq, x)
         edge = 0
+        based: List[str] = []
         for agent, chain in sorted(chains.items()):
             acc.checked += len(chain)
             prev = None
@@ -853,7 +865,10 @@ class _Verifier:
                     else:
                         acc.fail(label, f"the pack is missing seq {prev[1]['envelope']['seq'] + 1}..{seq - 1} of agent {agent} (a gap inside the chain)")
                 elif seq > 1:
-                    if self.local:
+                    base = ((self.local_bases.get(agent) or {}).get("head") or {}) if self.local else {}
+                    if self.local and base.get("seq") == seq - 1 and base.get("record_hash") == e["prev"]:
+                        based.append(f"{agent} after seq {seq - 1}")
+                    elif self.local:
                         acc.fail(label, f"the local chain is missing seq 1..{seq - 1}")
                     elif self.from_cuts(agent):
                         edge += 1
@@ -868,6 +883,8 @@ class _Verifier:
                 prev = chain[seq]
         if edge:
             acc.notes.append(f"{plural(edge, 'chain')} start after seq 1, as the export's from filter allows")
+        if based:
+            acc.notes.append(f"continues after a co-signed record this machine does not hold: {', '.join(based)} (the witness's signed head, see signed heads)")
         return chains
 
     # 5
@@ -1053,6 +1070,15 @@ class _Verifier:
         if newer:
             acc.notes.append(f"{plural(newer, 'client head')} newer than the export, not applied")
 
+        for chain, sh in sorted(self.local_bases.items()):
+            head = (sh or {}).get("head") or {}
+            hh = hash_json(head)
+            sig = (sh or {}).get("head_sig", "")
+            if self.service_keys and (hh, sig) not in seen:
+                seen.add((hh, sig))
+                if not self.any_key("head", hh, sig, head.get("server_time")):
+                    acc.fail(f"base {chain}#{head.get('seq')}", "head_sig: signature does not verify")
+
         for chain, sh in sorted(self.local_heads.items()):
             head = (sh or {}).get("head") or {}
             item = f"head.json {chain}#{head.get('seq')}"
@@ -1155,18 +1181,23 @@ class _Verifier:
                 a10.fail(f"anchor {seq}", f"prev does not equal the anchor_hash of anchor {prev[0]}")
             prev = (seq, ah)
         stale = young = 0
+        # Local state holds no anchors: a batch younger than the anchor window is pending (the
+        # same rule as a pack, judged at the time of the check); an older one is not checked here.
+        ref_ms = int(time.time() * 1000) if self.local else self.generated_ms
         for (_, h), rc in batches.items():
             if h in anchored:
                 continue
             t = _epoch_ms(rc["batch"]["server_time"])
-            if not self.local and (t is None or self.generated_ms is None or t + ANCHOR_WINDOW_MS < self.generated_ms):
+            if t is None or ref_ms is None or t + ANCHOR_WINDOW_MS < ref_ms:
                 stale += 1
             else:
                 young += 1
         if stale:
             a10.not_checked = True
-            a10.notes.append(f"{plural(stale, 'batch', 'batches')} not timestamped: older than the 2-hour anchor window, and no anchor in the pack covers them")
-        if not anchors and not stale:
+            a10.notes.append(f"{plural(stale, 'batch', 'batches')} older than the 2-hour anchor window: local state holds no anchors, so verify an export (`signafaide export`) to check them"
+                             if self.local else
+                             f"{plural(stale, 'batch', 'batches')} not timestamped: older than the 2-hour anchor window, and no anchor in the pack covers them")
+        if not anchors and not stale and not (self.local and young):
             if self.local:
                 a10.not_checked = True
             else:
