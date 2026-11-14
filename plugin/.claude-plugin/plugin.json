@@ -3,7 +3,13 @@
   "displayName": "signafAIde",
   "version": "0.3.0",
   "description": "Signed, tamper-evident records of what your AI agents decided: an MCP server to set it up and verify it, and a skill that says when to use it.",
-  "author": { "name": "AIMETECH" },
+  "author": { "name": "AIMETECH", "url": "https://signafaide.co.uk" },
   "license": "Apache-2.0",
-  "keywords": ["audit-trail", "ai-agents", "tamper-evidence", "compliance", "mcp"]
+  "keywords": ["audit-trail", "ai-agents", "tamper-evidence", "compliance", "mcp"],
+  "homepage": "https://signafaide.co.uk",
+  "repository": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk",
+  "documentationUrl": "https://signafaide.co.uk/docs/coding-agents",
+  "supportUrl": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues",
+  "privacyPolicyUrl": "https://signafaide.co.uk/legal/privacy",
+  "termsOfServiceUrl": "https://signafaide.co.uk/legal/terms"
 }
