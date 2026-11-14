@@ -1,0 +1,23 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "uk.co.signafaide/signafaide",
+  "title": "signafAIde",
+  "description": "Signed, tamper-evident records of AI agent tool calls: set up, record, verify and check coverage.",
+  "websiteUrl": "https://signafaide.co.uk",
+  "repository": {
+    "url": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk",
+    "source": "github",
+    "subfolder": "js/mcp"
+  },
+  "version": "0.3.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "signafaide-mcp",
+      "version": "0.3.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

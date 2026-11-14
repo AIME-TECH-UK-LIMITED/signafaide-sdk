@@ -9,6 +9,13 @@ The record format changed between v0.1.1 and v0.1.2 (salted content hashes) and 
 (packs name their project), before any public release. Records and packs written by a version
 verify with that version and later ones unless an entry below says otherwise.
 
+## v0.3.1 (2026-11-14)
+
+Listing metadata only; no change to the SDKs, the verifiers or the protocol.
+
+- `signafaide-mcp` carries `mcpName` (`uk.co.signafaide/signafaide`) and `js/mcp/server.json`, for the official MCP Registry.
+- The Claude Code plugin has an icon, its homepage, repository, documentation, support, privacy and terms links, and a README section on what it sends and where.
+
 ## v0.3.0 (2026-11-14)
 
 Recording everything an agent can call: the gateway for MCP tools, and tool declarations.
