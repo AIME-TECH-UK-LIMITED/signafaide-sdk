@@ -15,6 +15,7 @@ import { assertPortableNumbers, canonicalize, parseJson } from "../src/jcs.js";
 import { MAX_NODES, MAX_PROOF_BYTES, base64Decode, blockAttestations, otsStatus, parseOts } from "../src/ots.js";
 import { AGENT_RE, clampTime, envelopeErrors, manifestEntry, validProjectId, validTime } from "../src/records.js";
 import { checkHeader, rootsFromVector } from "../src/timestamps.js";
+import { coverage, declaredName, toolNote, toolNoteName } from "../src/coverage.js";
 import {
   ANCHOR_WINDOW_MS,
   MAX_ROUND,
@@ -209,8 +210,38 @@ describe.skipIf(!v)("spec/vectors.json", () => {
       expect(r.resultLine, c.name).toBe(c.expect.result_line);
       expect(Object.fromEntries(r.checks.map((x) => [x.id, x.value ?? x.status])), c.name).toEqual(c.expect.checks);
       if (c.expect.chain_note) expect(r.check("chain").detail, c.name).toContain(c.expect.chain_note);
+      // Tool coverage (§7): the same object and the same lines as the Rust and Python verifiers.
+      expect(JSON.parse(JSON.stringify(r.toJSON())).coverage, c.name).toEqual(c.expect.coverage);
+      expect(r.coverageLines(), c.name).toEqual(c.expect.coverage_lines);
+      for (const line of c.expect.coverage_lines) expect(String(r).split("\n"), c.name).toContain(`coverage: ${line}`);
     }
+    expect(v.variants.filter((c: any) => Object.values<any>(c.expect.coverage).some((x) => x.declared_at_seq !== null)).length).toBe(7);
     expect(v.variants.filter((c: any) => c.expect.chain_note).length).toBe(3); // an unclean start, a clean restart, a clean restart cut by the window
+  });
+
+  it("tool declarations: declared names, note names and coverage wording (spec §2.6, §7)", () => {
+    expect(v.tool_names.length).toBe(10);
+    for (const c of v.tool_names) {
+      expect(declaredName(c.tool), c.name).toBe(c.declared_name);
+      expect(declaredName(c.declared_name), c.name).toBe(c.declared_name);
+      expect(toolNoteName(c.tool, true), c.name).toBe(c.recorded_note);
+      expect(toolNoteName(c.tool, false), c.name).toBe(c.unrecorded_note);
+      expect([...c.unrecorded_note].length).toBeLessThanOrEqual(128);
+      expect(envelopeErrors({ ...v.records[2].envelope, name: c.unrecorded_note }), c.name).toEqual([]);
+      expect(toolNote("note", c.recorded_note)).toEqual({ name: c.declared_name, recorded: true });
+      expect(toolNote("note", c.unrecorded_note)).toEqual({ name: c.declared_name, recorded: false });
+      expect(toolNote("decision", c.recorded_note)).toBeNull();
+    }
+    expect(toolNote("note", "signafaide.tools")).toBe("header");
+    expect(toolNote("note", "signafaide.tool/")).toBeNull();
+    const r = verifyPack(v.pack.pack, ...inputs({}, { drand }));
+    expect(JSON.parse(JSON.stringify(r.toJSON())).coverage).toEqual(v.pack.expect.coverage);
+    expect(r.coverageLines()).toEqual(v.pack.expect.coverage_lines);
+    // Name order is by code point, as in Rust and Python, not by UTF-16 unit.
+    const names = ["\u{1F600}", "\uFFFD", "b", "a"];
+    expect(
+      coverage([{ seq: 1, kind: "note", name: "signafaide.tools" }, ...names.map((n, i) => ({ seq: i + 2, kind: "note", name: `signafaide.tool/${n}` }))]).declared.map((t) => t.name),
+    ).toEqual(["a", "b", "\uFFFD", "\u{1F600}"]);
   });
 
   it("monotonic time: the client's time for a new record (spec §2.2)", () => {

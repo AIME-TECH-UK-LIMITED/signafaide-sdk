@@ -211,6 +211,29 @@ def test_pack(v, bls):
     r = verify_pack(v["pack"]["pack"], keys, **o)
     assert r.result == v["pack"]["expect"]["result"] and r.result_line == v["pack"]["expect"]["result_line"], str(r)
     assert {c.id: c.value or c.status for c in r.checks} == v["pack"]["expect"]["checks"], str(r)
+    assert r.to_dict()["coverage"] == v["pack"]["expect"]["coverage"] and r.coverage_lines() == v["pack"]["expect"]["coverage_lines"]
+
+
+def test_tool_declarations(v):
+    """Spec §2.6: declared names, note names and how a record is read as a tool note."""
+    from signafaide.coverage import coverage, declared_name, tool_note, tool_note_name
+
+    assert len(v["tool_names"]) == 10
+    for case in v["tool_names"]:
+        d = declared_name(case["tool"])
+        assert d == case["declared_name"] and declared_name(d) == d, case["name"]
+        assert tool_note_name(case["tool"], True) == case["recorded_note"], case["name"]
+        assert tool_note_name(case["tool"], False) == case["unrecorded_note"], case["name"]
+        assert len(case["unrecorded_note"]) <= 128
+        assert envelope_errors({**v["records"][2]["envelope"], "name": case["unrecorded_note"]}) == [], case["name"]
+        assert tool_note("note", case["recorded_note"]) == (d, True)
+        assert tool_note("note", case["unrecorded_note"]) == (d, False)
+        assert tool_note("decision", case["recorded_note"]) is None
+    assert tool_note("note", "signafaide.tools") == "header" and tool_note("note", "signafaide.tool/") is None
+    # Name order is by code point, as in Rust and TypeScript.
+    names = ["\U0001F600", "\uFFFD", "b", "a"]
+    got = coverage([(1, "note", "signafaide.tools")] + [(i + 2, "note", f"signafaide.tool/{n}") for i, n in enumerate(names)])
+    assert [t["name"] for t in got["declared"]] == ["a", "b", "\uFFFD", "\U0001F600"]
 
 
 def test_variants(v, bls):
@@ -221,6 +244,12 @@ def test_variants(v, bls):
         assert {c.id: c.value or c.status for c in r.checks} == case["expect"]["checks"], (case["name"], str(r))
         if "chain_note" in case["expect"]:
             assert case["expect"]["chain_note"] in r.check("chain").detail, (case["name"], str(r))
+        # Tool coverage (§7): the same object and the same lines as the Rust and TypeScript verifiers.
+        assert r.to_dict()["coverage"] == case["expect"]["coverage"], case["name"]
+        assert r.coverage_lines() == case["expect"]["coverage_lines"], case["name"]
+        for line in case["expect"]["coverage_lines"]:
+            assert f"coverage: {line}" in str(r).split("\n"), (case["name"], str(r))
+    assert sum(1 for c in v["variants"] if any(x["declared_at_seq"] is not None for x in c["expect"]["coverage"].values())) == 7
     assert sum(1 for c in v["variants"] if "chain_note" in c["expect"]) == 3  # an unclean start, a clean restart, a clean restart cut by the window
 
 

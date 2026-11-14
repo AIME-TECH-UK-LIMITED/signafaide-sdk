@@ -1162,6 +1162,16 @@
         "record_sig": "pass",
         "schema": "pass"
       },
+      "coverage": {
+        "agent-a": {
+          "declared": [],
+          "declared_at_seq": null,
+          "undeclared_recorded": []
+        }
+      },
+      "coverage_lines": [
+        "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+      ],
       "result": "PASS",
       "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
     },
@@ -16313,6 +16323,79 @@
       "wall": "2026-11-13T10:00:00.000Z"
     }
   ],
+  "tool_names": [
+    {
+      "declared_name": "send_email",
+      "name": "a short name is kept",
+      "recorded_note": "signafaide.tool/send_email",
+      "tool": "send_email",
+      "unrecorded_note": "signafaide.tool_unrecorded/send_email"
+    },
+    {
+      "declared_name": "github/issues.create",
+      "name": "a name with a slash and a dot is kept",
+      "recorded_note": "signafaide.tool/github/issues.create",
+      "tool": "github/issues.create",
+      "unrecorded_note": "signafaide.tool_unrecorded/github/issues.create"
+    },
+    {
+      "declared_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "101 characters are kept",
+      "recorded_note": "signafaide.tool/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "tool": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "unrecorded_note": "signafaide.tool_unrecorded/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "declared_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~f2183711",
+      "name": "102 characters are cut",
+      "recorded_note": "signafaide.tool/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~f2183711",
+      "tool": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "unrecorded_note": "signafaide.tool_unrecorded/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~f2183711"
+    },
+    {
+      "declared_name": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "name": "101 two-byte characters are kept",
+      "recorded_note": "signafaide.tool/ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "tool": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "unrecorded_note": "signafaide.tool_unrecorded/ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+    },
+    {
+      "declared_name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé~cc7e9f54",
+      "name": "102 two-byte characters are cut: characters are counted, the hash is over the UTF-8 bytes",
+      "recorded_note": "signafaide.tool/éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé~cc7e9f54",
+      "tool": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "unrecorded_note": "signafaide.tool_unrecorded/éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé~cc7e9f54"
+    },
+    {
+      "declared_name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "name": "101 characters outside the basic plane are kept (code points, not UTF-16 units)",
+      "recorded_note": "signafaide.tool/😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "tool": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "unrecorded_note": "signafaide.tool_unrecorded/😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+    },
+    {
+      "declared_name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀~bea22a54",
+      "name": "102 characters outside the basic plane are cut",
+      "recorded_note": "signafaide.tool/😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀~bea22a54",
+      "tool": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "unrecorded_note": "signafaide.tool_unrecorded/😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀~bea22a54"
+    },
+    {
+      "declared_name": "crm.update_customer_record_update_customer_record_update_customer_record_update_customer_rec~14d82f9d",
+      "name": "a long name with a prefix",
+      "recorded_note": "signafaide.tool/crm.update_customer_record_update_customer_record_update_customer_record_update_customer_rec~14d82f9d",
+      "tool": "crm.update_customer_record_update_customer_record_update_customer_record_update_customer_record_update_customer_record_",
+      "unrecorded_note": "signafaide.tool_unrecorded/crm.update_customer_record_update_customer_record_update_customer_record_update_customer_rec~14d82f9d"
+    },
+    {
+      "declared_name": "tool-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx~7f056c65",
+      "name": "300 characters",
+      "recorded_note": "signafaide.tool/tool-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx~7f056c65",
+      "tool": "tool-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "unrecorded_note": "signafaide.tool_unrecorded/tool-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx~7f056c65"
+    }
+  ],
+  "tool_names_note": "Tool declarations (spec 2.6). declared_name is the tool's name as a declaration holds it: the name itself up to 101 characters (Unicode code points), else its first 92 characters, a tilde and the first 8 hex characters of sha256(UTF-8 tool name). recorded_note and unrecorded_note are the envelope names of the two notes that declare the tool. A variant's expect.coverage is the report's coverage object and expect.coverage_lines its coverage lines, in order.",
   "variants": [
     {
       "expect": {
@@ -16330,6 +16413,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -16658,6 +16751,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 10 of 12 checks passed, 2 pending (anchors, public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -16956,6 +17059,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -17286,6 +17399,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS (agent keys taken from the pack, not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -17621,6 +17744,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -17949,6 +18082,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 not checked (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -18283,6 +18426,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 not checked (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -18617,6 +18770,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 not checked (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -18945,6 +19108,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records from 2026-11-13T10:00:00.500Z, generated 2026-11-13T12:00:00.000Z"
       },
@@ -19198,6 +19371,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records before 2026-11-13T10:04:00.000Z, generated 2026-11-13T12:00:00.000Z"
       },
@@ -19481,6 +19664,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records before 2026-11-13T10:04:00.000Z, generated 2026-11-13T12:00:00.000Z"
       },
@@ -19781,6 +19974,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -20147,6 +20350,22 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          },
+          "agent-b": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded",
+          "agent-b: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records from 2026-11-13T09:30:00.000Z, generated 2026-11-13T12:00:00.000Z"
       },
@@ -20506,6 +20725,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -20834,6 +21063,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 10 of 12 checks passed, 2 not checked (anchors, public timestamp); export of every agent, all records, generated 2026-11-13T13:00:00.000Z"
       },
@@ -21134,6 +21373,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS (checked by the service with its own key registry; not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -21462,6 +21711,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS (service keys fetched over plain http, not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -21792,6 +22051,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -22121,6 +22390,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
       },
@@ -22449,6 +22728,16 @@
           "record_sig": "pass",
           "schema": "pass"
         },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
         "result": "PASS",
         "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, records from 2026-11-13T10:00:01.000Z, generated 2026-11-13T12:00:00.000Z"
       },
@@ -22614,6 +22903,3118 @@
               "service_key_id": "24f6ed6acbfe1009"
             },
             "sig": "UKRVWdu0rWgTPQWS7TNcVyEnmppFyRY2pwPNYte8FIMfCHumuD6Rd9LaFh74dPJSgzpr1_6kHM1dHHDjbAZIDg"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "not_checked",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "coverage": {
+          "agent-a": {
+            "declared": [
+              {
+                "name": "approve_payout",
+                "recorded": true
+              },
+              {
+                "name": "reject_refund",
+                "recorded": true
+              }
+            ],
+            "declared_at_seq": 1,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: all 2 declared tools are recorded"
+        ],
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "a tool declaration: every declared tool is recorded",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEIxLk8YxCLrs8WfLCidkGiOTK8Vh3qlBndYt8sxizaUHTwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "cb586418cb03d75638be85c55577fafc04c8ab97b7610fe0906da8654bc76fa2",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "LUbpjZLFst0ahv5TemLXSFblHLUrEbu3_Qc4GwaDe2xSwPcxDNKwV6y8xemSGSTucbu-Hj4R6Rl_N7n7xDV9BA",
+            "paths": {
+              "86d3a78339b3b9a58f2aa392ed6052154c5563b92ea0eb354437c5a8288b8e49": {
+                "index": 1,
+                "path": [
+                  "28c524ae6b8ae9474e19f11c51a1b87c61c2f94da779c2feef90055e59693b3d"
+                ]
+              },
+              "b7d57ab0886309a1e565299c83623168607cb088060c8465f279d4e07a00c508": {
+                "index": 0,
+                "path": [
+                  "301bf87b62c2233e968c69785cd3f60cf8ef23f22e708b4f46c70ea7ffda8fb6"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "s1oKl3QrtHoUcPyZJKIhktyUMj9HG914h_xpQMTCZqqEotbnmbnFV9A4slVwjq_HEgSMXJgaaw_kXPZMbASeAQ",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "a13bf18cab31656cde92a8db32c3653647d826e8cac31377362517ef0c8ea606",
+              "seq": 6,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "m8mfUpCdzCiCph7lNxSv0ff4-nM32I7cgrvxVOj47RRmUfdkDVZksfVAuv4ti1oZaA86-2eFMvsmDIEZZCkdAQ"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "cf5d597a52a0d887048f31605d597a789be56a198740fcb74b2057ba4d19587d",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tools",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "be465de4683a1b11d73162b5882a6c2b9a7d63ababe99989ebb64deff6276e9d",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "b7d57ab0886309a1e565299c83623168607cb088060c8465f279d4e07a00c508",
+              "batch_sig": "QrAOF8Vr5WevxJn19koPTLZ-1ku0In3VFhg9D_kgWvwzjyCpDwXxI_6GXHkCvk4TiQ2ImXpgeBopvjf3flGUAA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "22cafbf7249e773b014b6bad4906013d583cff29a430adaa6d1aca58bf9aad5b",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "wUjvbKYviHzIbjuGXzsB5A3GFWuR86otsBEbfBR58JY5rPKXFbBuC9ce-yjvpvl4IY-3Xh7UpmK37PRu7mQMDg",
+              "index": 0,
+              "proof": [
+                "00db7ff1ed1bd47d59c619fe17574b6dcd00435f5e8e35aa0e5e1cd724b7e379",
+                "61e62745dc607102fef6ba87107ef4ab1d85c0f10a335192a10415399ff83402"
+              ],
+              "record_hash": "2b61e814e233eb320c00d6498d9319108ab24bb91fdbc67feeb6f7eba9b1ecc6",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "DAhb-0aAOnVfXJrkt9iSihlrYobaC5ld5Zk06Yt7U17Ye_H1VvOKFUZCaHse9p87OhT96n7zYUXzHv2rDLM2BQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "9131cc3551f439980876a737b50cd562a462944ff4c04cf3f522a6a77a5c891f",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool/approve_payout",
+              "prev": "2b61e814e233eb320c00d6498d9319108ab24bb91fdbc67feeb6f7eba9b1ecc6",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 2,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "be465de4683a1b11d73162b5882a6c2b9a7d63ababe99989ebb64deff6276e9d",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "b7d57ab0886309a1e565299c83623168607cb088060c8465f279d4e07a00c508",
+              "batch_sig": "QrAOF8Vr5WevxJn19koPTLZ-1ku0In3VFhg9D_kgWvwzjyCpDwXxI_6GXHkCvk4TiQ2ImXpgeBopvjf3flGUAA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "22cafbf7249e773b014b6bad4906013d583cff29a430adaa6d1aca58bf9aad5b",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "wUjvbKYviHzIbjuGXzsB5A3GFWuR86otsBEbfBR58JY5rPKXFbBuC9ce-yjvpvl4IY-3Xh7UpmK37PRu7mQMDg",
+              "index": 1,
+              "proof": [
+                "11b7a713a21678818d131c5b0c90527923427d7ac7dd8c64f4a1740d2e9920f7",
+                "61e62745dc607102fef6ba87107ef4ab1d85c0f10a335192a10415399ff83402"
+              ],
+              "record_hash": "d79e1821132539cc5c6b1436bf3ea0a93e32c723ec9595b242044cf63d2d035c",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "21seZvgqz2Uawz64NhTKnTV5TkYUV12dVH7Npyxv8iFlOh4jWkisrvxYdwq0m3ph-7j3EaaG8MTCvGckhiRjBQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "386ccea17c0c00590255b1b7eed7daceb7dd6574344b6a39839b0b660860d121",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool/reject_refund",
+              "prev": "d79e1821132539cc5c6b1436bf3ea0a93e32c723ec9595b242044cf63d2d035c",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:02.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "be465de4683a1b11d73162b5882a6c2b9a7d63ababe99989ebb64deff6276e9d",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "b7d57ab0886309a1e565299c83623168607cb088060c8465f279d4e07a00c508",
+              "batch_sig": "QrAOF8Vr5WevxJn19koPTLZ-1ku0In3VFhg9D_kgWvwzjyCpDwXxI_6GXHkCvk4TiQ2ImXpgeBopvjf3flGUAA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "22cafbf7249e773b014b6bad4906013d583cff29a430adaa6d1aca58bf9aad5b",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "wUjvbKYviHzIbjuGXzsB5A3GFWuR86otsBEbfBR58JY5rPKXFbBuC9ce-yjvpvl4IY-3Xh7UpmK37PRu7mQMDg",
+              "index": 2,
+              "proof": [
+                "aaa04b9ff8dac37195d108ee3b15a789bedbb45a331a2fa6a8e14c7459749e12"
+              ],
+              "record_hash": "22cafbf7249e773b014b6bad4906013d583cff29a430adaa6d1aca58bf9aad5b",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "tN78o05veqIP7foeF-tDfxyp_gDz457o-K8ePhCREtQ-Oz8AUzY5lSjssOXGd_IGP1rHdJa-_Dr5Eh-LJ6S1Dg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "699cf9cd50d676bb6f481bf8a20339929588c2e848cb869684024d6df087645f",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": "22cafbf7249e773b014b6bad4906013d583cff29a430adaa6d1aca58bf9aad5b",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:00:03.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "b7d57ab0886309a1e565299c83623168607cb088060c8465f279d4e07a00c508",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "94aba072a5c1bf2428b5c1066b6dba6c5c279e870e494cd6780be87fe78b2e69",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "86d3a78339b3b9a58f2aa392ed6052154c5563b92ea0eb354437c5a8288b8e49",
+              "batch_sig": "m9DKjY6vt4G-rmd68dk_7l6F3ET8SMoVGPIRvy9-ys-IPdsCFNn8NxSDWkWtH5ggi2hmG2rSO92PAoX4FeOcCg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "a13bf18cab31656cde92a8db32c3653647d826e8cac31377362517ef0c8ea606",
+                "seq": 6,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "m8mfUpCdzCiCph7lNxSv0ff4-nM32I7cgrvxVOj47RRmUfdkDVZksfVAuv4ti1oZaA86-2eFMvsmDIEZZCkdAQ",
+              "index": 0,
+              "proof": [
+                "27c6760e7d6aaeaf3919a9889273fa85e1ef8ba29781a133642e52f3a5b27ac9",
+                "4fcc8019989b3b9a00b99481cb06602c2d493a8d6e16ec02c3ca417dd55e7613"
+              ],
+              "record_hash": "2b7e51c2ea48cdac4fd065ab510fb84585a970142715c5a41efcd8f32c20d4aa",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "IAUp0XyoNSE_bMPkhIuygPhTa3gRuSC_0Oor8P_Apa0mmP76jGKjn2Vn9I3UMzXlGL7bUQxL_Seb4IGy6C4cCw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "1055efe43dc3ce9c739dd43cf5688b8578d689229e3f7677383fb4d668955b40",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "2b7e51c2ea48cdac4fd065ab510fb84585a970142715c5a41efcd8f32c20d4aa",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "2b7e51c2ea48cdac4fd065ab510fb84585a970142715c5a41efcd8f32c20d4aa",
+              "seq": 5,
+              "time": "2026-11-13T10:00:04.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "b7d57ab0886309a1e565299c83623168607cb088060c8465f279d4e07a00c508",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "94aba072a5c1bf2428b5c1066b6dba6c5c279e870e494cd6780be87fe78b2e69",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "86d3a78339b3b9a58f2aa392ed6052154c5563b92ea0eb354437c5a8288b8e49",
+              "batch_sig": "m9DKjY6vt4G-rmd68dk_7l6F3ET8SMoVGPIRvy9-ys-IPdsCFNn8NxSDWkWtH5ggi2hmG2rSO92PAoX4FeOcCg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "a13bf18cab31656cde92a8db32c3653647d826e8cac31377362517ef0c8ea606",
+                "seq": 6,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "m8mfUpCdzCiCph7lNxSv0ff4-nM32I7cgrvxVOj47RRmUfdkDVZksfVAuv4ti1oZaA86-2eFMvsmDIEZZCkdAQ",
+              "index": 1,
+              "proof": [
+                "a174ce2534a1e7cadbb70b100432242e99876650eae5ba4fccb0acbc839dd0ff",
+                "4fcc8019989b3b9a00b99481cb06602c2d493a8d6e16ec02c3ca417dd55e7613"
+              ],
+              "record_hash": "8607498850742c0fdbe5b722aa3750c90690ca8a48732d09114d99639409430f",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "GScncGKE8mXemhJWSL0nECCTWTyFFJlO0xKvH5BU5e1tMak4aSsLsZsJb0pNFLrdLD-GB4lcCnfg9MvfC2XrAA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "8df3327dcfe684c122e174d64fbe5304b7dad4cc93a23cc52000ff698f6daaea",
+              "env": "live",
+              "kind": "decision",
+              "name": "reject_refund",
+              "prev": "8607498850742c0fdbe5b722aa3750c90690ca8a48732d09114d99639409430f",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 6,
+              "time": "2026-11-13T10:00:05.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "b7d57ab0886309a1e565299c83623168607cb088060c8465f279d4e07a00c508",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "94aba072a5c1bf2428b5c1066b6dba6c5c279e870e494cd6780be87fe78b2e69",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "86d3a78339b3b9a58f2aa392ed6052154c5563b92ea0eb354437c5a8288b8e49",
+              "batch_sig": "m9DKjY6vt4G-rmd68dk_7l6F3ET8SMoVGPIRvy9-ys-IPdsCFNn8NxSDWkWtH5ggi2hmG2rSO92PAoX4FeOcCg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "a13bf18cab31656cde92a8db32c3653647d826e8cac31377362517ef0c8ea606",
+                "seq": 6,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "m8mfUpCdzCiCph7lNxSv0ff4-nM32I7cgrvxVOj47RRmUfdkDVZksfVAuv4ti1oZaA86-2eFMvsmDIEZZCkdAQ",
+              "index": 2,
+              "proof": [
+                "348a15066e3fd5e56c9b45330b26fe7bf2fac227fcf7b5601d65f5fc8ecba456"
+              ],
+              "record_hash": "a13bf18cab31656cde92a8db32c3653647d826e8cac31377362517ef0c8ea606",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "DmSov4DZ9Qs_TedJsWBavCRgV9YYUie2YiVGqufLhn2xVGI5IkHNVaU3OO8nAoHNoMm9ULUb-rlzqKnBfYviAw"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "not_checked",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "coverage": {
+          "agent-a": {
+            "declared": [
+              {
+                "name": "approve_payout",
+                "recorded": true
+              },
+              {
+                "name": "delete_file",
+                "recorded": false
+              },
+              {
+                "name": "send_email",
+                "recorded": false
+              }
+            ],
+            "declared_at_seq": 1,
+            "undeclared_recorded": [
+              "escalate",
+              "reject_refund"
+            ]
+          }
+        },
+        "coverage_lines": [
+          "agent-a: 2 declared tools are not recorded: delete_file, send_email",
+          "agent-a: 2 recorded tools are not in the declared tool list: escalate, reject_refund"
+        ],
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "a tool declaration with unrecorded tools, and recorded tools it does not list",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEI0GpYBvUW+H8KWiXnp+OVNO5ibbIEKPJK5Vk6j618FO3wEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "0f7536c2055404a6d37efe6b2975bf5e84cf3c9c67d7033d6985d3ec67e568d6",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "_lmIrE44nMWVU8uTvnU0WA8Jp_kUH7XVYh-zdHiiUYARalGUmN0FnStTOGmlRNvXhqhn59c5gOdEGExsqLWwDQ",
+            "paths": {
+              "c283c8c2998f245f98587bf01c777e0f7917129b425d963b25f00a43294a9f65": {
+                "index": 0,
+                "path": [
+                  "26bd03ac800b580c56b0c72944c9b28fa52984897f62550aa0fad2859f7af11b"
+                ]
+              },
+              "f6036233b74ac249464e0bf952b6c7153ad551ca1c968f330d431578f4468b09": {
+                "index": 1,
+                "path": [
+                  "518d964f241bbffb067640e281de09aaa741368dc0b3b6015805eb0d06b32d5b"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "LdBvaZeEi8r3C66MmNLj9qMba-jzGjaY3nNyZi2XLkaM1jj8Shl3kx09-7t5KVRZD7fSdfIZYjMvbUKfkIJUCw",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "d9ec0c169970cdafa1af86e84024c274e4c5ca1a4ff57f1105d40d3257c16526",
+              "seq": 9,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "u6nufCVmmNgpI4ykWFyZMaMBFIJpSxCDFr4lQ6n7gXCH_RxJ8w2cgADloKebXnI0CMvZLrg5yto1qtWldpllCA"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "bdee3209b402813a1f4e8145305f568c401f856cc3cc92ef20c54730345a8891",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tools",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0d9d439a288efb08d3b3e7e1fe1079ffa9db4f8a1c1574606ed583318f5409d1",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "c283c8c2998f245f98587bf01c777e0f7917129b425d963b25f00a43294a9f65",
+              "batch_sig": "T4wbEcGkA1yaQazDRpTjOXDRfwZTMCnFbB1cMxnhslSVFgmLF4g1O78uuwO_wVM9bFaY4BewnM0ohMWvOTy-Dw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "65f9b9c32e5ddcd02745093f3c55195f274581ca4f0de20f3c210f884e2bde8b",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "53MbXufUuOgdOsf9_4c4RuixaNOwPQ6kPXqCGTuOn60OCoi8nxo6xn5TihzG0kfGVYhBhR5iC_gfNK27MS9eBA",
+              "index": 0,
+              "proof": [
+                "08392712a5470d1ea2e1c339e5962ae22b67049514d039974a8e0977599d5b8f",
+                "afe587b01d13d3f60d95ff60b3adef4d08e7914c5ca5eb323d0a6711f1334d00"
+              ],
+              "record_hash": "7320a69e5d5a26106df7acae1ed39703eead64e429606a56be913e31c4be869a",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "LdslDRoeYF2YvJFYhvb9NDgnHVQgJkvYoOlhX3MouTfQ3uKu8uw3GaOLKplKW_3GTbz3s7B7Ubwx9v20g3UxDg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "9131cc3551f439980876a737b50cd562a462944ff4c04cf3f522a6a77a5c891f",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool/approve_payout",
+              "prev": "7320a69e5d5a26106df7acae1ed39703eead64e429606a56be913e31c4be869a",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 2,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0d9d439a288efb08d3b3e7e1fe1079ffa9db4f8a1c1574606ed583318f5409d1",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "c283c8c2998f245f98587bf01c777e0f7917129b425d963b25f00a43294a9f65",
+              "batch_sig": "T4wbEcGkA1yaQazDRpTjOXDRfwZTMCnFbB1cMxnhslSVFgmLF4g1O78uuwO_wVM9bFaY4BewnM0ohMWvOTy-Dw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "65f9b9c32e5ddcd02745093f3c55195f274581ca4f0de20f3c210f884e2bde8b",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "53MbXufUuOgdOsf9_4c4RuixaNOwPQ6kPXqCGTuOn60OCoi8nxo6xn5TihzG0kfGVYhBhR5iC_gfNK27MS9eBA",
+              "index": 1,
+              "proof": [
+                "b1b8fece83d3d39783afc41b3b5f3878a29587ebc22acde24095618c78c45d1e",
+                "afe587b01d13d3f60d95ff60b3adef4d08e7914c5ca5eb323d0a6711f1334d00"
+              ],
+              "record_hash": "7fbd734e565aa486cbf23a41b47434332f5bf0a43f58c0b41debc451e06df507",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "deT76zVKgbgCiFHY1IsOhtvavt95VouCgnwaChFzmcXcq4Ax4CmEAAigYYfVdu9V4gedUQTJR0xLp6YMYiT7DA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "0d168d16f9cd92f8bf01a1b38e76236a34218bba057cc3aa8d5c6ba5b599f259",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool_unrecorded/send_email",
+              "prev": "7fbd734e565aa486cbf23a41b47434332f5bf0a43f58c0b41debc451e06df507",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:02.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0d9d439a288efb08d3b3e7e1fe1079ffa9db4f8a1c1574606ed583318f5409d1",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "c283c8c2998f245f98587bf01c777e0f7917129b425d963b25f00a43294a9f65",
+              "batch_sig": "T4wbEcGkA1yaQazDRpTjOXDRfwZTMCnFbB1cMxnhslSVFgmLF4g1O78uuwO_wVM9bFaY4BewnM0ohMWvOTy-Dw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "65f9b9c32e5ddcd02745093f3c55195f274581ca4f0de20f3c210f884e2bde8b",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "53MbXufUuOgdOsf9_4c4RuixaNOwPQ6kPXqCGTuOn60OCoi8nxo6xn5TihzG0kfGVYhBhR5iC_gfNK27MS9eBA",
+              "index": 2,
+              "proof": [
+                "424b71b17592a2bd68ea073b8fe3e591f16f51ae0f2d8c852f9d6de4742f6c45"
+              ],
+              "record_hash": "65f9b9c32e5ddcd02745093f3c55195f274581ca4f0de20f3c210f884e2bde8b",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "jtShX_Yephw-z46iUfXLXGLl_i7ctcDatSNfbWkM49mbGfUxTB8S7WRmDH_cdf5nePcBjvAGpXmRswqb8YtlBw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "d0dc004e48c5965b23d13622e13460c2f9056cc62047574d1a87846502560ea3",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool_unrecorded/delete_file",
+              "prev": "65f9b9c32e5ddcd02745093f3c55195f274581ca4f0de20f3c210f884e2bde8b",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:00:03.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "c283c8c2998f245f98587bf01c777e0f7917129b425d963b25f00a43294a9f65",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "7cf798a0566eb38b5e5c344339458b04dfd0ee8e4b062c995e76eb0c8b33037c",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 6,
+                "v": 1
+              },
+              "batch_hash": "f6036233b74ac249464e0bf952b6c7153ad551ca1c968f330d431578f4468b09",
+              "batch_sig": "ZknpRlHz-xSR-KQaL-4RcMBuHxHXdqYC9C7fOq0nMnfltqFzjeLTwRyWXWn_mfNV-ggYxPL0jIwDbzjQaVxNDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "d9ec0c169970cdafa1af86e84024c274e4c5ca1a4ff57f1105d40d3257c16526",
+                "seq": 9,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "u6nufCVmmNgpI4ykWFyZMaMBFIJpSxCDFr4lQ6n7gXCH_RxJ8w2cgADloKebXnI0CMvZLrg5yto1qtWldpllCA",
+              "index": 0,
+              "proof": [
+                "eec88e228cb187e7c49b5c68c2e291a0d000bf3a31199a20a9c0498417de3b58",
+                "da1e3ae67dee1b6b1279d3c04528726043e969c63521f06a5776d883046b2e74",
+                "0d7fabe52d5925b7e4ce888dd76db432068ba4f86a5aaeb6d03e1cb1464268d8"
+              ],
+              "record_hash": "1157592be24e4b65907a47ca071e153f961bef34836d8732e1424fd0153fce92",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "J5wMs_CTKWVdUckQvx5C6g0wj35gnAMbY_J3kbAVIXa29N7b0YEOdMjfXL26ingGwJNx4-iBmKMlyqRFdkg_Dw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "fa3b18370e8c4163ffbe453990ffa19129bc016db40171b0f610ae47d722f7ea",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": "1157592be24e4b65907a47ca071e153f961bef34836d8732e1424fd0153fce92",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 5,
+              "time": "2026-11-13T10:00:04.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "c283c8c2998f245f98587bf01c777e0f7917129b425d963b25f00a43294a9f65",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "7cf798a0566eb38b5e5c344339458b04dfd0ee8e4b062c995e76eb0c8b33037c",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 6,
+                "v": 1
+              },
+              "batch_hash": "f6036233b74ac249464e0bf952b6c7153ad551ca1c968f330d431578f4468b09",
+              "batch_sig": "ZknpRlHz-xSR-KQaL-4RcMBuHxHXdqYC9C7fOq0nMnfltqFzjeLTwRyWXWn_mfNV-ggYxPL0jIwDbzjQaVxNDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "d9ec0c169970cdafa1af86e84024c274e4c5ca1a4ff57f1105d40d3257c16526",
+                "seq": 9,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "u6nufCVmmNgpI4ykWFyZMaMBFIJpSxCDFr4lQ6n7gXCH_RxJ8w2cgADloKebXnI0CMvZLrg5yto1qtWldpllCA",
+              "index": 1,
+              "proof": [
+                "12bf7672267061765a88e13ceda0218bcc9b0e6dc0168485c8044829eee929a7",
+                "da1e3ae67dee1b6b1279d3c04528726043e969c63521f06a5776d883046b2e74",
+                "0d7fabe52d5925b7e4ce888dd76db432068ba4f86a5aaeb6d03e1cb1464268d8"
+              ],
+              "record_hash": "783e2265561dea33bca247c6f68e1d3f6a1ccf0b58289281df7e48da54f09d19",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "k8brtaMFUSfpp0cUsGzyvDYu2GesLVlOTOLKzqi1PHLNjcFS5dzZ-LGDeVDIa5wgswmGJb0f3VqESvOG_J-bBA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "3233d4417b58cd161ff361dc40e095982138636b4010b1ce3d5766334c9cc893",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "783e2265561dea33bca247c6f68e1d3f6a1ccf0b58289281df7e48da54f09d19",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "783e2265561dea33bca247c6f68e1d3f6a1ccf0b58289281df7e48da54f09d19",
+              "seq": 6,
+              "time": "2026-11-13T10:00:05.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "c283c8c2998f245f98587bf01c777e0f7917129b425d963b25f00a43294a9f65",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "7cf798a0566eb38b5e5c344339458b04dfd0ee8e4b062c995e76eb0c8b33037c",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 6,
+                "v": 1
+              },
+              "batch_hash": "f6036233b74ac249464e0bf952b6c7153ad551ca1c968f330d431578f4468b09",
+              "batch_sig": "ZknpRlHz-xSR-KQaL-4RcMBuHxHXdqYC9C7fOq0nMnfltqFzjeLTwRyWXWn_mfNV-ggYxPL0jIwDbzjQaVxNDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "d9ec0c169970cdafa1af86e84024c274e4c5ca1a4ff57f1105d40d3257c16526",
+                "seq": 9,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "u6nufCVmmNgpI4ykWFyZMaMBFIJpSxCDFr4lQ6n7gXCH_RxJ8w2cgADloKebXnI0CMvZLrg5yto1qtWldpllCA",
+              "index": 2,
+              "proof": [
+                "9b871c044017a0f951099d510f49c3f83801f88f3c1cbedb30cc07d74a84288d",
+                "2d39a90b9aa684b4eaa3b4203c85018faafe8e0c0c42e95e0a18a14c64567e0c",
+                "0d7fabe52d5925b7e4ce888dd76db432068ba4f86a5aaeb6d03e1cb1464268d8"
+              ],
+              "record_hash": "c05f8f8537e428956f9a19332e82469bef974b2cef93bf622b8b8d8a6851b71d",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "h7jWh3O9RgbTuvIokJNXTjofRoD5YomWsE-Lver5IAbECgpksrNSbQfG_PuARF0IiljRDg0cUyiEwvVTPCV6CQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "a464d8809ff214cea7cba7385f2ba960eba4fe06db9d4cea050289ace44c731f",
+              "env": "live",
+              "kind": "decision",
+              "name": "reject_refund",
+              "prev": "c05f8f8537e428956f9a19332e82469bef974b2cef93bf622b8b8d8a6851b71d",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 7,
+              "time": "2026-11-13T10:00:06.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "c283c8c2998f245f98587bf01c777e0f7917129b425d963b25f00a43294a9f65",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "7cf798a0566eb38b5e5c344339458b04dfd0ee8e4b062c995e76eb0c8b33037c",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 6,
+                "v": 1
+              },
+              "batch_hash": "f6036233b74ac249464e0bf952b6c7153ad551ca1c968f330d431578f4468b09",
+              "batch_sig": "ZknpRlHz-xSR-KQaL-4RcMBuHxHXdqYC9C7fOq0nMnfltqFzjeLTwRyWXWn_mfNV-ggYxPL0jIwDbzjQaVxNDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "d9ec0c169970cdafa1af86e84024c274e4c5ca1a4ff57f1105d40d3257c16526",
+                "seq": 9,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "u6nufCVmmNgpI4ykWFyZMaMBFIJpSxCDFr4lQ6n7gXCH_RxJ8w2cgADloKebXnI0CMvZLrg5yto1qtWldpllCA",
+              "index": 3,
+              "proof": [
+                "3cb9d08bcd59ab9e50b67916cec7ccc375bdb42360a0c73bafdc23d696753b63",
+                "2d39a90b9aa684b4eaa3b4203c85018faafe8e0c0c42e95e0a18a14c64567e0c",
+                "0d7fabe52d5925b7e4ce888dd76db432068ba4f86a5aaeb6d03e1cb1464268d8"
+              ],
+              "record_hash": "d8b80d0ed497e6af7a4369be4baf4de7a1661c212e9ca6a88b9bbed589bf0772",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "Hi2MMmhKmATddqvclmvgYsW2OdzLIqvE9cjHbK6g43mvoWZIDGvnHDXSPYNo98Eq_WhiFzRHMWMyFecDM22rAQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "fc13276a3bed07552d477129b99e5f78d3bb8551ba34953d50fb3c0e5cb8e535",
+              "env": "live",
+              "kind": "decision",
+              "name": "escalate",
+              "prev": "d8b80d0ed497e6af7a4369be4baf4de7a1661c212e9ca6a88b9bbed589bf0772",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 8,
+              "time": "2026-11-13T10:00:07.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "c283c8c2998f245f98587bf01c777e0f7917129b425d963b25f00a43294a9f65",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "7cf798a0566eb38b5e5c344339458b04dfd0ee8e4b062c995e76eb0c8b33037c",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 6,
+                "v": 1
+              },
+              "batch_hash": "f6036233b74ac249464e0bf952b6c7153ad551ca1c968f330d431578f4468b09",
+              "batch_sig": "ZknpRlHz-xSR-KQaL-4RcMBuHxHXdqYC9C7fOq0nMnfltqFzjeLTwRyWXWn_mfNV-ggYxPL0jIwDbzjQaVxNDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "d9ec0c169970cdafa1af86e84024c274e4c5ca1a4ff57f1105d40d3257c16526",
+                "seq": 9,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "u6nufCVmmNgpI4ykWFyZMaMBFIJpSxCDFr4lQ6n7gXCH_RxJ8w2cgADloKebXnI0CMvZLrg5yto1qtWldpllCA",
+              "index": 4,
+              "proof": [
+                "99a0defcba77488e9cf5e6efe3f7b2e6da3001234ea4d2105263f828e31e0c96",
+                "ae9fa74a2208d5b3e0973c35422a69bf714f10e6ec8cf06c4a1ef405a5261699"
+              ],
+              "record_hash": "a6b4f79710b23d7b81ae0a6a322be25d01c5d4cddc36f576d7d030c233e9bace",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "v8RGv077RwQaN3WlRrv9Llsd8Ufxh2XRFiiT-cIupW2RDQtCppxnp_gaUclMVhgE-GRt3tz_hfsP3FUOj0PYCg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "231f915ca580c4a89ebfc54abb37171ef706331c85b061824b146df027db9589",
+              "env": "live",
+              "kind": "decision",
+              "name": "signafaide.internal",
+              "prev": "a6b4f79710b23d7b81ae0a6a322be25d01c5d4cddc36f576d7d030c233e9bace",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 9,
+              "time": "2026-11-13T10:00:08.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "c283c8c2998f245f98587bf01c777e0f7917129b425d963b25f00a43294a9f65",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "7cf798a0566eb38b5e5c344339458b04dfd0ee8e4b062c995e76eb0c8b33037c",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 6,
+                "v": 1
+              },
+              "batch_hash": "f6036233b74ac249464e0bf952b6c7153ad551ca1c968f330d431578f4468b09",
+              "batch_sig": "ZknpRlHz-xSR-KQaL-4RcMBuHxHXdqYC9C7fOq0nMnfltqFzjeLTwRyWXWn_mfNV-ggYxPL0jIwDbzjQaVxNDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "d9ec0c169970cdafa1af86e84024c274e4c5ca1a4ff57f1105d40d3257c16526",
+                "seq": 9,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "u6nufCVmmNgpI4ykWFyZMaMBFIJpSxCDFr4lQ6n7gXCH_RxJ8w2cgADloKebXnI0CMvZLrg5yto1qtWldpllCA",
+              "index": 5,
+              "proof": [
+                "157ba765e8a77f2eeabb6decce93608945a3f14ad88aaf5a552455b771deba82",
+                "ae9fa74a2208d5b3e0973c35422a69bf714f10e6ec8cf06c4a1ef405a5261699"
+              ],
+              "record_hash": "d9ec0c169970cdafa1af86e84024c274e4c5ca1a4ff57f1105d40d3257c16526",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "dmj9O69VDjsQEdrdY3YOrjYn0tgNifZBi-qxCSBOv8K0PE-LnHBjjKjLKz0z_j8VUouXIxafmT9xmvLQmHk-Dg"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "not_checked",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "coverage": {
+          "agent-a": {
+            "declared": [
+              {
+                "name": "approve_payout",
+                "recorded": true
+              },
+              {
+                "name": "reject_refund",
+                "recorded": true
+              }
+            ],
+            "declared_at_seq": 4,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: all 2 declared tools are recorded"
+        ],
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "a second tool declaration replaces the first; a tool in both forms takes the later note",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEIoRRXpDy8IpJqjpQ7mlvH8Po63YZM2oNllDEUEXa5xM3wEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "cfb36b18c79251657ba12ebaa4caf0f81a24a786874e8e2018d8c428f8ceb86a",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "t1KwxStLdYLkZmUpw_B7t6-b2EdQu1kTBaciWZdk6ds8K55f07Hhuw64FAci0_QtVTdTqbt4ZoEsuFxU3JmUAQ",
+            "paths": {
+              "3935a98525a2e290b583b537010ef11f7b8bed6caa915181402d5d4529df0c4e": {
+                "index": 0,
+                "path": [
+                  "05134df9c9c7ebeb9e6775625ba1709ce972796efc903dbccf530eca3c56706c"
+                ]
+              },
+              "adab6dcd97ce3bb2503a688f7b6496af03b1bbc30b26e6781d2a8087571675a4": {
+                "index": 1,
+                "path": [
+                  "4c778ef67c06208676a673ec60469b3a586306f2a864f4e85f1024ba2235a997"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "O6byTaOxm5Iab3nZo7GR59vKB9k3pguwrjrq4Lt085o_UqDRrOCZknVP2UI7n8zO12xYx_PoB7hWPM_i8KoXAQ",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "0c23b604cdf7e85ba9e691f61a032ca613f14d1690fe95788c98958c0076c35b",
+              "seq": 8,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "m62gjLyTBKA8QYjfuy5MjAjJsc0vI-WLmjsJhTMAk2ov2Fh7InYsteaQuR6PPPpFFY8LxIkZC4KTDVbs0Yg4Bw"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "23193131b11752a4c8424f79506382fe481d2e4a9a127d0778af3f2d8b8a2441",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tools",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "af3967729aba417bea85cbc25b8af74c6ae32c573d6cae802c51d4a692ccea0e",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "3935a98525a2e290b583b537010ef11f7b8bed6caa915181402d5d4529df0c4e",
+              "batch_sig": "_Z-Rk7vzZ1sfCobn98ATRtZzqJWgHgAZ2GgXF2ZpJ8HfnQLNkUZYg2rXDezwUHCmvjA1JoRhUcZC3ZKZcIZIBQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "c2b8f06e0f4cf6dbaded3647cf38fcc2bfaea0f689cd92a69550c9d966d5eb55",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "pFw9gIOlw5uzk448oCIOcI2H1CAn2iBcKpTNscdhUncJO1-tbEIz_uVsrODf6_sQzI1jV_2_LB9YA-iGMyHjAg",
+              "index": 0,
+              "proof": [
+                "5e437b9cd49a53d434743b792b2ecb94bc2ac96421ae80e6bb7b17d53b40522b",
+                "a98bf59e25faf562361fa80a2186c4c26373266c92aa7ad8666bab7a189d3074"
+              ],
+              "record_hash": "e297ad95a0e98c87947055b386fc76bd2b4fc1b7d2fb444c277a0413915b8d51",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "iLE-I6iqY04hKSG5tQ9EP69o9aINzPEYzZyDeOsTytInBXVbdyXOd5IO3ENzjlDE6XRu5fvLb7SOwafa8mujBA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "9131cc3551f439980876a737b50cd562a462944ff4c04cf3f522a6a77a5c891f",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool/approve_payout",
+              "prev": "e297ad95a0e98c87947055b386fc76bd2b4fc1b7d2fb444c277a0413915b8d51",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 2,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "af3967729aba417bea85cbc25b8af74c6ae32c573d6cae802c51d4a692ccea0e",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "3935a98525a2e290b583b537010ef11f7b8bed6caa915181402d5d4529df0c4e",
+              "batch_sig": "_Z-Rk7vzZ1sfCobn98ATRtZzqJWgHgAZ2GgXF2ZpJ8HfnQLNkUZYg2rXDezwUHCmvjA1JoRhUcZC3ZKZcIZIBQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "c2b8f06e0f4cf6dbaded3647cf38fcc2bfaea0f689cd92a69550c9d966d5eb55",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "pFw9gIOlw5uzk448oCIOcI2H1CAn2iBcKpTNscdhUncJO1-tbEIz_uVsrODf6_sQzI1jV_2_LB9YA-iGMyHjAg",
+              "index": 1,
+              "proof": [
+                "ba50107b0968ce08a1ac69784821e7c177f490b3d40a11a1b2aa06f2dfbe5431",
+                "a98bf59e25faf562361fa80a2186c4c26373266c92aa7ad8666bab7a189d3074"
+              ],
+              "record_hash": "ddaf920cff90b0c20ec94c2b3b98f2afd331601a10da34239b0fc9872c6239ab",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "ROIDRNCGj3jFxRWeF6kMOgwf5LOx_2FoO4O3iSsvbzj6Na-idceh43szslx5sxf6jIycYmFJdpljlX23bSDLCA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "4eb88c1c0b627327b339cd380701a6c7760d7a7dda3a4ee51200407068450b4b",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool_unrecorded/old_tool",
+              "prev": "ddaf920cff90b0c20ec94c2b3b98f2afd331601a10da34239b0fc9872c6239ab",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:02.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "af3967729aba417bea85cbc25b8af74c6ae32c573d6cae802c51d4a692ccea0e",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "3935a98525a2e290b583b537010ef11f7b8bed6caa915181402d5d4529df0c4e",
+              "batch_sig": "_Z-Rk7vzZ1sfCobn98ATRtZzqJWgHgAZ2GgXF2ZpJ8HfnQLNkUZYg2rXDezwUHCmvjA1JoRhUcZC3ZKZcIZIBQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "c2b8f06e0f4cf6dbaded3647cf38fcc2bfaea0f689cd92a69550c9d966d5eb55",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "pFw9gIOlw5uzk448oCIOcI2H1CAn2iBcKpTNscdhUncJO1-tbEIz_uVsrODf6_sQzI1jV_2_LB9YA-iGMyHjAg",
+              "index": 2,
+              "proof": [
+                "bb13b1262579eebb87f0dc4ad7c766b1ecf0c2b6032ae9553413dd8c058cd83d"
+              ],
+              "record_hash": "c2b8f06e0f4cf6dbaded3647cf38fcc2bfaea0f689cd92a69550c9d966d5eb55",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "75HnkRQWaKktBNOZym_1MISZWBu0SnuuShB8Y-OtkigcbBFKIt6OpE7oauCjMJHc-e2OGK--h3khwgipIET5BA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "640463196d989397c5f7b1907536dd719b3bdff652331439ed708cdd43d57a8c",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tools",
+              "prev": "c2b8f06e0f4cf6dbaded3647cf38fcc2bfaea0f689cd92a69550c9d966d5eb55",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:00:03.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "3935a98525a2e290b583b537010ef11f7b8bed6caa915181402d5d4529df0c4e",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "370ccda16b41f07fb93b2c43f3fffbad3f801ac4b5df026c7dc73bf72dee1a02",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 5,
+                "v": 1
+              },
+              "batch_hash": "adab6dcd97ce3bb2503a688f7b6496af03b1bbc30b26e6781d2a8087571675a4",
+              "batch_sig": "WG6RbmVzfLChIjp-PwfyPD5eESY9fTGaPkpm7p01Cx5kfDGFdu_spzNpPtGpGdE4yTZpVVCJBtJUt0fFpF_GCw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "0c23b604cdf7e85ba9e691f61a032ca613f14d1690fe95788c98958c0076c35b",
+                "seq": 8,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "m62gjLyTBKA8QYjfuy5MjAjJsc0vI-WLmjsJhTMAk2ov2Fh7InYsteaQuR6PPPpFFY8LxIkZC4KTDVbs0Yg4Bw",
+              "index": 0,
+              "proof": [
+                "ef0ca63dd959860e40f9f307ec76ba5312154e3c1098964ec11bb8881618a638",
+                "5c6dda6e6db1fd87d4a2e87c009ab886b955ca1eeb84701686af9c41599c5a1c",
+                "1e825165806276a71b28288cad2d218695a294782b85f002c0df1a58a3d38a07"
+              ],
+              "record_hash": "bc1c7ba669d2bd213fd79bdb6d3a844c4141deedb5e539f0e7363807c8e8bb2a",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "nlML31_E7NpFI-ylLjft4KPrSvIzd6qJMiB-gOcFl47K7ztcNyHJxs-9byWQjtYXRV5iYN1QEEzEv5tXLatcBQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "50b3dd37f7734dc8c1e1d2c325192270e2f349971d5794127327cd8085212644",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool_unrecorded/approve_payout",
+              "prev": "bc1c7ba669d2bd213fd79bdb6d3a844c4141deedb5e539f0e7363807c8e8bb2a",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 5,
+              "time": "2026-11-13T10:00:04.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "3935a98525a2e290b583b537010ef11f7b8bed6caa915181402d5d4529df0c4e",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "370ccda16b41f07fb93b2c43f3fffbad3f801ac4b5df026c7dc73bf72dee1a02",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 5,
+                "v": 1
+              },
+              "batch_hash": "adab6dcd97ce3bb2503a688f7b6496af03b1bbc30b26e6781d2a8087571675a4",
+              "batch_sig": "WG6RbmVzfLChIjp-PwfyPD5eESY9fTGaPkpm7p01Cx5kfDGFdu_spzNpPtGpGdE4yTZpVVCJBtJUt0fFpF_GCw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "0c23b604cdf7e85ba9e691f61a032ca613f14d1690fe95788c98958c0076c35b",
+                "seq": 8,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "m62gjLyTBKA8QYjfuy5MjAjJsc0vI-WLmjsJhTMAk2ov2Fh7InYsteaQuR6PPPpFFY8LxIkZC4KTDVbs0Yg4Bw",
+              "index": 1,
+              "proof": [
+                "9bdbff79bf9a7261ee241a13a7cadbdc80ae2400f6bb5249c9d5327c892413cd",
+                "5c6dda6e6db1fd87d4a2e87c009ab886b955ca1eeb84701686af9c41599c5a1c",
+                "1e825165806276a71b28288cad2d218695a294782b85f002c0df1a58a3d38a07"
+              ],
+              "record_hash": "0d5b557769af5bbad8fb5f1846b2069b106acbfc6fdf06ba6edea59f7dce9c20",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "m65SO5yh2JXn-4BjERDdU_ZDy0g8yGtpURbu-fE_FdrmrNnAnbmWW1gjK_X7TWo34k8gFneGrDd6eDloAPekDg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "20bdfd00df3e85b0b606253991affa43f94a888ab78ec9d76f4c5bc927d94cc8",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool/reject_refund",
+              "prev": "0d5b557769af5bbad8fb5f1846b2069b106acbfc6fdf06ba6edea59f7dce9c20",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 6,
+              "time": "2026-11-13T10:00:05.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "3935a98525a2e290b583b537010ef11f7b8bed6caa915181402d5d4529df0c4e",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "370ccda16b41f07fb93b2c43f3fffbad3f801ac4b5df026c7dc73bf72dee1a02",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 5,
+                "v": 1
+              },
+              "batch_hash": "adab6dcd97ce3bb2503a688f7b6496af03b1bbc30b26e6781d2a8087571675a4",
+              "batch_sig": "WG6RbmVzfLChIjp-PwfyPD5eESY9fTGaPkpm7p01Cx5kfDGFdu_spzNpPtGpGdE4yTZpVVCJBtJUt0fFpF_GCw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "0c23b604cdf7e85ba9e691f61a032ca613f14d1690fe95788c98958c0076c35b",
+                "seq": 8,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "m62gjLyTBKA8QYjfuy5MjAjJsc0vI-WLmjsJhTMAk2ov2Fh7InYsteaQuR6PPPpFFY8LxIkZC4KTDVbs0Yg4Bw",
+              "index": 2,
+              "proof": [
+                "5e9535c30c951009935fd170109cbf6346e10c0590c8b317789c4428b7d0f7b6",
+                "bf8a2ef8785978cdc2e79c15341eb8142696f1f0454b6309a7ad06345eb1e046",
+                "1e825165806276a71b28288cad2d218695a294782b85f002c0df1a58a3d38a07"
+              ],
+              "record_hash": "a60002190799cfaa6c8133a298175b51ca942ecac4f57c2e734da2e528c2fef0",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "GlNHKhPHbOIqrAK2Gzo7bzPk3RlIZS2aQ51YmbQm0fc0EOfJ-pCAEpJgAli3epMOz1nD4S4mVsF0u0JsjIZHDA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "e03fbfc2007683468024d70494a9d8abfd3fbbd7e0b5641e292e0542345d3b2a",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool/approve_payout",
+              "prev": "a60002190799cfaa6c8133a298175b51ca942ecac4f57c2e734da2e528c2fef0",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 7,
+              "time": "2026-11-13T10:00:06.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "3935a98525a2e290b583b537010ef11f7b8bed6caa915181402d5d4529df0c4e",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "370ccda16b41f07fb93b2c43f3fffbad3f801ac4b5df026c7dc73bf72dee1a02",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 5,
+                "v": 1
+              },
+              "batch_hash": "adab6dcd97ce3bb2503a688f7b6496af03b1bbc30b26e6781d2a8087571675a4",
+              "batch_sig": "WG6RbmVzfLChIjp-PwfyPD5eESY9fTGaPkpm7p01Cx5kfDGFdu_spzNpPtGpGdE4yTZpVVCJBtJUt0fFpF_GCw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "0c23b604cdf7e85ba9e691f61a032ca613f14d1690fe95788c98958c0076c35b",
+                "seq": 8,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "m62gjLyTBKA8QYjfuy5MjAjJsc0vI-WLmjsJhTMAk2ov2Fh7InYsteaQuR6PPPpFFY8LxIkZC4KTDVbs0Yg4Bw",
+              "index": 3,
+              "proof": [
+                "a041d6194fb216e0bd3677451884bd5e4a1ba635a57d46948092cad558ffc13d",
+                "bf8a2ef8785978cdc2e79c15341eb8142696f1f0454b6309a7ad06345eb1e046",
+                "1e825165806276a71b28288cad2d218695a294782b85f002c0df1a58a3d38a07"
+              ],
+              "record_hash": "1e0a2b9dd790a6d55b8824e08ade66b78cbaff19ecfc627f6fd9d7479c9157aa",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "P8rrCd9CLD_9j87oDRceLo4l0_aF0o80ty1rAdlDPv4HUl8l3t-M9jcWgjFwX8IeaPDbV_LELpBECMzbiAWPDA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "fc13276a3bed07552d477129b99e5f78d3bb8551ba34953d50fb3c0e5cb8e535",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": "1e0a2b9dd790a6d55b8824e08ade66b78cbaff19ecfc627f6fd9d7479c9157aa",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 8,
+              "time": "2026-11-13T10:00:07.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "3935a98525a2e290b583b537010ef11f7b8bed6caa915181402d5d4529df0c4e",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "370ccda16b41f07fb93b2c43f3fffbad3f801ac4b5df026c7dc73bf72dee1a02",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 5,
+                "v": 1
+              },
+              "batch_hash": "adab6dcd97ce3bb2503a688f7b6496af03b1bbc30b26e6781d2a8087571675a4",
+              "batch_sig": "WG6RbmVzfLChIjp-PwfyPD5eESY9fTGaPkpm7p01Cx5kfDGFdu_spzNpPtGpGdE4yTZpVVCJBtJUt0fFpF_GCw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "0c23b604cdf7e85ba9e691f61a032ca613f14d1690fe95788c98958c0076c35b",
+                "seq": 8,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "m62gjLyTBKA8QYjfuy5MjAjJsc0vI-WLmjsJhTMAk2ov2Fh7InYsteaQuR6PPPpFFY8LxIkZC4KTDVbs0Yg4Bw",
+              "index": 4,
+              "proof": [
+                "9788793bed8eee423266027f1136dcfe5538e81a49b5e6c54ef6996ac1551720"
+              ],
+              "record_hash": "0c23b604cdf7e85ba9e691f61a032ca613f14d1690fe95788c98958c0076c35b",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "M2Y4MhN8ZVbSMcLeUYOJX1DKM8-B6IaQvLixdjoQzcLu4VkaKO-D6fgMXEn80EHuxv1S8qRy6K5MU8eFaqlgCQ"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "not_checked",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "coverage": {
+          "agent-a": {
+            "declared": [
+              {
+                "name": "send_email",
+                "recorded": false
+              }
+            ],
+            "declared_at_seq": 1,
+            "undeclared_recorded": [
+              "approve_payout"
+            ]
+          }
+        },
+        "coverage_lines": [
+          "agent-a: 1 declared tool is not recorded: send_email",
+          "agent-a: 1 recorded tool is not in the declared tool list: approve_payout"
+        ],
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "a tool declaration with one tool, not recorded",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEI49FYFNGXp5uqNGOG4Up1AGqzQxWgzWBPAmE7cgE48nDwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "56e81376f217b2575e0390f2b81190420cadf64151797b6dbdabbfa96bf8be84",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "_Md2oxlP2Jbzq5PG5phNRudfqVPwIRECi_EvFg0FS9movrhgCfAk5qv1RhVMX8GBi9uanhx-E-e4lQB1cZGXBQ",
+            "paths": {
+              "57120b354fa0ad92d63b8a7b193e3287885b6e85f4be8e36f865a31ed76b8684": {
+                "index": 0,
+                "path": [
+                  "e4149b02614711d994389ff4d244c3a6aa92df0c922a0cb8330c20044668b03b"
+                ]
+              },
+              "ecead0d82e362267612a264c07af3c392937983194550e89d47de4e07dbe1e0e": {
+                "index": 1,
+                "path": [
+                  "93b0ad89d720036467b20abea19ae1575b0b12f0e4f6164fe4d92c7c91705b9e"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "335357Hv0rTCJ60uv_WNDzB6mf0Reh3vgeS_x99U3I8mccNVQp6bUOJdUEu0O7znes6zff9dc3x-ZN9Gy8C9Dw",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "6c88ad8685b978f8c8b8e9cb2cb5f016c9315d5e2468d0d7669bd1c4d4f81fef",
+              "seq": 4,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "6-KmpKNHyG1kJmcdDUlpUIaqrr34PwEAmHqCWmeFaWsjInMPhii8GAM79EKxvMX6zykAC44xdn4vU0zwToGwAA"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "b26f6ba820649c58e7b2f08552b0482c6e62dc39199419fc42cb0e48348c3468",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tools",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "7c5d0be68615822689030c654c954192263f221903e075c472ebae115f233cb7",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "57120b354fa0ad92d63b8a7b193e3287885b6e85f4be8e36f865a31ed76b8684",
+              "batch_sig": "IC9X8qjHUS1QBh9zU6aWVLQ3BVE4Mh3MmozkbypjeFHmficNWz3qt6NKXPlKPmSQljFeunszDILUHWvnKVRuBA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "bbe7148ff8838bc25d048b5e5cca34a60bfdb0b795f7fb1bc4b1b737a61fa2fb",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "GPrbDC2myMsw2EEtQ1ERk9f7lKkjAc28Rr58UV_ykPoPmwmpj5g1SA8sCKaJ5wC6Whfy2r1bqW4cVbitUPusCw",
+              "index": 0,
+              "proof": [
+                "86d9f15005f1f85e769af6318bba9d774707c00a7150fd7c9c12b478dccca3f1",
+                "14f1cc145e82b4f9e51d9f5e814b9094ad8fb951271ed2f3108a178370d61497"
+              ],
+              "record_hash": "4d8719522bc705519bda5e4a4c481cee854b1e5dff64082c1cb487427ae6185b",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "BLRLD74AuPT_7C2ZTsVYqFuH2KPJLLHmvDtZMMI3sFYi7bVynSMebOEQbdmpKGFy7tQUPUZUOl_GLLd3COs2BA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "ae22ec95dc31a8b2774cfd89e8bd8716d942b13899fc8263366eb56d7716af29",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool_unrecorded/send_email",
+              "prev": "4d8719522bc705519bda5e4a4c481cee854b1e5dff64082c1cb487427ae6185b",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 2,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "7c5d0be68615822689030c654c954192263f221903e075c472ebae115f233cb7",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "57120b354fa0ad92d63b8a7b193e3287885b6e85f4be8e36f865a31ed76b8684",
+              "batch_sig": "IC9X8qjHUS1QBh9zU6aWVLQ3BVE4Mh3MmozkbypjeFHmficNWz3qt6NKXPlKPmSQljFeunszDILUHWvnKVRuBA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "bbe7148ff8838bc25d048b5e5cca34a60bfdb0b795f7fb1bc4b1b737a61fa2fb",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "GPrbDC2myMsw2EEtQ1ERk9f7lKkjAc28Rr58UV_ykPoPmwmpj5g1SA8sCKaJ5wC6Whfy2r1bqW4cVbitUPusCw",
+              "index": 1,
+              "proof": [
+                "bf88a5ad4f6c262afdf9000b128c6735635503e09c286a31539219a0e0326230",
+                "14f1cc145e82b4f9e51d9f5e814b9094ad8fb951271ed2f3108a178370d61497"
+              ],
+              "record_hash": "1bb1089ed360299b5ba1d2e10ecbc84218ef735542a3a365d10011863dc62cc1",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "Ny3TCSIs7PPPlmjbN-1cNuYKmy9MhD7iyIy0pwa0iWvsTbyJ6EQfwU63Hd_14f2xiXzfiiXgbtfHhl3AmHYHCw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "a225d1cac4ec87b7fe0b3ca762749b59518e3fc1ae311092657dd7d90015e29e",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": "1bb1089ed360299b5ba1d2e10ecbc84218ef735542a3a365d10011863dc62cc1",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:02.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "7c5d0be68615822689030c654c954192263f221903e075c472ebae115f233cb7",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "57120b354fa0ad92d63b8a7b193e3287885b6e85f4be8e36f865a31ed76b8684",
+              "batch_sig": "IC9X8qjHUS1QBh9zU6aWVLQ3BVE4Mh3MmozkbypjeFHmficNWz3qt6NKXPlKPmSQljFeunszDILUHWvnKVRuBA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "bbe7148ff8838bc25d048b5e5cca34a60bfdb0b795f7fb1bc4b1b737a61fa2fb",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "GPrbDC2myMsw2EEtQ1ERk9f7lKkjAc28Rr58UV_ykPoPmwmpj5g1SA8sCKaJ5wC6Whfy2r1bqW4cVbitUPusCw",
+              "index": 2,
+              "proof": [
+                "9ee9d1a06320f6298ab6e9add187c6b98990b565b9fb1603a87b8dd5a65fa667"
+              ],
+              "record_hash": "bbe7148ff8838bc25d048b5e5cca34a60bfdb0b795f7fb1bc4b1b737a61fa2fb",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "Uwm_SYkpB7_PJ4LHp_w992QGg11_V5ZFy-dEok8Tm2cc01TXrdrHEyZq2tFSi1Q82rfhELknNIGunrv0odAQCg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "93b1e6961ef214795a23045b4e185e1f2822898f91994dbd401ce990d81b4504",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "bbe7148ff8838bc25d048b5e5cca34a60bfdb0b795f7fb1bc4b1b737a61fa2fb",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "bbe7148ff8838bc25d048b5e5cca34a60bfdb0b795f7fb1bc4b1b737a61fa2fb",
+              "seq": 4,
+              "time": "2026-11-13T10:00:03.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "57120b354fa0ad92d63b8a7b193e3287885b6e85f4be8e36f865a31ed76b8684",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "91318d964f6a518e3494792cf832477825edc2f916de7edc2cc7e1cc09c7ba06",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 1,
+                "v": 1
+              },
+              "batch_hash": "ecead0d82e362267612a264c07af3c392937983194550e89d47de4e07dbe1e0e",
+              "batch_sig": "jThALYvR-5CbDjaSr3Ut3hVK3UYgTj58hyQFeYVYwZcuoFUwPOOHw1h03IL_I5BefdG35iXFlVDWvHJ55a7_Dw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "6c88ad8685b978f8c8b8e9cb2cb5f016c9315d5e2468d0d7669bd1c4d4f81fef",
+                "seq": 4,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "6-KmpKNHyG1kJmcdDUlpUIaqrr34PwEAmHqCWmeFaWsjInMPhii8GAM79EKxvMX6zykAC44xdn4vU0zwToGwAA",
+              "index": 0,
+              "proof": [],
+              "record_hash": "6c88ad8685b978f8c8b8e9cb2cb5f016c9315d5e2468d0d7669bd1c4d4f81fef",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "aDx-Dy-N8mjmnardY8zjCHms5t9JxMpgsRnOVGIl6zcnETI1RfUcG_V8FnyXsxmtx90nDuk5Bmxs-qnv3WJuAg"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "not_checked",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": 1,
+            "undeclared_recorded": [
+              "approve_payout"
+            ]
+          }
+        },
+        "coverage_lines": [
+          "agent-a: the declared tool list is empty",
+          "agent-a: 1 recorded tool is not in the declared tool list: approve_payout"
+        ],
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "a tool declaration with no tools",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEI5fxCPLh/8u5l4cVO1u2RdpfDyyvy3InTjDXii1YZ+jXwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "12ccb5a938b6c9f739af797af0e5c042dc2c59457b78b714464bc841e07526c9",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "47yLIQnm3RqZwKpBztOidTcfo9b6biHyYoJlgyQEH9jIg3O030c4eOoNni1zpsrZURMIwpZpT5qweJ9vo071Bg",
+            "paths": {
+              "32a29c78a03cd55c4c7ba1c793dada9ab06175f2acefa0d97d8cfce6e5f1036c": {
+                "index": 1,
+                "path": [
+                  "7807794b610a8609bf8d2f7bad5ee98e3ace73b65f2034fa834fcf412113d35b"
+                ]
+              },
+              "53ed7d9909b145f2f136980b01608776f039d1561fd9941059ed99773313ae30": {
+                "index": 0,
+                "path": [
+                  "637cd0136a53b0084fa2b40d7c88df68f37efc75326d3a7dfd884b03cd23e329"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "b6bAa_W1ioRqP6_JrlmpuppsDx7MXJTyjABkU41qI_Dk6nMa-J177BM4mrmtjJAexRsKN4QtGPwkhDCeLEYfBw",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "7584f345f50ee944cf69a8ceeaaeb0a7a3ad429179861357c8311c17dd76f719",
+              "seq": 4,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "WfWfWKcNlog_HsarNB7yrHneZ8MlPXuLpAssiU9LjoBK_DLlzPsZIdU_tnRI4vP2kxwIvPPePoQtxNI3_hZkBA"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "d75c179a98f0403c3634ebe884ce69bca64a5818d61e8dba211c48badbf777a2",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tools",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "035851e99742abc24ecaa138fa7f4b142fe13512b3f461f2efa34117b6304308",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "53ed7d9909b145f2f136980b01608776f039d1561fd9941059ed99773313ae30",
+              "batch_sig": "aCDZWtnd4C1j69nwJ___V4JTSpRJArKB6y-nsNSfaJMzPgnOdkicjnMEe77pUBjr0Pf2sgvJznEIkVTenxn5Aw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "04f6a2febbf42000409d06e760e3c08746aae4dad90c3034256970c09356ba0b",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "r5k4s4RFcYXVNZhllweevbFBcVRIzkUKn0pUg5lZMdUkU4KvWkHLK-82GeAQ-iBd9SkWLKDgXtMDO3vtAKI4Cw",
+              "index": 0,
+              "proof": [
+                "3182ff13d94f6b814c1c7943a1f47563147df281d8f570754d55ef9c4c953bc7",
+                "3c9eb63536ba93f4de898ed835820d709e3469e703b772544f84ea2f5ca9a91b"
+              ],
+              "record_hash": "edaf25349b37e35168a25fda6ad2437b98a8fa5ed2b8645868bc71f895fa7c96",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "CZzeKnFIQOb-YJB-2pxU8T44iz6feo9tCMQzswfeP5pPT5F6j8L8_fzwfuF2Sn4CZJKYUS54dB8i2sex-aezCw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "c42ff260d17cca27cad6ca6020ee175daaf5c6d0bbfe50425591bfdafa8a1bbf",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": "edaf25349b37e35168a25fda6ad2437b98a8fa5ed2b8645868bc71f895fa7c96",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 2,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "035851e99742abc24ecaa138fa7f4b142fe13512b3f461f2efa34117b6304308",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "53ed7d9909b145f2f136980b01608776f039d1561fd9941059ed99773313ae30",
+              "batch_sig": "aCDZWtnd4C1j69nwJ___V4JTSpRJArKB6y-nsNSfaJMzPgnOdkicjnMEe77pUBjr0Pf2sgvJznEIkVTenxn5Aw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "04f6a2febbf42000409d06e760e3c08746aae4dad90c3034256970c09356ba0b",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "r5k4s4RFcYXVNZhllweevbFBcVRIzkUKn0pUg5lZMdUkU4KvWkHLK-82GeAQ-iBd9SkWLKDgXtMDO3vtAKI4Cw",
+              "index": 1,
+              "proof": [
+                "bcd480db04530f8246242ea2da4c5d613a2c3b7c1420faed763be22d032b3ecb",
+                "3c9eb63536ba93f4de898ed835820d709e3469e703b772544f84ea2f5ca9a91b"
+              ],
+              "record_hash": "d284197c5392759b2ee2ce173a910b8bd8d7870ff8eacf2659f1914e2aeef6d7",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "5uEXLQ2uR-YWJaO-gMb8qLxQBKN5382sAvynA_8xVfVcl0fbgUQCR3eNkkJtWomnwK67f3ohfU3jHz5Gfju6Bg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "d7a6fb27e8009bd083a47a44f6c417ceb3252353885f0e47209c7e5bdf822eab",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "d284197c5392759b2ee2ce173a910b8bd8d7870ff8eacf2659f1914e2aeef6d7",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "d284197c5392759b2ee2ce173a910b8bd8d7870ff8eacf2659f1914e2aeef6d7",
+              "seq": 3,
+              "time": "2026-11-13T10:00:02.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "035851e99742abc24ecaa138fa7f4b142fe13512b3f461f2efa34117b6304308",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "53ed7d9909b145f2f136980b01608776f039d1561fd9941059ed99773313ae30",
+              "batch_sig": "aCDZWtnd4C1j69nwJ___V4JTSpRJArKB6y-nsNSfaJMzPgnOdkicjnMEe77pUBjr0Pf2sgvJznEIkVTenxn5Aw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "04f6a2febbf42000409d06e760e3c08746aae4dad90c3034256970c09356ba0b",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "r5k4s4RFcYXVNZhllweevbFBcVRIzkUKn0pUg5lZMdUkU4KvWkHLK-82GeAQ-iBd9SkWLKDgXtMDO3vtAKI4Cw",
+              "index": 2,
+              "proof": [
+                "a113f46dff03e54b5f699a457e4d26698f795fe0e1df41089843f7b84327859e"
+              ],
+              "record_hash": "04f6a2febbf42000409d06e760e3c08746aae4dad90c3034256970c09356ba0b",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "CYXTK6boU16L0XyzNpkm_qHHxwuOMtLX36h1ekN0fQAPyKmjoyMvtGbqhVXNxRDBRkXgOf6lqznag0TyG5f9Dg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "699cf9cd50d676bb6f481bf8a20339929588c2e848cb869684024d6df087645f",
+              "env": "live",
+              "kind": "note",
+              "name": "nightly_summary",
+              "prev": "04f6a2febbf42000409d06e760e3c08746aae4dad90c3034256970c09356ba0b",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:00:03.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "53ed7d9909b145f2f136980b01608776f039d1561fd9941059ed99773313ae30",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "eda7dff4e3b968d70dbaa1e18c9e2310764da259d618b776cdfb8a2cfebe7485",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 1,
+                "v": 1
+              },
+              "batch_hash": "32a29c78a03cd55c4c7ba1c793dada9ab06175f2acefa0d97d8cfce6e5f1036c",
+              "batch_sig": "f5xIwa1Tgi9PaFho3r6T0HlQs3plTiYM2GnCDF2neNIW06YWtmAjey6mwMaS2gFRfUX63V6dto4cjaEI_wjlBw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "7584f345f50ee944cf69a8ceeaaeb0a7a3ad429179861357c8311c17dd76f719",
+                "seq": 4,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "WfWfWKcNlog_HsarNB7yrHneZ8MlPXuLpAssiU9LjoBK_DLlzPsZIdU_tnRI4vP2kxwIvPPePoQtxNI3_hZkBA",
+              "index": 0,
+              "proof": [],
+              "record_hash": "7584f345f50ee944cf69a8ceeaaeb0a7a3ad429179861357c8311c17dd76f719",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "ptPVSI68ONTBtqIv87410KUwO9oaNmNk8i-Izz1GeOcVkzmGkyaw53-DVtRj3HLFg72IaXGJppyefDAp6WPFDQ"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "not_checked",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "coverage": {
+          "agent-a": {
+            "declared": [
+              {
+                "name": "approve_payout",
+                "recorded": true
+              },
+              {
+                "name": "crm.update_customer_record_update_customer_record_update_customer_record_update_customer_rec~14d82f9d",
+                "recorded": true
+              }
+            ],
+            "declared_at_seq": 1,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: all 2 declared tools are recorded"
+        ],
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "a tool name too long for a declaration is cut and matched to its decision",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEIXHeVLfdo52jblEWtfgxHx8UQAM9QVwb0QOphpgr5CuPwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "2f50da7b0be833d6884c245c1b6b1b8e83a716a60d4025a71ae04b4335cd7c94",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "1B1HA2j6KZ7jL7viJd6oDxw0a2YjQBci8KgrbzIYc3H7bK04S4OArqgMsNNss4RhClZSnAO1SLGW8RP5cSGoCw",
+            "paths": {
+              "5515c8503e3861d9509293cc8b0d61b056635025e03e0dae2465c87b02173966": {
+                "index": 0,
+                "path": [
+                  "af838971c4722db8e9875a4077a500dae27d902776d95295cb4ca590f10004f9"
+                ]
+              },
+              "7c554709e3a0acbacc8a9ece528ccb918ccef5a0c7301fb822e075276c4a4206": {
+                "index": 1,
+                "path": [
+                  "8bb10393f596c60739d5e0ee84709c15224d217b1ff5d4f08be0b72a94f15777"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "MSGA9-0l1zBol_ai5kEUDWrudT4hx_OJ4XwcF3Y1c_JbKoheSjbeqshWLdc7d6PZV1ghJLumwoHyXM__W_UzDA",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "77d36865158bc31138cb40a5b23dcf9333aa1cbd6417691df3d409dffc9b6725",
+              "seq": 5,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "XrTOC5zxGUxnidmzOy9QZjjVn2b4sg3TNG8_Hr_K_k93rJ2KrZqPIEM1YNPymFT4K_YVJYvAmAB09_kEAqyCDQ"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "cf5d597a52a0d887048f31605d597a789be56a198740fcb74b2057ba4d19587d",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tools",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "d3d14939cc4da4ae8bccea7552570258c9b647010a90a39231a17a49720b6227",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "5515c8503e3861d9509293cc8b0d61b056635025e03e0dae2465c87b02173966",
+              "batch_sig": "-ZOaKuQwZTGh36lP4dRvTMV9XidyuF4kt3n0YcPhP_FjufEkER1RGynt-aL_dhynRhAd1tQaWLPPr_zw6BdYBQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "b0fc50180d52cc4b19d3ad75bb65934ad553524108dd6fd47f2909295a12831f",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "Os9UOgujXZvgsSyNBILCMMg8DL1MsXNqJ3yPqKbBiXSdOmucB-FCVCSFSF1rBI21mgWBC_4TMZIUvKp6mDreBg",
+              "index": 0,
+              "proof": [
+                "d85490e5206ada2f5528eac75032aced27220e7693ce8334a131fde3b893765a",
+                "837e741095207cf17a5138ef4a0a4dbaaaf9a44f58ae1363833e7b179a183490"
+              ],
+              "record_hash": "2b61e814e233eb320c00d6498d9319108ab24bb91fdbc67feeb6f7eba9b1ecc6",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "DAhb-0aAOnVfXJrkt9iSihlrYobaC5ld5Zk06Yt7U17Ye_H1VvOKFUZCaHse9p87OhT96n7zYUXzHv2rDLM2BQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "3491ea952fc62ae11ee9751d4f90052fe23050ec5da31e63cf40f0a2f119a09c",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool/crm.update_customer_record_update_customer_record_update_customer_record_update_customer_rec~14d82f9d",
+              "prev": "2b61e814e233eb320c00d6498d9319108ab24bb91fdbc67feeb6f7eba9b1ecc6",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 2,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "d3d14939cc4da4ae8bccea7552570258c9b647010a90a39231a17a49720b6227",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "5515c8503e3861d9509293cc8b0d61b056635025e03e0dae2465c87b02173966",
+              "batch_sig": "-ZOaKuQwZTGh36lP4dRvTMV9XidyuF4kt3n0YcPhP_FjufEkER1RGynt-aL_dhynRhAd1tQaWLPPr_zw6BdYBQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "b0fc50180d52cc4b19d3ad75bb65934ad553524108dd6fd47f2909295a12831f",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "Os9UOgujXZvgsSyNBILCMMg8DL1MsXNqJ3yPqKbBiXSdOmucB-FCVCSFSF1rBI21mgWBC_4TMZIUvKp6mDreBg",
+              "index": 1,
+              "proof": [
+                "11b7a713a21678818d131c5b0c90527923427d7ac7dd8c64f4a1740d2e9920f7",
+                "837e741095207cf17a5138ef4a0a4dbaaaf9a44f58ae1363833e7b179a183490"
+              ],
+              "record_hash": "c023cdcadbfc33794b877796d263eebb0e1f3a9db126ca8f1967fb3c0f6d3bef",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "vxK-iTS70f-Wb17fxLMJiqji12qd0zdkCc7If5yA6q6trLOcs2gCCCqTor7ri0gDyZuAyCEDxCHyDIn_vrQHDQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "4b6134163359213a2b1232e08c3c7cdb929c55c633a4bd4b345c5078861565ee",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool/approve_payout",
+              "prev": "c023cdcadbfc33794b877796d263eebb0e1f3a9db126ca8f1967fb3c0f6d3bef",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:02.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "d3d14939cc4da4ae8bccea7552570258c9b647010a90a39231a17a49720b6227",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "5515c8503e3861d9509293cc8b0d61b056635025e03e0dae2465c87b02173966",
+              "batch_sig": "-ZOaKuQwZTGh36lP4dRvTMV9XidyuF4kt3n0YcPhP_FjufEkER1RGynt-aL_dhynRhAd1tQaWLPPr_zw6BdYBQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "b0fc50180d52cc4b19d3ad75bb65934ad553524108dd6fd47f2909295a12831f",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "Os9UOgujXZvgsSyNBILCMMg8DL1MsXNqJ3yPqKbBiXSdOmucB-FCVCSFSF1rBI21mgWBC_4TMZIUvKp6mDreBg",
+              "index": 2,
+              "proof": [
+                "674fef53999f1a2177a37b9e68a5dc2a9e1edc471699e34e0139794b77570259"
+              ],
+              "record_hash": "b0fc50180d52cc4b19d3ad75bb65934ad553524108dd6fd47f2909295a12831f",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "yXvgQy80sIVNDq7vIafYzwcnIK_QKXMEM9BIAfPTdB-eCnrdDG6UYESONUkf0Hfac7ewaRls_50PpbIh3TI2BQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "699cf9cd50d676bb6f481bf8a20339929588c2e848cb869684024d6df087645f",
+              "env": "live",
+              "kind": "decision",
+              "name": "crm.update_customer_record_update_customer_record_update_customer_record_update_customer_record_update_customer_record_",
+              "prev": "b0fc50180d52cc4b19d3ad75bb65934ad553524108dd6fd47f2909295a12831f",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:00:03.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "5515c8503e3861d9509293cc8b0d61b056635025e03e0dae2465c87b02173966",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "364b5eb4e7abda4c2f236196c7c0cccfde10ed9af6b58c1214eaf357b73251a9",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 2,
+                "v": 1
+              },
+              "batch_hash": "7c554709e3a0acbacc8a9ece528ccb918ccef5a0c7301fb822e075276c4a4206",
+              "batch_sig": "GOGwINgaYyhLNiJst24scMhHLai9mMHH2pKZRqg_NULihbAC8UARQNDBeOoIqq1LRLdfSfUpdqwTyxsoBNlSDA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "77d36865158bc31138cb40a5b23dcf9333aa1cbd6417691df3d409dffc9b6725",
+                "seq": 5,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "XrTOC5zxGUxnidmzOy9QZjjVn2b4sg3TNG8_Hr_K_k93rJ2KrZqPIEM1YNPymFT4K_YVJYvAmAB09_kEAqyCDQ",
+              "index": 0,
+              "proof": [
+                "46bf22e04f2cedd8ec9d828b5b4ae3b75ec5a457db16aee32d308577717846ee"
+              ],
+              "record_hash": "332ff187055f95ff0a7a65ba80a198ae8a9e8761600d1602b627e69f559cebc0",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "z3uQMPuV4U-z8M6JsoyBFTUCJJaWwIkEmiIKs-Rk2Lm43ezFIKXeoZUoVKZn2ZRunjisKOOaEOE6Wn-8UnvQBQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "1055efe43dc3ce9c739dd43cf5688b8578d689229e3f7677383fb4d668955b40",
+              "env": "live",
+              "kind": "outcome",
+              "name": "crm.update_customer_record_update_customer_record_update_customer_record_update_customer_record_update_customer_record_",
+              "prev": "332ff187055f95ff0a7a65ba80a198ae8a9e8761600d1602b627e69f559cebc0",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "332ff187055f95ff0a7a65ba80a198ae8a9e8761600d1602b627e69f559cebc0",
+              "seq": 5,
+              "time": "2026-11-13T10:00:04.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "5515c8503e3861d9509293cc8b0d61b056635025e03e0dae2465c87b02173966",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "364b5eb4e7abda4c2f236196c7c0cccfde10ed9af6b58c1214eaf357b73251a9",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 2,
+                "v": 1
+              },
+              "batch_hash": "7c554709e3a0acbacc8a9ece528ccb918ccef5a0c7301fb822e075276c4a4206",
+              "batch_sig": "GOGwINgaYyhLNiJst24scMhHLai9mMHH2pKZRqg_NULihbAC8UARQNDBeOoIqq1LRLdfSfUpdqwTyxsoBNlSDA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "77d36865158bc31138cb40a5b23dcf9333aa1cbd6417691df3d409dffc9b6725",
+                "seq": 5,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "XrTOC5zxGUxnidmzOy9QZjjVn2b4sg3TNG8_Hr_K_k93rJ2KrZqPIEM1YNPymFT4K_YVJYvAmAB09_kEAqyCDQ",
+              "index": 1,
+              "proof": [
+                "0e53cc70ee80dcb51f20958ab9c21925e5367331d84cb6f84d6b2a13b0519c94"
+              ],
+              "record_hash": "77d36865158bc31138cb40a5b23dcf9333aa1cbd6417691df3d409dffc9b6725",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "gi6cJHspRBgtFjqNtxSdD1czhSIW5CoZ4WAETXxw3nPu9G-fwKG4TB8-bp2wguxlKKKf1aIawpUluIRmaK9UBw"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "not_checked",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, records from 2026-11-13T10:00:02.000Z, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "a tool declaration exported from after its header: the tool note left is ignored",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEIXHDK43MsUaSLrUUDqApFcHWIh4ehihpar4cCQFT+FQHwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "c19d6b913b456abd6070fc39beda0416ec2b927381447adc96b9c6124437188c",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "DNmuDHKjG_jTQh0FrohrPZis2cAk1AVy4O9DtRT3tuADV9eZWbJDeFAlAx7fQLLF2C_bk7uNj2L-3YiS2Wn6Cw",
+            "paths": {
+              "ceac881840163dbbe0331c9d8c109d17cae518382a3ceda76f0ddf52caa36131": {
+                "index": 1,
+                "path": [
+                  "19753e22e34f04a8cc294c47f43865eb1c527773debae8450a7a0d9baab9b635"
+                ]
+              },
+              "e036a5ee6cfd83e9a3e41bdbbd1d536768978e9d84f2dd1fb5a55ac9a75fa475": {
+                "index": 0,
+                "path": [
+                  "a125039c7797239e11eb0083af186d138015d689957b0b8cad24f5541ef6fb9c"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "Li_sLJEu1bJuaiRmkDJVXfODDsLk6Gx_OhKD3pSY_Vo6SHfRMXctvQQ8vXkz9ZWuhF8tifjegQjgcZiEW1XJCQ",
+        "filter": {
+          "agents": null,
+          "from": "2026-11-13T10:00:02.000Z",
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "0ffd3a933e02b101607a374bdb1e740aa313400900e14e49f9931cea630b4e53",
+              "seq": 5,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "1ImmzHcTVuD1qsOKFiBadZIQjI79z4LnqSNqoSg-Yvk9RYi2JGuoStAJEYvKD4m-21mZgGIG0lI3luNgNZEYCA"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "0d168d16f9cd92f8bf01a1b38e76236a34218bba057cc3aa8d5c6ba5b599f259",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool_unrecorded/send_email",
+              "prev": "d79e1821132539cc5c6b1436bf3ea0a93e32c723ec9595b242044cf63d2d035c",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:02.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "ebd074fd89f844d90ba7217ce69995d55c19238fccc87f707493954ff34cc7b2",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "e036a5ee6cfd83e9a3e41bdbbd1d536768978e9d84f2dd1fb5a55ac9a75fa475",
+              "batch_sig": "ZziWu9pKyCuUhMP8WrY42wnoIy1oxfYjsZ_eeMSDoEaqUG8G8-TDajPqNeina_YPcpFkB9fDr9V5HKmy8YrdDg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "7563b459d21ea99c794518041d344b9290a91d2f5649b9c3b086d7209020b586",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "_NA1XMNMOJcvv-RliQm0167U1eDmhQA2WTT9rX2A3FoSkqj4OuwUJDa1deTo2LjqDdPHSorBLVcVDkkMfffNCg",
+              "index": 2,
+              "proof": [
+                "aaa04b9ff8dac37195d108ee3b15a789bedbb45a331a2fa6a8e14c7459749e12"
+              ],
+              "record_hash": "7563b459d21ea99c794518041d344b9290a91d2f5649b9c3b086d7209020b586",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "CmL5RPFZTovmFBS5nfmjeJSj-9iT6xyHvhvP3H741b_JJ7kENGawLLDIYErGBAOrChk7svf-3x6XDgOVHraoAA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "699cf9cd50d676bb6f481bf8a20339929588c2e848cb869684024d6df087645f",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": "7563b459d21ea99c794518041d344b9290a91d2f5649b9c3b086d7209020b586",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:00:03.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "e036a5ee6cfd83e9a3e41bdbbd1d536768978e9d84f2dd1fb5a55ac9a75fa475",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "05bb1e0a5a344ecb2f166e8a3a50503553457a642ed6fa648aacb64c5ca4b2a2",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 2,
+                "v": 1
+              },
+              "batch_hash": "ceac881840163dbbe0331c9d8c109d17cae518382a3ceda76f0ddf52caa36131",
+              "batch_sig": "kwqPF9da3m_P1xYqlHdEKXRalZaWKZZZ4ZrYBYvcLgwTgqkLWbVss3o5twPgHRVIp_k6qsJBOlOxbRBgjwk4Cg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "0ffd3a933e02b101607a374bdb1e740aa313400900e14e49f9931cea630b4e53",
+                "seq": 5,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "1ImmzHcTVuD1qsOKFiBadZIQjI79z4LnqSNqoSg-Yvk9RYi2JGuoStAJEYvKD4m-21mZgGIG0lI3luNgNZEYCA",
+              "index": 0,
+              "proof": [
+                "8a504dcfe15844293b4d4819b95e46d16637f1639e47528eefb45a4eef1d794c"
+              ],
+              "record_hash": "fa5c0e351d83fd8bc8d06012d4b6fa67551016cbfebd2fa82b20cc8c5a0bf3e3",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "L7ZXFWlYJmJdEBwbSocV9xgNEiRekKFu29-4o4vVNZOeXXXHy34g3PgwiEE9LlmdWtOKniOzHut1M_wBbyBQDw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "1055efe43dc3ce9c739dd43cf5688b8578d689229e3f7677383fb4d668955b40",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "fa5c0e351d83fd8bc8d06012d4b6fa67551016cbfebd2fa82b20cc8c5a0bf3e3",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "fa5c0e351d83fd8bc8d06012d4b6fa67551016cbfebd2fa82b20cc8c5a0bf3e3",
+              "seq": 5,
+              "time": "2026-11-13T10:00:04.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "e036a5ee6cfd83e9a3e41bdbbd1d536768978e9d84f2dd1fb5a55ac9a75fa475",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "05bb1e0a5a344ecb2f166e8a3a50503553457a642ed6fa648aacb64c5ca4b2a2",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 2,
+                "v": 1
+              },
+              "batch_hash": "ceac881840163dbbe0331c9d8c109d17cae518382a3ceda76f0ddf52caa36131",
+              "batch_sig": "kwqPF9da3m_P1xYqlHdEKXRalZaWKZZZ4ZrYBYvcLgwTgqkLWbVss3o5twPgHRVIp_k6qsJBOlOxbRBgjwk4Cg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "0ffd3a933e02b101607a374bdb1e740aa313400900e14e49f9931cea630b4e53",
+                "seq": 5,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "1ImmzHcTVuD1qsOKFiBadZIQjI79z4LnqSNqoSg-Yvk9RYi2JGuoStAJEYvKD4m-21mZgGIG0lI3luNgNZEYCA",
+              "index": 1,
+              "proof": [
+                "775528268690463aa899a4ab18d6411e102cc540bcd1016b8278536e101f6bd6"
+              ],
+              "record_hash": "0ffd3a933e02b101607a374bdb1e740aa313400900e14e49f9931cea630b4e53",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "vkPYN_0Lol3XABqdpD9lguxYmJ9kh557bUda4DhSuMMa084yibrXgqXBRF46V1UbUmHRbHnPPvZwHim_XjUKDA"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "agent_keys": {
+        "format": "signafaide-agent-keys/1",
+        "keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "sig": "vgaGx0qGD2cs4vklIww0059oBVYEMhFfBTG4xHKyMvZ0bdblOxN8Rh-SXcQFf1W7Mk8XHuMLC7BThC49DBznBQ",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          },
+          {
+            "agent": "agent-b",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "sig": "wdVdXtPEiw9H35OZ6sS3xWNq9YDkKjZJ1RDKGbc0j3EVXFIRTpruW2RfIDFRVnFRxUdp4iLjE9KF-nXBmr-WAQ",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      },
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "not_checked",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "coverage": {
+          "agent-a": {
+            "declared": [
+              {
+                "name": "approve_payout",
+                "recorded": true
+              }
+            ],
+            "declared_at_seq": 1,
+            "undeclared_recorded": []
+          },
+          "agent-b": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: all 1 declared tool is recorded",
+          "agent-b: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "two agents: one declared its tools, the other did not",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          },
+          {
+            "agent": "agent-b",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEIz++/JfaZs0j0pgq00/DyWpDwxI5VljezSRXb9XKWEBTwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "1ebb647c9f7be1047aeea6fcc4297089cb58b8ea7cab5eed0c12f93a63fa8c9a",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "cM7-JwYmkqi-Dchn18GOBn_FcaKvOXs-r1ZsekQf9-KkWLWJyaw7dy3NUwWrCfBFWL4YGtU__QbP9kmX0qHPBg",
+            "paths": {
+              "8d5864c89d339d9e6f1b910bf716c285245963d9971186faf5733b969dc6761e": {
+                "index": 0,
+                "path": [
+                  "f8b7ca67173d7c6a81e2a64072504f0506f4bdbc21f2a9fb7ef8ad9557fb5e09"
+                ]
+              },
+              "d1c61638920d318139d697c64fd012992f595fdcc1f14627114071cd88c65e0c": {
+                "index": 1,
+                "path": [
+                  "053c4a3f8c74c81fd52f8bdd2d5050d3db12700fb3f22797aea8c903ac41caed"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "oBIM5h2ze8GA-wfihLdK3oODjylTVPrWfVAOo7qL05nTEb4AX0gcKa6-uNFIpO0NpBiyzoIgUjpaqkw7ZdvxAw",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "f35264a01880c07c3545f8f03deee5704616749384b947e4feedaa448f1eff98",
+              "seq": 3,
+              "server_time": "2026-11-13T10:00:01.250Z"
+            },
+            "head_sig": "CsMcHlVED5Qg3LmxmKSdAEawCc3W77j5y-em9DjxANsGRwKDTKMJpUNCEq4KdL9EpxtIu6x-kapMQrbhNFNgBA"
+          },
+          {
+            "head": {
+              "agent": "agent-b",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "8b89fd156251d67f86d21ed8a1bbf0ce273b9a63da49fa5262e298ef4123944a",
+              "seq": 1,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "rVJOua7bIM9PKmti2YMNFI-1WPFbjFSaftaeIYiOd_yLZnYSZP776izXepuJcTudLSKDGjcEe0CvxfxfOG4xDQ"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "b26f6ba820649c58e7b2f08552b0482c6e62dc39199419fc42cb0e48348c3468",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tools",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0f4aca7d87b0ea37ac1a3b51eeeabf874ddccc2250753f2d43fb79315f8a3023",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "8d5864c89d339d9e6f1b910bf716c285245963d9971186faf5733b969dc6761e",
+              "batch_sig": "RQiMflnP_Z_-lFI30zdxIWSLh1AlTWNTsASllfz4E-tbEXzO--s9sK15cYDiwv-ADMvk06Csa_l417WEfI8HBw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "f35264a01880c07c3545f8f03deee5704616749384b947e4feedaa448f1eff98",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "CsMcHlVED5Qg3LmxmKSdAEawCc3W77j5y-em9DjxANsGRwKDTKMJpUNCEq4KdL9EpxtIu6x-kapMQrbhNFNgBA",
+              "index": 0,
+              "proof": [
+                "ba048b848ae9033ec1108437b69d6115d3b4785a4b7098e42e58ea9c03f9f418",
+                "62d05668709ce83bc2b7cb966487964b3199720aeeafb6fde0525eba79231be6"
+              ],
+              "record_hash": "4d8719522bc705519bda5e4a4c481cee854b1e5dff64082c1cb487427ae6185b",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "BLRLD74AuPT_7C2ZTsVYqFuH2KPJLLHmvDtZMMI3sFYi7bVynSMebOEQbdmpKGFy7tQUPUZUOl_GLLd3COs2BA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "9131cc3551f439980876a737b50cd562a462944ff4c04cf3f522a6a77a5c891f",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.tool/approve_payout",
+              "prev": "4d8719522bc705519bda5e4a4c481cee854b1e5dff64082c1cb487427ae6185b",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 2,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0f4aca7d87b0ea37ac1a3b51eeeabf874ddccc2250753f2d43fb79315f8a3023",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "8d5864c89d339d9e6f1b910bf716c285245963d9971186faf5733b969dc6761e",
+              "batch_sig": "RQiMflnP_Z_-lFI30zdxIWSLh1AlTWNTsASllfz4E-tbEXzO--s9sK15cYDiwv-ADMvk06Csa_l417WEfI8HBw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "f35264a01880c07c3545f8f03deee5704616749384b947e4feedaa448f1eff98",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "CsMcHlVED5Qg3LmxmKSdAEawCc3W77j5y-em9DjxANsGRwKDTKMJpUNCEq4KdL9EpxtIu6x-kapMQrbhNFNgBA",
+              "index": 1,
+              "proof": [
+                "bf88a5ad4f6c262afdf9000b128c6735635503e09c286a31539219a0e0326230",
+                "62d05668709ce83bc2b7cb966487964b3199720aeeafb6fde0525eba79231be6"
+              ],
+              "record_hash": "a027330634c6c4a95a642d72ceedb338acf081bba06a2424966cbd22d8833e3a",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "Es3Mf1LiH_C5iILGtcdkA0YlDGQcA9U2Xl_OVGjvNWLk_IN9Qr6eDZ_-uj3h9gNanzeSTVrbqvBoxDdDeWKqCA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "a225d1cac4ec87b7fe0b3ca762749b59518e3fc1ae311092657dd7d90015e29e",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": "a027330634c6c4a95a642d72ceedb338acf081bba06a2424966cbd22d8833e3a",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:02.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "0f4aca7d87b0ea37ac1a3b51eeeabf874ddccc2250753f2d43fb79315f8a3023",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "8d5864c89d339d9e6f1b910bf716c285245963d9971186faf5733b969dc6761e",
+              "batch_sig": "RQiMflnP_Z_-lFI30zdxIWSLh1AlTWNTsASllfz4E-tbEXzO--s9sK15cYDiwv-ADMvk06Csa_l417WEfI8HBw",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "f35264a01880c07c3545f8f03deee5704616749384b947e4feedaa448f1eff98",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "CsMcHlVED5Qg3LmxmKSdAEawCc3W77j5y-em9DjxANsGRwKDTKMJpUNCEq4KdL9EpxtIu6x-kapMQrbhNFNgBA",
+              "index": 2,
+              "proof": [
+                "12909aa2f92ebfc9033a72d6854f9997c6ce79e3c50cb717a482f55dfe4fca19"
+              ],
+              "record_hash": "f35264a01880c07c3545f8f03deee5704616749384b947e4feedaa448f1eff98",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "GQMIHlLqQpm1Q9XI_oyw8FflYqmYqzppoGaJT_-3aJUpJ5XdbZCLZIUwtRiCdss5U9pnF-AsUI6u8pE-o6GYDA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-b",
+              "content_hash": "699cf9cd50d676bb6f481bf8a20339929588c2e848cb869684024d6df087645f",
+              "env": "live",
+              "kind": "decision",
+              "name": "reject_refund",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:03.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "8d5864c89d339d9e6f1b910bf716c285245963d9971186faf5733b969dc6761e",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "61d466eca1da4d0ce3b65b4fc02294e063419a5194846df006edee8714f2ae53",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 1,
+                "v": 1
+              },
+              "batch_hash": "d1c61638920d318139d697c64fd012992f595fdcc1f14627114071cd88c65e0c",
+              "batch_sig": "xwLbTL3olcbBvTZK8cF-55stAve4TjS-lV09NOIYiU706ndRxopW1dZAOTozXNJ5l-J6sk5wnv4QjlbjgqKMAQ",
+              "head": {
+                "agent": "agent-b",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "8b89fd156251d67f86d21ed8a1bbf0ce273b9a63da49fa5262e298ef4123944a",
+                "seq": 1,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "rVJOua7bIM9PKmti2YMNFI-1WPFbjFSaftaeIYiOd_yLZnYSZP776izXepuJcTudLSKDGjcEe0CvxfxfOG4xDQ",
+              "index": 0,
+              "proof": [],
+              "record_hash": "8b89fd156251d67f86d21ed8a1bbf0ce273b9a63da49fa5262e298ef4123944a",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "oM9Ob_iQ8mekUuu9L2VYSR_FHdU8DxUSTfrQjC8TDv8f9en64P4btrHc-SmJJeagugzOeawwuZpJP5gofXOoCA"
           }
         ],
         "service_keys": [

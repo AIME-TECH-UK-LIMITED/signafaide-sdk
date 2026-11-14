@@ -217,6 +217,12 @@ fn variants_pass_with_their_values() {
         if let Some(n) = t["expect"]["chain_note"].as_str() {
             assert!(r.check("chain").detail.contains(n), "{}\n{}", t["name"], r.to_text());
         }
+        // Tool coverage (§7): the same object and the same lines in every verifier.
+        assert_eq!(serde_json::to_value(&r.coverage).unwrap(), t["expect"]["coverage"], "{}", t["name"]);
+        assert_eq!(json!(r.coverage_lines()), t["expect"]["coverage_lines"], "{}", t["name"]);
+        for line in r.coverage_lines() {
+            assert!(r.to_text().contains(&format!("coverage: {line}\n")), "{}\n{}", t["name"], r.to_text());
+        }
     }
     // The instance-start note (§8) names the chain and the seq it continues after.
     let notes: Vec<&str> = variants.iter().filter_map(|t| t["expect"]["chain_note"].as_str()).collect();
@@ -229,6 +235,72 @@ fn variants_pass_with_their_values() {
             format!("{INSTANCE_NOTE}: agent-a after seq 2").as_str(),
         ]
     );
+}
+
+/// Tool declarations (§2.6) and coverage (§7), written out here independently of the generator.
+#[test]
+fn tool_coverage_vectors() {
+    let v = vectors();
+    let none = "no tool list was declared, so the pack cannot show which of the agent's tools are recorded";
+    let want: Vec<(&str, Vec<String>, Option<u64>)> = vec![
+        ("a tool declaration: every declared tool is recorded", vec!["agent-a: all 2 declared tools are recorded".into()], Some(1)),
+        (
+            "a tool declaration with unrecorded tools, and recorded tools it does not list",
+            vec![
+                "agent-a: 2 declared tools are not recorded: delete_file, send_email".into(),
+                "agent-a: 2 recorded tools are not in the declared tool list: escalate, reject_refund".into(),
+            ],
+            Some(1),
+        ),
+        ("a second tool declaration replaces the first; a tool in both forms takes the later note", vec!["agent-a: all 2 declared tools are recorded".into()], Some(4)),
+        (
+            "a tool declaration with one tool, not recorded",
+            vec!["agent-a: 1 declared tool is not recorded: send_email".into(), "agent-a: 1 recorded tool is not in the declared tool list: approve_payout".into()],
+            Some(1),
+        ),
+        (
+            "a tool declaration with no tools",
+            vec!["agent-a: the declared tool list is empty".into(), "agent-a: 1 recorded tool is not in the declared tool list: approve_payout".into()],
+            Some(1),
+        ),
+        ("a tool name too long for a declaration is cut and matched to its decision", vec!["agent-a: all 2 declared tools are recorded".into()], Some(1)),
+        ("a tool declaration exported from after its header: the tool note left is ignored", vec![format!("agent-a: {none}")], None),
+        ("two agents: one declared its tools, the other did not", vec!["agent-a: all 1 declared tool is recorded".into(), format!("agent-b: {none}")], Some(1)),
+    ];
+    let variants = v["variants"].as_array().unwrap();
+    for (name, lines, at) in &want {
+        let t = variants.iter().find(|t| t["name"] == *name).unwrap_or_else(|| panic!("no variant {name}"));
+        assert_eq!(t["expect"]["coverage_lines"], json!(lines), "{name}");
+        assert_eq!(t["expect"]["coverage"]["agent-a"]["declared_at_seq"], json!(at), "{name}");
+    }
+    // Every other variant, and the valid pack, declares nothing.
+    let declared = variants.iter().filter(|t| t["expect"]["coverage"].as_object().unwrap().values().any(|c| !c["declared_at_seq"].is_null())).count();
+    assert_eq!(declared, want.len() - 1);
+    assert_eq!(v["pack"]["expect"]["coverage_lines"], json!([format!("agent-a: {none}")]));
+    assert_eq!(v["pack"]["expect"]["coverage"], json!({"agent-a": {"declared": [], "undeclared_recorded": [], "declared_at_seq": null}}));
+    let cut = variants.iter().find(|t| t["name"] == want[5].0).unwrap();
+    let long = &cut["expect"]["coverage"]["agent-a"]["declared"][1]["name"];
+    assert_eq!(long.as_str().unwrap().chars().count(), 101);
+
+    for c in v["tool_names"].as_array().unwrap() {
+        let tool = c["tool"].as_str().unwrap();
+        let d = coverage::declared_name(tool);
+        assert_eq!(d, c["declared_name"].as_str().unwrap(), "{}", c["name"]);
+        assert!(d.chars().count() <= coverage::MAX_DECLARED_NAME);
+        if tool.chars().count() <= 101 {
+            assert_eq!(d, tool);
+        } else {
+            let kept: String = tool.chars().take(92).collect();
+            assert_eq!(d, format!("{kept}~{}", &sha256(tool.as_bytes()).hex()[..8]), "{}", c["name"]);
+        }
+        assert_eq!(coverage::declared_name(&d), d);
+        assert_eq!(c["recorded_note"], json!(format!("signafaide.tool/{d}")));
+        assert_eq!(c["unrecorded_note"], json!(format!("signafaide.tool_unrecorded/{d}")));
+        assert!(c["unrecorded_note"].as_str().unwrap().chars().count() <= 128);
+        assert_eq!(coverage::tool_note(Kind::Note, c["recorded_note"].as_str().unwrap()), Some(coverage::ToolNote::Tool { name: &d, recorded: true }));
+        assert_eq!(coverage::tool_note(Kind::Decision, c["recorded_note"].as_str().unwrap()), None);
+    }
+    assert_eq!(v["tool_names"].as_array().unwrap().len(), 10);
 }
 
 #[test]

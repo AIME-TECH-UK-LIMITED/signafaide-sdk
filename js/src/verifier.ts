@@ -13,6 +13,7 @@ import { parseJson } from "./jcs.js";
 import { base64Decode, blockAttestations, otsStatus } from "./ots.js";
 import { AGENT_RE, CLEAN_RESTART_NOTE, INSTANCE_NOTE, INSTANCE_START, INSTANCE_STOP, isStopNote, MAX_CLOCK_SKEW_MS, draftErrors, keyEntryErrors, manifestErrors, receiptErrors, recordErrors, validProjectId, validTime, type AgentKeyEntry } from "./records.js";
 import { plural } from "./plural.js";
+import { coverage, coverageLines, type Coverage } from "./coverage.js";
 import { checkHeader, type BlockRoots } from "./timestamps.js";
 
 export const CHECKS = [
@@ -200,6 +201,9 @@ export class Report {
   notSent = 0;
   /** The project's name from the signed export statement, when the pack has one. */
   projectName: string | null = null;
+  /** Tool coverage per agent (§7; per chain for local state): the agent's current tool
+   * declaration and the recorded tools it does not list. A note, never a failure. */
+  coverage: Record<string, Coverage> = {};
 
   constructor(
     readonly checks: Check[],
@@ -241,6 +245,12 @@ export class Report {
     return this.checks.find((c) => c.status === "fail")?.id ?? null;
   }
 
+  /** Tool coverage in words (§7), agent by agent: what each agent declared, then the recorded
+   * tools its declaration does not list. */
+  coverageLines(): string[] {
+    return Object.entries(this.coverage).flatMap(([agent, c]) => coverageLines(agent, c));
+  }
+
   lines(): string[] {
     const out = [...this.notes];
     if (this.project && this.env) {
@@ -258,6 +268,7 @@ export class Report {
       if (c.failures.length > 20) out.push(`      ... and ${c.failures.length - 20} more`);
     }
     if (this.checks.some((c) => c.status === "pending")) out.push(PENDING_MEANS);
+    out.push(...this.coverageLines().map((l) => `coverage: ${l}`));
     out.push(...this.after);
     out.push(...this.blocked.map((b) => `BLOCKED ${b}`));
     out.push(this.resultLine);
@@ -282,6 +293,7 @@ export class Report {
       independent: this.independent,
       notes: this.notes,
       checks: this.checks,
+      coverage: this.coverage,
       ...(this.after.length ? { not_yet: this.after } : {}),
       ...(this.blocked.length ? { blocked: this.blocked } : {}),
     };
@@ -461,6 +473,7 @@ export function verifyPack(pack: any, serviceKeys: KeyDoc[] | null, opts: PackOp
     byService,
   });
   report.projectName = typeof pack.project_name === "string" ? pack.project_name : null;
+  report.coverage = v.coverage;
   return report;
 }
 
@@ -492,6 +505,7 @@ export function verifyLocalState(local: LocalInput, serviceKeys: KeyDoc[], drand
   const checks = v.run(local.records, [], local.chainIds);
   const report = new Report(checks, null, null, local.records.length, [], [], { service_keys: !serviceKeysPlainHttp, agent_keys: true });
   report.nothingCosigned = v.nothingCosigned;
+  report.coverage = v.coverage;
   return report;
 }
 
@@ -626,6 +640,8 @@ class Verifier {
   private firstKey = new Map<string, number>();
   drafts = 0;
   nothingCosigned = false;
+  /** Tool coverage per chain (§7), filled by `run`. */
+  coverage: Record<string, Coverage> = {};
   /** Local state: chain id -> the witness's signed head a chain continues after (§8). */
   localBases: Record<string, { head: any; head_sig: string; stop?: any }> = {};
 
@@ -854,6 +870,12 @@ class Verifier {
     if (starts.length) acc.notes.push(`${INSTANCE_NOTE}: ${starts.join(", ")}`);
     if (clean.length) acc.notes.push(`${CLEAN_RESTART_NOTE}: ${clean.join(", ")}`);
     if (based.length) acc.notes.push(`continues after a co-signed record this machine does not hold: ${based.join(", ")} (the witness's signed head, see signed heads)`);
+    // Tool coverage (§7): a note per agent, read from the envelopes of its chain in seq order.
+    for (const agent of [...chains.keys()].sort()) {
+      const chain = chains.get(agent)!;
+      const seqs = [...chain.keys()].sort((x, y) => x - y);
+      this.coverage[agent] = coverage(seqs.map((seq) => ({ seq, kind: chain.get(seq)!.r.envelope.kind, name: chain.get(seq)!.r.envelope.name })));
+    }
     return chains;
   }
 

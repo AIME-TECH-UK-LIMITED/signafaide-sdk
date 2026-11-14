@@ -1,6 +1,7 @@
 //! The §7 verification-pack verifier. Pure: no I/O, so it also runs in a browser (wasm32).
 
 use crate::bitcoin::{check_header, BlockHeader};
+use crate::coverage::{coverage, coverage_lines, Coverage};
 use crate::drand::{check_round_time, verify_beacon, BeaconCheck};
 use crate::merkle::verify_path;
 use crate::model::*;
@@ -92,6 +93,9 @@ pub struct Report {
     pub warnings: Vec<String>,
     pub independent: Independent,
     pub checks: Vec<Check>,
+    /// Tool coverage per agent (§7): the agent's current tool declaration and the recorded tools
+    /// it does not list. A note, never a failure.
+    pub coverage: BTreeMap<String, Coverage>,
 }
 
 impl Report {
@@ -141,9 +145,18 @@ impl Report {
             out += PENDING_MEANS;
             out.push('\n');
         }
+        for line in self.coverage_lines() {
+            out += &format!("coverage: {line}\n");
+        }
         out += &self.result_line();
         out.push('\n');
         out
+    }
+
+    /// Tool coverage in words (§7), agent by agent: what each agent declared, then the recorded
+    /// tools its declaration does not list.
+    pub fn coverage_lines(&self) -> Vec<String> {
+        self.coverage.iter().flat_map(|(agent, c)| coverage_lines(agent, c)).collect()
     }
 
     /// For example `PASS: export of every agent, all records, generated 2026-11-13T12:00:00.000Z`,
@@ -912,6 +925,12 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         acc[11].notes.push("no content supplied (hash-only records)".into());
     }
 
+    // Tool coverage (§7): a note per agent, read from the envelopes of its chain in seq order.
+    let tool_coverage: BTreeMap<String, Coverage> = chains
+        .iter()
+        .map(|(agent, chain)| (agent.to_string(), coverage(chain.iter().map(|(&seq, x)| (seq, x.r.envelope.kind, x.r.envelope.name.as_str())))))
+        .collect();
+
     let units = [("record", "records"), ("record", "records"), ("record", "records"), ("record", "records"), ("record", "records"), ("batch", "batches"), ("batch", "batches"), ("head", "heads"), ("round", "rounds"), ("anchor", "anchors"), ("proof", "proofs"), ("record", "records")];
     let checks: Vec<Check> = acc
         .into_iter()
@@ -949,6 +968,7 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         warnings,
         independent,
         checks,
+        coverage: tool_coverage,
     })
 }
 
@@ -1115,6 +1135,7 @@ fn malformed(why: String, independent: Independent) -> Report {
         warnings: vec![],
         independent,
         checks,
+        coverage: BTreeMap::new(),
     }
 }
 

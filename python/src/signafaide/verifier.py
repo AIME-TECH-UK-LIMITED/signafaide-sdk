@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import ots
 from ._plural import plural
+from .coverage import coverage as tool_coverage, coverage_lines
 from .bitcoin import check_header
 from .crypto import HEX64, b64url, b64url_decode, check_content, hash_json, key_id, sha256_hex, verify_inclusion, verify_sig
 from .records import AGENT_RE, CLEAN_RESTART_NOTE, INSTANCE_NOTE, INSTANCE_START, INSTANCE_STOP, is_stop_note, MAX_CLOCK_SKEW_MS, draft_errors, key_entry_errors, manifest_errors, parse_time, receipt_errors, record_errors, valid_project_id
@@ -197,6 +198,9 @@ class Report:
     blocked: List[str] = field(default_factory=list)
     #: Local state with --fail-on-pending-send: records not co-signed yet, which then fail.
     not_sent: int = 0
+    #: Tool coverage per agent (§7; per chain for local state): the agent's current tool
+    #: declaration and the recorded tools it does not list. A note, never a failure.
+    coverage: Dict[str, dict] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -214,6 +218,11 @@ class Report:
     def first_failed(self) -> Optional[str]:
         return next((c.id for c in self.checks if c.status == FAIL), None)
 
+    def coverage_lines(self) -> List[str]:
+        """Tool coverage in words (§7), agent by agent: what each agent declared, then the
+        recorded tools its declaration does not list."""
+        return [line for agent, c in self.coverage.items() for line in coverage_lines(agent, c)]
+
     def lines(self) -> List[str]:
         out = list(self.notes)
         if self.project and self.env:
@@ -229,6 +238,7 @@ class Report:
                 out.append(f"      ... and {len(c.failures) - 20} more")
         if any(c.status == PENDING for c in self.checks):
             out.append(PENDING_MEANS)
+        out += [f"coverage: {line}" for line in self.coverage_lines()]
         out += self.after
         out += [f"BLOCKED {b}" for b in self.blocked]
         out.append(self.result_line)
@@ -259,6 +269,7 @@ class Report:
             **({"project_name": self.project_name} if self.project_name else {}), "env": self.env, "records": self.records,
             "generated": self.generated, "filter": self.filter, "warnings": self.warnings, "independent": self.independent, "notes": self.notes,
             "checks": checks,
+            "coverage": self.coverage,
             **({"not_yet": self.after} if self.after else {}),
             **({"blocked": self.blocked} if self.blocked else {}),
         }
@@ -460,7 +471,7 @@ def verify_pack(
     checks = v.run(pack["records"], pack["anchors"])
     return Report(checks, pack["project"], pack["env"], len(pack["records"]), warnings, independent=independent, generated=pack["generated"],
                   filter=pack["filter"], sources=(service_src, agent_src), by_service=by_service,
-                  project_name=pack.get("project_name") if isinstance(pack.get("project_name"), str) else None)
+                  project_name=pack.get("project_name") if isinstance(pack.get("project_name"), str) else None, coverage=v.coverage)
 
 
 def _earliest(a: Optional[str], b: Optional[str]) -> Optional[str]:
@@ -509,7 +520,8 @@ def verify_local(
     v = _Verifier(service_keys, agent_keys, {}, project=None, env=None, local=True, local_heads=heads, drand=drand, local_bases=bases)
     checks = v.run(records, [], chain_ids)
     return Report(checks, records=len(records), independent={"service_keys": not service_keys_plain_http, "agent_keys": True},
-                  sources=(PLAIN_HTTP if service_keys_plain_http else INDEPENDENT, INDEPENDENT), nothing_cosigned=v.nothing_cosigned)
+                  sources=(PLAIN_HTTP if service_keys_plain_http else INDEPENDENT, INDEPENDENT), nothing_cosigned=v.nothing_cosigned,
+                  coverage=v.coverage)
 
 
 def _signed_head_errors(sh: Any) -> str:
@@ -684,6 +696,7 @@ class _Verifier:
             if f is not None and isinstance(k.get("agent"), str):
                 self.first_key[k["agent"]] = min(self.first_key.get(k["agent"], f), f)
         self.nothing_cosigned = False
+        self.coverage: Dict[str, dict] = {}  # tool coverage per chain (§7), filled by run
         self.drafts = 0  # local drafts waiting for the project (§8): not a reason for "no records"
         self.chain_of: Dict[int, str] = {}  # id(record) -> chain id (local state)
         self.acc = [_Acc() for _ in CHECKS]
@@ -902,6 +915,11 @@ class _Verifier:
             acc.notes.append(f"{CLEAN_RESTART_NOTE}: {', '.join(clean)}")
         if based:
             acc.notes.append(f"continues after a co-signed record this machine does not hold: {', '.join(based)} (the witness's signed head, see signed heads)")
+        # Tool coverage (§7): a note per agent, read from the envelopes of its chain in seq order.
+        self.coverage = {
+            agent: tool_coverage((seq, chain[seq][1]["envelope"]["kind"], chain[seq][1]["envelope"]["name"]) for seq in sorted(chain))
+            for agent, chain in sorted(chains.items())
+        }
         return chains
 
     # 5

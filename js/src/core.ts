@@ -35,6 +35,19 @@ export {
   type SignedRecord,
 } from "./records.js";
 export { Client, DEFAULT_URL, SignafaideError, fetchJson } from "./http.js";
+export {
+  MAX_DECLARED_NAME,
+  TOOLS,
+  TOOL_PREFIX,
+  TOOL_UNRECORDED_PREFIX,
+  coverage,
+  coverageLines,
+  declaredName,
+  toolNote,
+  toolNoteName,
+  type Coverage,
+  type DeclaredTool,
+} from "./coverage.js";
 export { MAX_NODES, MAX_PROOF_BYTES, blockAttestations, otsStatus, parseOts } from "./ots.js";
 export { checkHeader, rootsFromVector, target, type BlockHeader, type BlockRoots } from "./timestamps.js";
 export {

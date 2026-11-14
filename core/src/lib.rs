@@ -5,6 +5,7 @@
 //! an OpenTimestamps proof codec, drand quicknet verification and the §7 pack verifier.
 
 pub mod bitcoin;
+pub mod coverage;
 pub mod drand;
 pub mod hash;
 pub mod jcs;

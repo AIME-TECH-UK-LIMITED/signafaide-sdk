@@ -204,9 +204,13 @@ pub fn sample_salt(i: usize) -> String {
     hex::encode(&sha256(format!("salt-{i}").as_bytes()).0[..16])
 }
 
-fn sample_contents() -> Vec<(Kind, &'static str, &'static str, Value, bool)> {
+/// One record of a fixture: (kind, name, time, content, whether the content is stored).
+type Sample = (Kind, String, String, Value, bool);
+
+fn sample_contents() -> Vec<Sample> {
+    let s = |kind: Kind, name: &str, time: &str, content: Value, store: bool| (kind, name.to_string(), time.to_string(), content, store);
     vec![
-        (
+        s(
             Kind::Decision,
             "approve_payout",
             "2026-11-13T10:00:00.000Z",
@@ -215,31 +219,57 @@ fn sample_contents() -> Vec<(Kind, &'static str, &'static str, Value, bool)> {
                    "meta": {"tags": ["finance", "\u{e9}t\u{e9}", "\u{1F600}"], "ratio": 0.1, "big": 1e21, "zero": -0.0}}),
             true,
         ),
-        (Kind::Outcome, "approve_payout", "2026-11-13T10:00:00.500Z", json!({"output": {"paid": true, "amount": 1250.5}}), true),
-        (Kind::Note, "nightly_summary", "2026-11-13T10:00:01.000Z", json!({"text": "line1\nline2\t\"quoted\" \\ \u{1f}"}), false),
-        (Kind::Decision, "reject_refund", "2026-11-13T10:04:59.000Z", json!({"input": {"order": "A-9"}, "output": {"refund": false}}), false),
+        s(Kind::Outcome, "approve_payout", "2026-11-13T10:00:00.500Z", json!({"output": {"paid": true, "amount": 1250.5}}), true),
+        s(Kind::Note, "nightly_summary", "2026-11-13T10:00:01.000Z", json!({"text": "line1\nline2\t\"quoted\" \\ \u{1f}"}), false),
+        s(Kind::Decision, "reject_refund", "2026-11-13T10:04:59.000Z", json!({"input": {"order": "A-9"}, "output": {"refund": false}}), false),
     ]
 }
 
+/// The records of a tool-coverage vector (§2.6), from (kind, name): hash-only, one second apart
+/// from 10:00:00. A tool note is named for `name` as a declaration holds it.
+fn coverage_contents(items: &[(Kind, &str)]) -> Vec<Sample> {
+    let tools = items.iter().filter(|(k, n)| matches!(coverage::tool_note(*k, n), Some(coverage::ToolNote::Tool { .. }))).count();
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, (kind, name))| {
+            let content = match (kind, coverage::tool_note(*kind, name)) {
+                (_, Some(coverage::ToolNote::Header)) => json!({"source": "declared", "tools": tools}),
+                (_, Some(coverage::ToolNote::Tool { name, recorded })) => json!({"tool": name, "recorded": recorded}),
+                (Kind::Outcome, _) => json!({"output": {"done": true}}),
+                _ => json!({"input": {"order": format!("A-{i}")}}),
+            };
+            (*kind, name.to_string(), format!("2026-11-13T10:00:{i:02}.000Z"), content, false)
+        })
+        .collect()
+}
+
 fn build(mode: Build) -> Fixture {
+    build_with(mode, sample_contents())
+}
+
+/// A pack of `contents`: the first three records in batch 1, the rest in batch 2. An outcome
+/// refers to the decision before it.
+fn build_with(mode: Build, contents: Vec<Sample>) -> Fixture {
     let (ak, sk) = (agent_key(), service_key());
     let mut records: Vec<(SignedRecord, Hash)> = Vec::new();
     let mut prev = None;
-    for (i, (mut kind, name, time, mut content, store)) in sample_contents().into_iter().enumerate() {
+    let mut decision: Option<Hash> = None;
+    for (i, (mut kind, name, time, mut content, store)) in contents.into_iter().enumerate() {
         let name = if matches!(mode, Build::InstanceStart | Build::CleanRestart) && i == 2 {
             let unsent = if mode == Build::CleanRestart { "none" } else { "unknown" };
             content = json!({"continues_after_seq": 2, "continues_after": records[1].1, "earlier_unsent": unsent});
-            INSTANCE_START
+            INSTANCE_START.to_string()
         } else if mode == Build::CleanRestart && i == 1 {
             kind = Kind::Note;
             content = json!({"stopped_after_seq": 1, "stopped_after": records[0].1, "outbox": "empty"});
-            INSTANCE_STOP
+            INSTANCE_STOP.to_string()
         } else {
             name
         };
         let time = match (mode, i) {
-            (Build::TimeBackwards, 2) => "2026-11-13T10:00:00.200Z",
-            (Build::TimeAfterBatch, 3) => "2026-11-13T10:10:00.001Z",
+            (Build::TimeBackwards, 2) => "2026-11-13T10:00:00.200Z".to_string(),
+            (Build::TimeAfterBatch, 3) => "2026-11-13T10:10:00.001Z".to_string(),
             _ => time,
         };
         let second = mode == Build::TwoAgents && i == 3;
@@ -251,10 +281,10 @@ fn build(mode: Build) -> Fixture {
             agent: if second { "agent-b".into() } else { AGENT.into() },
             seq: if second { 1 } else { i as u64 + 1 },
             prev: if second { None } else { prev },
-            time: time.into(),
-            name: name.into(),
+            time,
+            name,
             content_hash: content_hash(&content, &sample_salt(i)).unwrap(),
-            reference: (kind == Kind::Outcome).then(|| records[0].1),
+            reference: if kind == Kind::Outcome { decision } else { None },
         };
         if mode == Build::ForkedPrev && i == 3 {
             envelope.prev = Some(sha256(b"forged prev"));
@@ -262,12 +292,15 @@ fn build(mode: Build) -> Fixture {
         let hash = envelope.record_hash().unwrap();
         let sig = ak.sign(Domain::Record, &hash);
         records.push((SignedRecord { envelope, key_id: ak.key_id(), sig, content: store.then_some(content), salt: store.then(|| sample_salt(i)) }, hash));
+        if kind == Kind::Decision {
+            decision = Some(hash);
+        }
         prev = Some(hash);
     }
 
     let groups: [(std::ops::Range<usize>, &str, Option<Drand>); 2] = [
         (0..3, if mode == Build::BatchBeforeRound { "2026-11-13T09:59:59.000Z" } else { "2026-11-13T10:00:01.250Z" }, Some(drand_vector_round())),
-        (3..4, if mode == Build::BatchTimeBackwards { "2026-11-13T10:00:01.000Z" } else { "2026-11-13T10:05:00.000Z" }, None),
+        (3..records.len(), if mode == Build::BatchTimeBackwards { "2026-11-13T10:00:01.000Z" } else { "2026-11-13T10:05:00.000Z" }, None),
     ];
     let (mut batches, mut receipts) = (Vec::new(), Vec::new());
     let mut prev_batch: Option<Hash> = None;
@@ -369,7 +402,7 @@ fn build(mode: Build) -> Fixture {
         })
         .collect();
     let agents: &[&str] = if mode == Build::TwoAgents { &[AGENT, "agent-b"] } else { &[AGENT] };
-    let heads = if mode == Build::TwoAgents { vec![&receipts[2], &receipts[3]] } else { vec![&receipts[3]] };
+    let heads = if mode == Build::TwoAgents { vec![&receipts[2], &receipts[3]] } else { vec![receipts.last().unwrap()] };
     let mut pack = serde_json::to_value(Pack {
         format: PACK_FORMAT.into(),
         generated: "2026-11-13T12:00:00.000Z".into(),
@@ -708,6 +741,68 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
     let cut: Vec<Value> = cut_restart["records"].as_array().unwrap()[2..].to_vec();
     cut_restart["records"] = json!(cut);
     sign_export(&mut cut_restart);
+    // Tool declarations (§2.6) and the coverage they give (§7).
+    use Kind::{Decision as D, Note as N, Outcome as O};
+    let cover = |items: &[(Kind, &str)]| build_with(Build::Valid, coverage_contents(items)).pack;
+    let long_tool = format!("crm.{}", "update_customer_record_".repeat(5));
+    let long_note = coverage::tool_note_name(&long_tool, true);
+    let all_recorded = cover(&[
+        (N, "signafaide.tools"),
+        (N, "signafaide.tool/approve_payout"),
+        (N, "signafaide.tool/reject_refund"),
+        (D, "approve_payout"),
+        (O, "approve_payout"),
+        (D, "reject_refund"),
+    ]);
+    let unrecorded = cover(&[
+        (N, "signafaide.tools"),
+        (N, "signafaide.tool/approve_payout"),
+        (N, "signafaide.tool_unrecorded/send_email"),
+        (N, "signafaide.tool_unrecorded/delete_file"),
+        (D, "approve_payout"),
+        (O, "approve_payout"),
+        (D, "reject_refund"),
+        (D, "escalate"),
+        (D, "signafaide.internal"),
+    ]);
+    let redeclared = cover(&[
+        (N, "signafaide.tools"),
+        (N, "signafaide.tool/approve_payout"),
+        (N, "signafaide.tool_unrecorded/old_tool"),
+        (N, "signafaide.tools"),
+        (N, "signafaide.tool_unrecorded/approve_payout"),
+        (N, "signafaide.tool/reject_refund"),
+        (N, "signafaide.tool/approve_payout"),
+        (D, "approve_payout"),
+    ]);
+    let one_unrecorded = cover(&[(N, "signafaide.tools"), (N, "signafaide.tool_unrecorded/send_email"), (D, "approve_payout"), (O, "approve_payout")]);
+    let empty_list = cover(&[(N, "signafaide.tools"), (D, "approve_payout"), (O, "approve_payout"), (N, "nightly_summary")]);
+    let long_names = cover(&[(N, "signafaide.tools"), (N, &long_note), (N, "signafaide.tool/approve_payout"), (D, &long_tool), (O, &long_tool)]);
+    // The same declaration exported from its third record on: the header is outside the pack, so
+    // the tool note left in it belongs to a declaration the pack does not hold.
+    let mut cut_declaration = cover(&[
+        (N, "signafaide.tools"),
+        (N, "signafaide.tool/approve_payout"),
+        (N, "signafaide.tool_unrecorded/send_email"),
+        (D, "approve_payout"),
+        (O, "approve_payout"),
+    ]);
+    cut_declaration["filter"]["from"] = json!("2026-11-13T10:00:02.000Z");
+    let cut: Vec<Value> = cut_declaration["records"].as_array().unwrap()[2..].to_vec();
+    cut_declaration["records"] = json!(cut);
+    sign_export(&mut cut_declaration);
+    let two_declared = build_with(
+        Build::TwoAgents,
+        coverage_contents(&[(N, "signafaide.tools"), (N, "signafaide.tool/approve_payout"), (D, "approve_payout"), (D, "reject_refund")]),
+    )
+    .pack;
+    let two_agent_keys = || Inputs {
+        agent_keys: Some(json!(AgentKeysDocument {
+            format: AGENT_KEYS_FORMAT.into(),
+            keys: vec![agent_key_entry(AGENT, &agent_key(), AGENT_KEY_FROM, None), agent_key_entry("agent-b", &agent_key(), AGENT_KEY_FROM, None)],
+        })),
+        ..none()
+    };
     vec![
         ("independent service and agent keys, offline", valid.clone(), none()),
         ("young batches no anchor covers yet: anchors and public timestamp pending", not_yet_anchored, none()),
@@ -745,6 +840,14 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         ("a new instance continued the chain after seq 2 (an instance-start note)", instance_start, none()),
         ("a clean restart: the start note at seq 3 follows a stop note at seq 2", clean_restart, none()),
         ("a clean restart exported from its start note on: the stop note is outside the pack", cut_restart, none()),
+        ("a tool declaration: every declared tool is recorded", all_recorded, none()),
+        ("a tool declaration with unrecorded tools, and recorded tools it does not list", unrecorded, none()),
+        ("a second tool declaration replaces the first; a tool in both forms takes the later note", redeclared, none()),
+        ("a tool declaration with one tool, not recorded", one_unrecorded, none()),
+        ("a tool declaration with no tools", empty_list, none()),
+        ("a tool name too long for a declaration is cut and matched to its decision", long_names, none()),
+        ("a tool declaration exported from after its header: the tool note left is ignored", cut_declaration, none()),
+        ("two agents: one declared its tools, the other did not", two_declared, two_agent_keys()),
     ]
 }
 
@@ -767,12 +870,40 @@ fn time_clamp_cases() -> Vec<Value> {
         .collect()
 }
 
+/// §2.6: tool names as a declaration holds them, and the names of the notes that declare them.
+fn tool_name_cases() -> Vec<Value> {
+    let cases: Vec<(&str, String)> = vec![
+        ("a short name is kept", "send_email".into()),
+        ("a name with a slash and a dot is kept", "github/issues.create".into()),
+        ("101 characters are kept", "a".repeat(101)),
+        ("102 characters are cut", "a".repeat(102)),
+        ("101 two-byte characters are kept", "\u{e9}".repeat(101)),
+        ("102 two-byte characters are cut: characters are counted, the hash is over the UTF-8 bytes", "\u{e9}".repeat(102)),
+        ("101 characters outside the basic plane are kept (code points, not UTF-16 units)", "\u{1F600}".repeat(101)),
+        ("102 characters outside the basic plane are cut", "\u{1F600}".repeat(102)),
+        ("a long name with a prefix", format!("crm.{}", "update_customer_record_".repeat(5))),
+        ("300 characters", format!("tool-{}", "x".repeat(295))),
+    ];
+    cases
+        .into_iter()
+        .map(|(name, tool)| {
+            json!({
+                "name": name,
+                "tool": tool,
+                "declared_name": coverage::declared_name(&tool),
+                "recorded_note": coverage::tool_note_name(&tool, true),
+                "unrecorded_note": coverage::tool_note_name(&tool, false),
+            })
+        })
+        .collect()
+}
+
 fn expected(report: &verify::Report) -> Value {
     let mut checks = serde_json::Map::new();
     for c in &report.checks {
         checks.insert(c.id.into(), json!(c.value.clone().unwrap_or_else(|| serde_json::to_value(c.status).unwrap().as_str().unwrap().to_string())));
     }
-    json!({"result": report.result, "result_line": report.result_line(), "checks": checks})
+    json!({"result": report.result, "result_line": report.result_line(), "checks": checks, "coverage": report.coverage, "coverage_lines": report.coverage_lines()})
 }
 
 fn jcs_cases() -> Vec<Value> {
@@ -968,7 +1099,7 @@ pub fn generate() -> Value {
         service_key_entry(),
     ];
 
-    json!({
+    let mut out = json!({
         "spec": "signafaide/v1",
         "about": "Generated by signafaide-core (cargo run --bin gen-vectors). Every implementation must reproduce these values byte for byte. Strings named *_jcs are the exact canonical UTF-8 text. A tampered entry's or variant's inputs: keys, agent_keys (null: none), trust_embedded_agent_keys, head, bitcoin (height -> {hash, header} as an explorer serves them), by_service, service_keys_plain_http.",
         "jcs": jcs_cases(),
@@ -1074,5 +1205,9 @@ pub fn generate() -> Value {
         "tampered": tampered,
         "variants": variants,
         "check_ids": CHECKS.iter().map(|c| c.0).collect::<Vec<_>>(),
-    })
+    });
+    // Added here, not inside the macro above, which is at its expansion limit.
+    out["tool_names"] = json!(tool_name_cases());
+    out["tool_names_note"] = json!("Tool declarations (spec 2.6). declared_name is the tool's name as a declaration holds it: the name itself up to 101 characters (Unicode code points), else its first 92 characters, a tilde and the first 8 hex characters of sha256(UTF-8 tool name). recorded_note and unrecorded_note are the envelope names of the two notes that declare the tool. A variant's expect.coverage is the report's coverage object and expect.coverage_lines its coverage lines, in order.");
+    out
 }

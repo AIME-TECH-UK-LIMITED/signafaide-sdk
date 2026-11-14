@@ -72,8 +72,11 @@ def test_clean_pack_passes(pack, keys):
     assert s["anchor"] == s["ots"] == "pending"
     assert ": 8 of 12 checks passed, 2 pending (anchors, public timestamp), 2 not checked (drand rounds, content hashes);" in r.result_line
     lines = str(r).splitlines()
-    assert lines[0].startswith("signafAIde pack prj_") and no_counts(lines[-1]).startswith("PASS" + SCOPE) and len(lines) == 15
-    assert lines[-2].startswith("pending: co-signed, waiting for the public timestamp")
+    assert lines[0].startswith("signafAIde pack prj_") and no_counts(lines[-1]).startswith("PASS" + SCOPE) and len(lines) == 16
+    assert lines[-3].startswith("pending: co-signed, waiting for the public timestamp")
+    # Tool coverage (§7), a note before the result line: this agent declared no tool list.
+    assert lines[-2] == "coverage: claims-project: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+    assert r.coverage == {"claims-project": {"declared": [], "undeclared_recorded": [], "declared_at_seq": None}}
     assert lines[-1].endswith(pack["generated"])
     assert lines[1].startswith(" 1. Envelope schema") and "PASS" in lines[1]
     assert "no anchors in the pack yet" in r.check("anchor").detail

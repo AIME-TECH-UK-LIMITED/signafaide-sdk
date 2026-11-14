@@ -106,6 +106,39 @@ fn valid_pack_passes_with_independent_keys() {
     assert_eq!(report["checks"].as_array().unwrap().len(), 12);
 }
 
+/// Tool coverage (§7): a `coverage:` line per agent before the result line, and a `coverage`
+/// object in the JSON output. Never a failure.
+#[test]
+fn tool_coverage_is_reported_in_text_and_json() {
+    let v = vectors();
+    let keys = tmp("keys-cov.json", &v["keys_document"]);
+    let agents = tmp("agents-cov.json", &v["agent_keys_document"]);
+    let variants = v["variants"].as_array().unwrap();
+    let mut declared = 0;
+    for (i, t) in variants.iter().enumerate() {
+        // Only the variants checked with the default inputs (the vectors' keys and manifest, offline).
+        if ["keys", "agent_keys", "head", "bitcoin", "by_service", "service_keys_plain_http", "trust_embedded_agent_keys"].iter().any(|k| t.get(*k).is_some()) {
+            continue;
+        }
+        let pack = tmp(&format!("pack-cov-{i}.json"), &t["pack"]);
+        let (code, out) = run(&[&pack, "--keys", &keys, "--agent-keys", &agents, "--offline"]);
+        assert_eq!(code, 0, "{}\n{out}", t["name"]);
+        let lines: Vec<&str> = out.lines().collect();
+        let want: Vec<String> = t["expect"]["coverage_lines"].as_array().unwrap().iter().map(|l| format!("coverage: {}", l.as_str().unwrap())).collect();
+        let got: Vec<&str> = lines.iter().copied().filter(|l| l.starts_with("coverage: ")).collect();
+        assert_eq!(got, want, "{}\n{out}", t["name"]);
+        assert_eq!(lines.last().copied(), t["expect"]["result_line"].as_str(), "{}", t["name"]);
+        let (code, out) = run(&[&pack, "--keys", &keys, "--agent-keys", &agents, "--offline", "--json"]);
+        assert_eq!(code, 0, "{}", t["name"]);
+        let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(report["coverage"], t["expect"]["coverage"], "{}", t["name"]);
+        if out.contains("\"declared_at_seq\": 1") {
+            declared += 1;
+        }
+    }
+    assert!(declared >= 5, "the tool-declaration variants ran: {declared}");
+}
+
 #[test]
 fn keys_are_required_and_agent_keys_must_be_independent() {
     let v = vectors();

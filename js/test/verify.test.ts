@@ -76,8 +76,11 @@ describe("pack verifier", () => {
     const lines = String(r).split("\n");
     expect(lines[0]).toMatch(/^signafAIde pack prj_\w+ \(test\), 5 records$/);
     expect(lines[1]).toMatch(/^ 1\. Envelope schema +PASS +5 records$/);
-    expect(lines).toHaveLength(15);
-    expect(lines.at(-2)).toBe("pending: co-signed, waiting for the public timestamp (an anchor is made every hour and usually confirms within a few hours); never counted as passed");
+    expect(lines).toHaveLength(16);
+    expect(lines.at(-3)).toBe("pending: co-signed, waiting for the public timestamp (an anchor is made every hour and usually confirms within a few hours); never counted as passed");
+    // Tool coverage (§7), a note before the result line: this agent declared no tool list.
+    expect(lines.at(-2)).toBe("coverage: claims-project: no tool list was declared, so the pack cannot show which of the agent's tools are recorded");
+    expect(r.coverage).toEqual({ "claims-project": { declared: [], undeclared_recorded: [], declared_at_seq: null } });
     expect(noCounts(lines.at(-1))).toBe(`PASS${SCOPE}${pack.generated}`);
   });
 
