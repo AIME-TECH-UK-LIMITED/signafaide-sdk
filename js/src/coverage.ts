@@ -110,7 +110,7 @@ export function coverageLines(agent: string, c: Coverage): string[] {
   const unrecorded = c.declared.filter((t) => !t.recorded).map((t) => t.name);
   const out: string[] = [];
   if (!c.declared.length) out.push(`${agent}: the declared tool list is empty`);
-  else if (!unrecorded.length) out.push(`${agent}: all ${countIs(c.declared.length, "declared tool")} recorded`);
+  else if (!unrecorded.length) out.push(`${agent}: ${c.declared.length === 1 ? "the" : "all"} ${countIs(c.declared.length, "declared tool")} recorded`); // "the 1 declared tool is recorded"
   else out.push(`${agent}: ${countIs(unrecorded.length, "declared tool")} not recorded: ${unrecorded.join(", ")}`);
   if (c.undeclared_recorded.length) out.push(`${agent}: ${countIs(c.undeclared_recorded.length, "recorded tool")} not in the declared tool list: ${c.undeclared_recorded.join(", ")}`);
   return out;

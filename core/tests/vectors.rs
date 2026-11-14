@@ -265,7 +265,7 @@ fn tool_coverage_vectors() {
         ),
         ("a tool name too long for a declaration is cut and matched to its decision", vec!["agent-a: all 2 declared tools are recorded".into()], Some(1)),
         ("a tool declaration exported from after its header: the tool note left is ignored", vec![format!("agent-a: {none}")], None),
-        ("two agents: one declared its tools, the other did not", vec!["agent-a: all 1 declared tool is recorded".into(), format!("agent-b: {none}")], Some(1)),
+        ("two agents: one declared its tools, the other did not", vec!["agent-a: the 1 declared tool is recorded".into(), format!("agent-b: {none}")], Some(1)),
     ];
     let variants = v["variants"].as_array().unwrap();
     for (name, lines, at) in &want {

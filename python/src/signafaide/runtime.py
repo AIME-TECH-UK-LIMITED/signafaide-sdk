@@ -21,7 +21,7 @@ from .crypto import SigningKey, b64url, hash_json
 from .http import DEFAULT_URL, Client, SignafaideError
 from .records import (API_KEY_RE, AGENT_RE, INSTANCE_STOP, MAX_CLOCK_SKEW_MS, instance_stop_content, is_stop_note, agent_name, clamp_time, make_draft, make_record, now, parse_time, record_hash,
                       registration, valid_project_id, with_wall_time)
-from .state import PENDING, KeyProvider, State, StateError, agent_key_env_name, append_env_file, key_fingerprint, read_env_file, scope_of, wire_record
+from .state import TOOL_SOURCE_REFRESH_MS, PENDING, KeyProvider, State, StateError, agent_key_env_name, append_env_file, key_fingerprint, read_env_file, scope_of, wire_record
 from . import telemetry
 
 log = logging.getLogger("signafaide")
@@ -101,7 +101,9 @@ class Recorder:
         self._wrote: Set[str] = set()  # agents this process wrote records for since its last stop note
         self._told_strict = False
         #: (agent, source) -> the tool set this recorder last declared for it (§2.6), and the header's hash.
-        self._declared: Dict[Tuple[str, str], Tuple[str, str]] = {}
+        self._declared: Dict[Tuple[str, str], tuple] = {}
+        self._tool_thread: Optional[threading.Thread] = None  # refreshes tools/<agent>.json once an hour (§8)
+        self._tool_stop = threading.Event()
         self._url = url
         self._api_key = api_key
         self.store_content = store_content
@@ -404,10 +406,12 @@ class Recorder:
                 raise TypeError(f"a tool name must be a non-empty string without control characters (got {n!r})")
         sig = json.dumps([[n, bool(tools[n])] for n in names])
         held = self._declared.get((agent, source))
-        if held and held[0] == sig:
-            return held[1]
 
-        def write(union: Dict[str, bool]) -> str:
+        def write(union: Dict[str, bool], expired: bool) -> str:
+            # The same list as last time: only the entry's time is refreshed, unless a stopped
+            # source's tools just dropped out of the agent's list (§8), which is declared anew.
+            if held and held[0] == sig and not expired:
+                return held[1]
             # By declared name (a long name is cut, §2.6); two names cut to the same one keep the recorded form.
             by_name: Dict[str, Tuple[str, bool]] = {}
             for tool, recorded in union.items():
@@ -422,9 +426,42 @@ class Recorder:
             items += [("note", tool_note_name(tool, recorded), {"tool": tool, "recorded": recorded}, None) for tool, recorded in listed]
             return record_hash(self.write_run(items, agent=agent, store_content=store_content)[0])
 
-        h = self.state.declare_tools(agent, source, {n: bool(tools[n]) for n in names}, write)
-        self._declared[(agent, source)] = (sig, h)
+        own = {n: bool(tools[n]) for n in names}
+        h = self.state.declare_tools(agent, source, own, write)
+        self._declared[(agent, source)] = (sig, h, origin, own, store_content)
+        if self._tool_thread is None and not self._stopped:
+            self._tool_stop.clear()
+            self._tool_thread = threading.Thread(target=self._tool_loop, name="signafaide-tools", daemon=True)  # never keeps a finished program alive
+            self._tool_thread.start()
         return h
+
+    def _tool_loop(self) -> None:
+        while not self._tool_stop.wait(TOOL_SOURCE_REFRESH_MS / 1000):
+            self.refresh_tool_sources()
+
+    def refresh_tool_sources(self) -> None:
+        """Refresh this recorder's entries in ``tools/<agent>.json`` (§8): each gets the current
+        time, so other sources keep counting its tools, and entries of sources that stopped more
+        than 24 hours ago drop out. Nothing is written to the chain unless that changed the
+        agent's tool list. Runs by itself once an hour while the process lives. Never raises."""
+        for (agent, source), (_, _, origin, tools, store_content) in list(self._declared.items()):
+            try:
+                self.declare_tools(tools, source=source, origin=origin, agent=agent, store_content=store_content)
+            except Exception as e:  # noqa: BLE001
+                self._report(f"signafaide: could not refresh the tool list of {agent}: {e}")
+
+    def release_tool_sources(self) -> None:
+        """A clean end of this source (§8): its entries leave ``tools/<agent>.json``, so the next
+        declaration by any source no longer counts its tools. Nothing is written to the chain.
+        Never raises."""
+        self._tool_stop.set()
+        self._tool_thread = None
+        for agent, source in list(self._declared):
+            try:
+                self.state.release_tool_source(agent, source)
+            except Exception:  # noqa: BLE001  the 24-hour rule covers an entry that could not be removed
+                pass
+        self._declared.clear()
 
     def _write_bucket(self, api_key: Optional[str], agent: str) -> str:
         """Where *agent*'s next record goes. A known project whose chain for *agent* is not on
@@ -862,6 +899,7 @@ class Recorder:
 
         self._stopped = True
         self._wake.set()
+        self.release_tool_sources()  # a clean end: this program's tools leave the agent's tool list (§8)
         limit = self.exit_flush if timeout is None else timeout
         stop = self.instance_stop and bool(self._wrote) and not self.test
         if not limit or not self.api_key or not (self._waiting() or stop):
@@ -891,6 +929,8 @@ class Recorder:
         self._ship_lock = threading.Lock()
         self._wake = threading.Event()
         self._thread = None
+        self._tool_thread = None
+        self._tool_stop = threading.Event()
 
     # --- blocked chains and repair -------------------------------------------
 
@@ -1074,6 +1114,7 @@ def configure(**kwargs) -> Recorder:
         if _default is not None:
             _default._stopped = True
             _default._wake.set()
+            _default._tool_stop.set()
             atexit.unregister(_default.close)
         _default = Recorder(**kwargs)
         return _default

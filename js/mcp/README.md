@@ -27,6 +27,8 @@ tools are recorded.
 
 The gateway records every call that goes through it; a call the application makes around it is
 still not recorded, so the deployment has to make the gateway the only route to those tools. A
-declaration is the program's own statement of its tools, not proof that the list is complete.
+declaration is the program's own statement of its tools, not proof that the list is complete. A
+tool list is as fresh as its last declaration: a source that stops leaves the list at its clean
+exit, or within 24 hours after a crash.
 
 Apache-2.0. Source: the `js/` folder of the signafAIde SDK repository.

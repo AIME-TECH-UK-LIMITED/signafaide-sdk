@@ -29,6 +29,7 @@ import {
   type Receipt,
   type SignedRecord,
 } from "./records.js";
+import { TOOL_SOURCE_REFRESH_MS } from "./state.js";
 import { PENDING, State, StateError, agentKeyEnvName, monotonicMs, appendEnvFile, keyFingerprint, readEnvFile, scopeOf, type Base, type KeyProvider, type KeyScope } from "./state.js";
 import { adapterField, clientHeader, detectAgent, telemetryEnabled } from "./telemetry.js";
 import { TOOLS, byCodePoint, declaredName, toolNoteName } from "./coverage.js";
@@ -140,7 +141,8 @@ export class Recorder {
   private wrote = new Set<string>();
   private toldStrict = false;
   /** `<agent>\n<source>` -> the tool set this recorder last declared for it (§2.6), and the header's hash. */
-  private declared = new Map<string, { sig: string; hash: string }>();
+  private declared = new Map<string, { sig: string; hash: string; agent: string; source: string; origin: "gateway" | "wrap_tools" | "declared"; tools: Record<string, boolean>; storeContent?: boolean }>();
+  private toolTimer?: ReturnType<typeof setInterval>;
   /** @internal */ _url?: string;
   /** @internal */ _apiKey?: string;
   /** `<agent>\n<scope>` -> [key, the key file's identity when loaded] */
@@ -452,8 +454,10 @@ export class Recorder {
     const id = `${agent}\n${opts.source}`;
     const sig = JSON.stringify(names.map((n) => [n, tools[n]]));
     const held = this.declared.get(id);
-    if (held?.sig === sig) return held.hash;
-    const hash = this.state.declareTools(agent, opts.source, tools, (all) => {
+    const hash = this.state.declareTools(agent, opts.source, tools, (all, expired) => {
+      // The same list as last time: only the entry's time is refreshed, unless a stopped
+      // source's tools just dropped out of the agent's list (§8), which is declared anew.
+      if (held?.sig === sig && !expired) return held.hash;
       // By declared name (a long name is cut, §2.6); two names cut to the same one keep the recorded form.
       const byName = new Map<string, { tool: string; recorded: boolean }>();
       for (const [tool, recorded] of Object.entries(all)) {
@@ -469,8 +473,45 @@ export class Recorder {
       ];
       return recordHash(this.writeRun(items, { agent, storeContent: opts.storeContent })[0]);
     });
-    this.declared.set(id, { sig, hash });
+    this.declared.set(id, { sig, hash, agent, source: opts.source, origin: opts.origin, tools, storeContent: opts.storeContent });
+    if (!this.toolTimer && !this.closed) {
+      this.toolTimer = setInterval(() => this.refreshToolSources(), TOOL_SOURCE_REFRESH_MS);
+      this.toolTimer.unref?.(); // never keeps a finished program alive
+    }
     return hash;
+  }
+
+  /** Refresh this recorder's entries in `tools/<agent>.json` (§8): each gets the current time,
+   * so other sources keep counting its tools, and entries of sources that stopped more than 24
+   * hours ago drop out. Nothing is written to the chain unless that changed the agent's tool
+   * list. Runs by itself once an hour while the process lives. Never throws. */
+  refreshToolSources(): void {
+    for (const d of [...this.declared.values()]) {
+      try {
+        this.declareTools(d.tools, { agent: d.agent, source: d.source, origin: d.origin, storeContent: d.storeContent });
+      } catch (e) {
+        this.report(`signafaide: could not refresh the tool list of ${d.agent}: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  /** A clean end of this source (§8): its entries leave `tools/<agent>.json`, so the next
+   * declaration by any source no longer counts its tools. Nothing is written to the chain. With
+   * `source`, only that source ends (a gateway run inside another program). Never throws. */
+  releaseToolSources(source?: string): void {
+    for (const [id, d] of [...this.declared]) {
+      if (source !== undefined && d.source !== source) continue;
+      try {
+        this.state.releaseToolSource(d.agent, d.source);
+      } catch {
+        /* the 24-hour rule covers an entry that could not be removed */
+      }
+      this.declared.delete(id);
+    }
+    if (!this.declared.size && this.toolTimer) {
+      clearInterval(this.toolTimer);
+      this.toolTimer = undefined;
+    }
   }
 
   /** Where `agent`'s next record goes. A known project whose chain for `agent` is not on this
@@ -945,6 +986,7 @@ export class Recorder {
    * background timer. Never throws. */
   async shutdown(): Promise<void> {
     await this.exitAttempt();
+    this.releaseToolSources();
     this.close();
   }
 
@@ -973,6 +1015,7 @@ export class Recorder {
   }
 
   private onExit = (): void => {
+    this.releaseToolSources(); // a clean end: this program's tools leave the agent's tool list (§8)
     const left = this.waiting();
     if (left && !this.quiet && this.apiKey) {
       console.error(`signafaide: ${plural(left, "record")} kept in ${path.join(this.state.home, "outbox")}; they ship on the next run or with \`signafaide flush\``);
@@ -982,6 +1025,8 @@ export class Recorder {
   /** Stop the background timer and exit hooks (records stay in the outbox). */
   close(): void {
     this.closed = true;
+    if (this.toolTimer) clearInterval(this.toolTimer);
+    this.toolTimer = undefined;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     this.bgAbort.abort();

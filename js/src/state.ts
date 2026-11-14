@@ -59,6 +59,10 @@ export function fsError(e: unknown, home: string): Error {
   }
   return e as Error;
 }
+/** A source refreshes its entry in `tools/<agent>.json` at least this often while it runs (§8). */
+export const TOOL_SOURCE_REFRESH_MS = 3_600_000;
+/** An entry another source has not refreshed for this long is dropped: that source has stopped (§8). */
+export const TOOL_SOURCE_MAX_AGE_MS = 86_400_000;
 const LOCK_STALE_MS = 10_000;
 const LOCK_WAIT_MS = 15_000;
 export const PENDING = "_pending";
@@ -821,34 +825,63 @@ export class State {
 
   /** The tools every source last declared for `agent`: source -> {tool name: recorded}. */
   toolSources(agent: string): Record<string, Record<string, boolean>> {
+    return Object.fromEntries(Object.entries(this.toolEntries(agent)).map(([src, e]) => [src, e.tools]));
+  }
+
+  /** The entries of `tools/<agent>.json`: source -> when it last declared or refreshed, and its tools. */
+  toolEntries(agent: string): Record<string, { at: string; tools: Record<string, boolean> }> {
     const doc = readJson<{ sources?: unknown }>(this.toolsPath(agent));
-    const out: Record<string, Record<string, boolean>> = {};
+    const out: Record<string, { at: string; tools: Record<string, boolean> }> = {};
     const sources = doc?.sources;
     if (!sources || typeof sources !== "object" || Array.isArray(sources)) return out;
     for (const [src, entry] of Object.entries(sources as Record<string, any>)) {
       const tools = entry?.tools;
       if (!tools || typeof tools !== "object" || Array.isArray(tools)) continue;
-      out[src] = Object.fromEntries(Object.entries(tools).filter(([, v]) => typeof v === "boolean")) as Record<string, boolean>;
+      out[src] = { at: typeof entry.at === "string" ? entry.at : "", tools: Object.fromEntries(Object.entries(tools).filter(([, v]) => typeof v === "boolean")) as Record<string, boolean> };
     }
     return out;
+  }
+
+  /** A source that ends cleanly takes its own entry out of `tools/<agent>.json`, so the next
+   * declaration by any source no longer counts its tools (§8). Nothing is written to the chain. */
+  releaseToolSource(agent: string, source: string): void {
+    const file = this.toolsPath(agent);
+    if (!fs.existsSync(file)) return;
+    this.lockAt(path.join(this.home, "tools", `${agent}.lock`), () => {
+      const entries = this.toolEntries(agent);
+      if (!(source in entries)) return;
+      delete entries[source];
+      writeJson(file, { sources: entries });
+    });
   }
 
   /** Set the tools `source` declares for `agent` and call `write` with the agent's whole tool
    * list: the union over every source, a tool recorded when any source records it (§8). Held
    * under `tools/<agent>.lock`, so two sources never write declarations that miss each other's
-   * tools. The file is updated only when `write` returns. */
-  declareTools<T>(agent: string, source: string, tools: Record<string, boolean>, write: (all: Record<string, boolean>) => T): T {
+   * tools. The source's own entry gets the time `nowMs`; another source's entry not refreshed for
+   * `TOOL_SOURCE_MAX_AGE_MS` is dropped (that source has stopped), and `expired` tells `write`
+   * whether dropping changed the agent's tool list. The file is updated only when `write` returns. */
+  declareTools<T>(agent: string, source: string, tools: Record<string, boolean>, write: (all: Record<string, boolean>, expired: boolean) => T, nowMs = Date.now()): T {
     this.ensure();
     const file = this.toolsPath(agent);
     return this.lockAt(path.join(this.home, "tools", `${agent}.lock`), () => {
-      const sources = { ...this.toolSources(agent), [source]: tools };
-      const all: Record<string, boolean> = {};
-      for (const src of Object.keys(sources).sort()) for (const [name, recorded] of Object.entries(sources[src])) all[name] = all[name] === true || recorded;
-      const out = write(all);
-      const at = now();
-      const old = (readJson<{ sources?: Record<string, { at?: string }> }>(file)?.sources ?? {}) as Record<string, { at?: string }>;
+      const union = (entries: Record<string, { tools: Record<string, boolean> }>): Record<string, boolean> => {
+        const all: Record<string, boolean> = {};
+        for (const src of Object.keys(entries).sort()) for (const [name, recorded] of Object.entries(entries[src].tools)) all[name] = all[name] === true || recorded;
+        return all;
+      };
+      const sorted = (all: Record<string, boolean>): string => JSON.stringify(Object.keys(all).sort().map((n) => [n, all[n]]));
+      const held = { ...this.toolEntries(agent), [source]: { at: new Date(nowMs).toISOString(), tools } };
+      const live = Object.fromEntries(
+        Object.entries(held).filter(([src, e]) => {
+          const at = Date.parse(e.at);
+          return src === source || (Number.isFinite(at) && nowMs - at <= TOOL_SOURCE_MAX_AGE_MS);
+        }),
+      );
+      const all = union(live);
+      const out = write(all, sorted(all) !== sorted(union(held)));
       try {
-        writeJson(file, { sources: Object.fromEntries(Object.entries(sources).map(([src, t]) => [src, { at: src === source ? at : (old[src]?.at ?? at), tools: t }])) });
+        writeJson(file, { sources: live });
       } catch (e) {
         throw fsError(e, this.home);
       }

@@ -106,7 +106,7 @@ signafaide.declare_tools(["refund", "lookup_order", "web_search"], agent="suppor
 
 `signafaide verify` then has a coverage line for each agent: `all 3 declared tools are recorded`, or `1 declared tool is not recorded: web_search`, or that no tool list was declared. It is a note, never a failure. A declaration is one signed note for the list and one for each tool in the agent's chain, so n tools are n + 1 records, counted like every other record, each time a process starts or the list changes. `declare_tools=False` or `SIGNAFAIDE_DECLARE_TOOLS=0` turns off the one `wrap_tools` writes.
 
-What this shows, and what it does not. The gateway records every call that goes through it; a call the application makes around it is still not recorded, so the deployment has to make the gateway the only route to those tools. A declaration is the program's own signed statement of its tools: evidence of what it said it had, not proof that the list is complete.
+What this shows, and what it does not. The gateway records every call that goes through it; a call the application makes around it is still not recorded, so the deployment has to make the gateway the only route to those tools. A declaration is the program's own signed statement of its tools: evidence of what it said it had, not proof that the list is complete. A tool list is as fresh as its last declaration: a source that stops (a gateway that is removed, a program that ends) leaves the list at its clean exit, or within 24 hours after a crash.
 
 ## Strict mode: no receipt, no action
 

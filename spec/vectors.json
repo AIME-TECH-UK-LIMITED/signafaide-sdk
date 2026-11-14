@@ -25723,7 +25723,7 @@
           }
         },
         "coverage_lines": [
-          "agent-a: all 1 declared tool is recorded",
+          "agent-a: the 1 declared tool is recorded",
           "agent-b: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",

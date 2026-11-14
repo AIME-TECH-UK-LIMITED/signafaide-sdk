@@ -407,6 +407,9 @@ class Gateway {
         this.calls.clear();
         if (!this.off) this.declareShown();
         try {
+          // A clean end: this gateway's tools leave the agent's tool list (§8), so no later
+          // declaration counts a server that is no longer behind a gateway.
+          this.rec.releaseToolSources(this.source);
           if (!this.opts.recorder) await this.rec.shutdown(); // ships what is left; the stop note as the runtime writes it
         } catch (e) {
           this.diag((e as Error).message);

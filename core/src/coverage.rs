@@ -138,7 +138,9 @@ pub fn coverage_lines(agent: &str, c: &Coverage) -> Vec<String> {
     if c.declared.is_empty() {
         out.push(format!("{agent}: the declared tool list is empty"));
     } else if unrecorded.is_empty() {
-        out.push(format!("{agent}: all {} recorded", count_is(c.declared.len(), "declared tool", "declared tools")));
+        // One tool: "the 1 declared tool is recorded".
+        let all = if c.declared.len() == 1 { "the" } else { "all" };
+        out.push(format!("{agent}: {all} {} recorded", count_is(c.declared.len(), "declared tool", "declared tools")));
     } else {
         out.push(format!("{agent}: {} not recorded: {}", count_is(unrecorded.len(), "declared tool", "declared tools"), unrecorded.join(", ")));
     }

@@ -37,13 +37,16 @@ Recording everything an agent can call: the gateway for MCP tools, and tool decl
   changes; they are ordinary records and count towards the quota. `declare_tools=False`,
   `declareTools: false` or `SIGNAFAIDE_DECLARE_TOOLS=0` turns it off.
 - The verifiers (Rust, Python, TypeScript) report tool coverage per agent, as notes that never
-  fail a pack: `coverage: <agent>: all 4 declared tools are recorded`, `... 1 declared tool is not
+  fail a pack: `coverage: <agent>: all 4 declared tools are recorded` (`the 1 declared tool is recorded` for one), `... 1 declared tool is not
   recorded: web_search`, `... 2 recorded tools are not in the declared tool list: ...`, or that no
   tool list was declared. The JSON output has a `coverage` object. The Rust core has
   `signafaide_core::coverage` for the same result from envelopes alone.
 - Local state: `.signafaide/tools/<agent>.json` keeps the tools each source (the application, each
   gateway) last declared, so every declaration lists the agent's whole tool list. The Python and
-  TypeScript SDKs share the format.
+  TypeScript SDKs share the format. A running source refreshes its entry every hour; a source
+  that ends cleanly removes its entry, and an entry not refreshed for 24 hours is dropped, with a
+  new declaration when that changes the list. So a gateway that was removed does not stay in
+  later declarations as recorded.
 - Spec: section 2.6 (tool declarations), tool coverage in section 7, the client rules and the
   gateway in section 8, `via=gateway` in the client header. Vectors: eight new variants, a
   `tool_names` list, and `expect.coverage` and `expect.coverage_lines` on the pack and every

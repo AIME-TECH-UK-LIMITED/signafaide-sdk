@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
@@ -65,6 +66,12 @@ def scope_of(bucket: str) -> str:
 def agent_key_env_name(agent: str, scope: str = "") -> str:
     """``SIGNAFAIDE_AGENT_KEY_<NAME>``: an agent's key file content from the environment or a secret store."""
     return "SIGNAFAIDE_AGENT_KEY_" + ("LIVE_" if scope else "") + "".join(c if c.isalnum() else "_" for c in agent.upper())
+
+
+#: A source refreshes its entry in ``tools/<agent>.json`` at least this often while it runs (§8).
+TOOL_SOURCE_REFRESH_MS = 3_600_000
+#: An entry another source has not refreshed for this long is dropped: that source has stopped (§8).
+TOOL_SOURCE_MAX_AGE_MS = 86_400_000
 
 
 class StateError(Exception):
@@ -696,39 +703,73 @@ class State:
 
     def tool_sources(self, agent: str) -> Dict[str, Dict[str, bool]]:
         """The tools every source last declared for *agent*: source -> {tool name: recorded}."""
+        return {src: e["tools"] for src, e in self.tool_entries(agent).items()}
+
+    def tool_entries(self, agent: str) -> Dict[str, dict]:
+        """The entries of ``tools/<agent>.json``: source -> ``{"at", "tools"}`` (when it last
+        declared or refreshed, and its tools)."""
         doc = _read_json(self.tools_path(agent)) or {}
         sources = doc.get("sources") if isinstance(doc, dict) else None
-        out: Dict[str, Dict[str, bool]] = {}
+        out: Dict[str, dict] = {}
         if not isinstance(sources, dict):
             return out
         for src, entry in sources.items():
             tools = entry.get("tools") if isinstance(entry, dict) else None
             if isinstance(tools, dict):
-                out[src] = {k: v for k, v in tools.items() if isinstance(v, bool)}
+                at = entry.get("at")
+                out[src] = {"at": at if isinstance(at, str) else "", "tools": {k: v for k, v in tools.items() if isinstance(v, bool)}}
         return out
 
-    def declare_tools(self, agent: str, source: str, tools: Dict[str, bool], write: Callable[[Dict[str, bool]], Any]) -> Any:
+    def release_tool_source(self, agent: str, source: str) -> None:
+        """A source that ends cleanly takes its own entry out of ``tools/<agent>.json``, so the
+        next declaration by any source no longer counts its tools (§8). Nothing is written to the
+        chain."""
+        path = self.tools_path(agent)
+        if not path.exists():
+            return
+        with self._lock_at(self.home / "tools" / f"{agent}.lock"):
+            entries = self.tool_entries(agent)
+            if source in entries:
+                del entries[source]
+                _write_json(path, {"sources": entries})
+
+    def declare_tools(self, agent: str, source: str, tools: Dict[str, bool], write: Callable[[Dict[str, bool], bool], Any], now_ms: Optional[int] = None) -> Any:
         """Set the tools *source* declares for *agent* and call ``write`` with the agent's whole
         tool list: the union over every source, a tool recorded when any source records it (§8).
         Held under ``tools/<agent>.lock``, so two sources never write declarations that miss each
-        other's tools. The file is updated only when ``write`` returns."""
+        other's tools. The source's own entry gets the time *now_ms*; another source's entry not
+        refreshed for ``TOOL_SOURCE_MAX_AGE_MS`` is dropped (that source has stopped), and the
+        second argument of ``write`` says whether dropping changed the agent's tool list. The file
+        is updated only when ``write`` returns."""
         self.ensure()
         path = self.tools_path(agent)
-        with self._lock_at(self.home / "tools" / f"{agent}.lock"):
-            sources = {**self.tool_sources(agent), source: dict(tools)}
-            union: Dict[str, bool] = {}
-            for src in sorted(sources):
-                for name, recorded in sources[src].items():
-                    union[name] = union.get(name) is True or recorded
-            out = write(union)
-            at = now()
-            doc = _read_json(path) or {}
-            old = doc.get("sources") if isinstance(doc.get("sources"), dict) else {}
+        if now_ms is None:
+            now_ms = int(time.time() * 1000)
+
+        def union(entries: Dict[str, dict]) -> Dict[str, bool]:
+            out: Dict[str, bool] = {}
+            for src in sorted(entries):
+                for name, recorded in entries[src]["tools"].items():
+                    out[name] = out.get(name) is True or recorded
+            return out
+
+        def fresh(src: str, entry: dict) -> bool:
+            if src == source:
+                return True
             try:
-                _write_json(path, {"sources": {
-                    src: {"at": at if src == source else ((old.get(src) or {}).get("at") if isinstance(old.get(src), dict) else None) or at, "tools": t}
-                    for src, t in sources.items()
-                }})
+                at = parse_time(entry["at"])
+            except Exception:
+                return False
+            return now_ms - int(at.timestamp() * 1000) <= TOOL_SOURCE_MAX_AGE_MS
+
+        with self._lock_at(self.home / "tools" / f"{agent}.lock"):
+            at = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{now_ms % 1000:03d}Z"
+            held = {**self.tool_entries(agent), source: {"at": at, "tools": dict(tools)}}
+            live = {src: e for src, e in held.items() if fresh(src, e)}
+            everything = union(live)
+            out = write(everything, everything != union(held))
+            try:
+                _write_json(path, {"sources": live})
             except OSError as e:
                 raise fs_error(e, self.home) from None
             return out

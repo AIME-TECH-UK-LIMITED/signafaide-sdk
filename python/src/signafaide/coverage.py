@@ -98,7 +98,8 @@ def coverage_lines(agent: str, c: dict) -> List[str]:
     if not c["declared"]:
         out.append(f"{agent}: the declared tool list is empty")
     elif not unrecorded:
-        out.append(f"{agent}: all {_count_is(len(c['declared']), 'declared tool')} recorded")
+        # One tool: "the 1 declared tool is recorded".
+        out.append(f"{agent}: {'the' if len(c['declared']) == 1 else 'all'} {_count_is(len(c['declared']), 'declared tool')} recorded")
     else:
         out.append(f"{agent}: {_count_is(len(unrecorded), 'declared tool')} not recorded: {', '.join(unrecorded)}")
     if c["undeclared_recorded"]:

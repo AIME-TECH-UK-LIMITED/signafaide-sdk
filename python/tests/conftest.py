@@ -54,6 +54,7 @@ def _recorder(service, monkeypatch, opt_in: bool):
 def _stop(r):
     r._stopped = True
     r._wake.set()
+    r._tool_stop.set()
     atexit.unregister(r.close)
     runtime._default = None
 

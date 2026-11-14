@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -21,6 +22,7 @@ def end(rec):
     """Stop a recorder a test made itself (its shipper thread and exit hook)."""
     rec._stopped = True
     rec._wake.set()
+    rec._tool_stop.set()
     atexit.unregister(rec.close)
 
 
@@ -283,3 +285,103 @@ def test_a_declaration_is_one_uninterrupted_run(local_recorder, project):
     assert [r["envelope"]["seq"] for r in everything] == list(range(1, len(everything) + 1))
     assert sum(1 for r in everything if tool_note(r["envelope"]["kind"], r["envelope"]["name"])) == runs * 26
     assert verify_local(local_recorder.state, []).ok
+
+
+# --- the agent's tool list stays fresh (SPEC §8) -------------------------------------------
+
+HOUR = 3_600_000
+
+
+def ago(ms):
+    t = datetime.now(timezone.utc) - timedelta(milliseconds=ms)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{t.microsecond // 1000:03d}Z"
+
+
+def leave(rec, sources):
+    """Write tools/<agent>.json as other sources left it."""
+    path = rec.state.tools_path("claims-project")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"sources": sources}))
+
+
+def entries(rec, agent="claims-project"):
+    return json.loads(rec.state.tools_path(agent).read_text())["sources"]
+
+
+def age_ms(at):
+    return (datetime.now(timezone.utc) - datetime.strptime(at, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)).total_seconds() * 1000
+
+
+def test_the_two_durations():
+    assert (signafaide.TOOL_SOURCE_REFRESH_MS, signafaide.TOOL_SOURCE_MAX_AGE_MS) == (HOUR, 24 * HOUR)
+
+
+def test_a_declaration_drops_a_stale_source_and_keeps_a_fresh_one(local_recorder):
+    live_at = ago(23 * HOUR)
+    leave(local_recorder, {
+        "gateway:gone": {"at": ago(25 * HOUR), "tools": {"gone.delete": True}},
+        "gateway:live": {"at": live_at, "tools": {"live.read": True}},
+        "gateway:broken": {"at": "not a time", "tools": {"broken.x": True}},
+    })
+    signafaide.wrap_tools({"refund": lambda: 1})["refund"]()
+    assert names(local_recorder) == ["note:signafaide.tools", "note:signafaide.tool/live.read", "note:signafaide.tool/refund", "decision:refund", "outcome:refund"]
+    got = entries(local_recorder)
+    assert sorted(got) == ["gateway:live", "sdk"]
+    assert got["gateway:live"]["at"] == live_at  # another source's time is not touched
+    assert age_ms(got["sdk"]["at"]) < 60_000
+    assert coverage(local_recorder) == ["claims-project: all 2 declared tools are recorded"]
+
+
+def test_refresh_updates_the_time_and_a_stopped_source_drops_out_with_a_new_declaration(local_recorder):
+    rec = local_recorder
+    leave(rec, {"gateway:old": {"at": ago(2 * HOUR), "tools": {"old.delete": True}}})
+    signafaide.wrap_tools({"refund": lambda: 1})["refund"]()
+    assert names(rec)[:3] == ["note:signafaide.tools", "note:signafaide.tool/old.delete", "note:signafaide.tool/refund"]
+    # Nothing changed: a refresh touches the file only.
+    got = entries(rec)
+    leave(rec, {**got, "sdk": {**got["sdk"], "at": ago(2 * HOUR)}})
+    rec.refresh_tool_sources()
+    assert age_ms(entries(rec)["sdk"]["at"]) < 60_000 and len(names(rec)) == 5
+    # The gateway stopped without a clean exit: 25 hours later its entry is dropped at the next refresh.
+    got = entries(rec)
+    leave(rec, {**got, "gateway:old": {**got["gateway:old"], "at": ago(25 * HOUR)}})
+    rec.refresh_tool_sources()
+    assert sorted(entries(rec)) == ["sdk"]
+    assert names(rec)[5:] == ["note:signafaide.tools", "note:signafaide.tool/refund"]
+    assert chain(rec)[5]["content"] == {"source": "wrap_tools", "tools": 1, "recorded": 1, "unrecorded": 0}
+    rec.refresh_tool_sources()  # and only once
+    assert len(names(rec)) == 7
+    assert coverage(rec) == ["claims-project: the 1 declared tool is recorded"]
+
+
+def test_an_expired_source_whose_tools_are_still_declared_changes_nothing_in_the_chain(local_recorder):
+    leave(local_recorder, {"gateway:old": {"at": ago(30 * HOUR), "tools": {"refund": True}}})
+    signafaide.wrap_tools({"refund": lambda: 1})["refund"]()
+    assert names(local_recorder) == ["note:signafaide.tools", "note:signafaide.tool/refund", "decision:refund", "outcome:refund"]
+    leave(local_recorder, {**entries(local_recorder), "gateway:other": {"at": ago(30 * HOUR), "tools": {"refund": True}}})
+    local_recorder.refresh_tool_sources()
+    assert sorted(entries(local_recorder)) == ["sdk"] and len(names(local_recorder)) == 4
+
+
+def test_a_clean_shutdown_removes_the_own_entry_and_writes_nothing(local_recorder):
+    rec = local_recorder
+    leave(rec, {"gateway:live": {"at": ago(HOUR), "tools": {"live.read": True}}})
+    signafaide.declare_tools(["refund"], unrecorded=["refund"])
+    assert sorted(entries(rec)) == ["gateway:live", "sdk"]
+    assert rec._tool_thread is not None and rec._tool_thread.daemon  # the hourly refresh never keeps the program alive
+    before = len(names(rec))
+    rec.close(0)  # what the program's normal exit runs
+    assert sorted(entries(rec)) == ["gateway:live"] and len(names(rec)) == before
+    assert rec._tool_stop.is_set()
+    rec.refresh_tool_sources()  # nothing left to refresh: the entry does not come back
+    assert sorted(entries(rec)) == ["gateway:live"]
+
+
+def test_a_program_that_ends_is_not_held_by_the_refresh_and_removes_its_entry(local_recorder, project):
+    code = ("import signafaide\nfrom signafaide import runtime\nsignafaide.declare_tools(['b'], agent='child-bot')\n"
+            "print(runtime.get().state.tools_path('child-bot').read_text())\n")
+    p = subprocess.run([sys.executable, "-c", code], cwd=project, env={**os.environ, "SIGNAFAIDE_TEST": "0"}, capture_output=True, text=True, timeout=30)
+    assert p.returncode == 0, p.stderr
+    assert sorted(json.loads(p.stdout)["sources"]) == ["sdk"]  # while it ran
+    assert local_recorder.state.tool_sources("child-bot") == {}  # after its normal exit
+

@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { toolNote, toolNoteName } from "../src/coverage.js";
-import { autoDeclareTools, declareTools, flush, note, record, verify, wrapTool, wrapTools } from "../src/index.js";
+import { TOOL_SOURCE_MAX_AGE_MS, TOOL_SOURCE_REFRESH_MS, autoDeclareTools, declareTools, flush, note, record, verify, wrapTool, wrapTools } from "../src/index.js";
 import { parseJson } from "../src/jcs.js";
 import { recordHash } from "../src/records.js";
 import { Recorder, configure, getRecorder } from "../src/runtime.js";
@@ -256,5 +256,102 @@ describe("declarations in the chain", () => {
     expect(all.map((r) => r.envelope.seq)).toEqual(all.map((_, i) => i + 1));
     expect(all.filter((r) => toolNote(r.envelope.kind, r.envelope.name)).length).toBe(runs * 26);
     expect((await verify()).ok).toBe(true);
+  });
+});
+
+describe("the agent's tool list stays fresh (SPEC §8)", () => {
+  const HOUR = 3_600_000;
+  const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+  const file = () => getRecorder().state.toolsPath("claims-project");
+  /** Write tools/<agent>.json as other sources left it. */
+  const leave = (sources: Record<string, { at: string; tools: Record<string, boolean> }>): void => {
+    fs.mkdirSync(path.dirname(file()), { recursive: true });
+    fs.writeFileSync(file(), JSON.stringify({ sources }));
+  };
+  const entries = () => JSON.parse(fs.readFileSync(file(), "utf8")).sources as Record<string, { at: string; tools: Record<string, boolean> }>;
+
+  it("the two durations are an hour and 24 hours", () => {
+    expect([TOOL_SOURCE_REFRESH_MS, TOOL_SOURCE_MAX_AGE_MS]).toEqual([HOUR, 24 * HOUR]);
+  });
+
+  it("a declaration drops a source not refreshed for more than 24 hours, and keeps a fresh one", async () => {
+    const liveAt = ago(23 * HOUR);
+    leave({
+      "gateway:gone": { at: ago(25 * HOUR), tools: { "gone.delete": true } },
+      "gateway:live": { at: liveAt, tools: { "live.read": true } },
+      "gateway:broken": { at: "not a time", tools: { "broken.x": true } },
+    });
+    wrapTools({ refund: () => 1 }).refund();
+    expect(names()).toEqual(["note:signafaide.tools", "note:signafaide.tool/live.read", "note:signafaide.tool/refund", "decision:refund", "outcome:refund"]);
+    expect(Object.keys(entries())).toEqual(["gateway:live", "sdk"]);
+    expect(entries()["gateway:live"].at).toBe(liveAt); // another source's time is not touched
+    expect(Date.now() - Date.parse(entries().sdk.at)).toBeLessThan(60_000);
+    expect(await coverage()).toEqual(["claims-project: all 2 declared tools are recorded"]);
+  });
+
+  it("a refresh updates the own entry's time; a source that stopped drops out, with a new declaration without its tools", async () => {
+    const rec = getRecorder();
+    leave({ "gateway:old": { at: ago(2 * HOUR), tools: { "old.delete": true } } });
+    wrapTools({ refund: () => 1 }).refund();
+    expect(names().slice(0, 3)).toEqual(["note:signafaide.tools", "note:signafaide.tool/old.delete", "note:signafaide.tool/refund"]);
+    // Nothing changed: a refresh touches the file only.
+    leave({ ...entries(), sdk: { ...entries().sdk, at: ago(2 * HOUR) } });
+    rec.refreshToolSources();
+    expect(Date.now() - Date.parse(entries().sdk.at)).toBeLessThan(60_000);
+    expect(names()).toHaveLength(5);
+    // The gateway stopped without a clean exit: 25 hours later its entry is dropped at the next refresh.
+    leave({ ...entries(), "gateway:old": { ...entries()["gateway:old"], at: ago(25 * HOUR) } });
+    rec.refreshToolSources();
+    expect(Object.keys(entries())).toEqual(["sdk"]);
+    expect(names().slice(5)).toEqual(["note:signafaide.tools", "note:signafaide.tool/refund"]);
+    expect(chain()[5].content).toEqual({ source: "wrap_tools", tools: 1, recorded: 1, unrecorded: 0 });
+    rec.refreshToolSources(); // and only once
+    expect(names()).toHaveLength(7);
+    expect(await coverage()).toEqual(["claims-project: the 1 declared tool is recorded"]);
+  });
+
+  it("an expired source whose tools another source still declares changes nothing in the chain", () => {
+    leave({ "gateway:old": { at: ago(30 * HOUR), tools: { refund: true } } });
+    wrapTools({ refund: () => 1 }).refund();
+    expect(names()).toEqual(["note:signafaide.tools", "note:signafaide.tool/refund", "decision:refund", "outcome:refund"]);
+    leave({ ...entries(), "gateway:other": { at: ago(30 * HOUR), tools: { refund: true } } });
+    getRecorder().refreshToolSources();
+    expect(Object.keys(entries())).toEqual(["sdk"]);
+    expect(names()).toHaveLength(4);
+  });
+
+  it("a clean shutdown removes the own entry and writes nothing to the chain", async () => {
+    leave({ "gateway:live": { at: ago(HOUR), tools: { "live.read": true } } });
+    const rec = getRecorder();
+    declareTools(["refund"], { unrecorded: ["refund"] });
+    expect(Object.keys(entries())).toEqual(["gateway:live", "sdk"]);
+    const before = names().length;
+    await rec.shutdown();
+    expect(Object.keys(entries())).toEqual(["gateway:live"]);
+    expect(names()).toHaveLength(before);
+    rec.refreshToolSources(); // nothing left to refresh: the entry does not come back
+    expect(Object.keys(entries())).toEqual(["gateway:live"]);
+  });
+
+  it("the hourly refresh never keeps a program alive, and a program that ends removes its entry", async () => {
+    const rec = getRecorder();
+    declareTools(["a"]);
+    const timer = (rec as unknown as { toolTimer?: NodeJS.Timeout }).toolTimer;
+    expect(timer?.hasRef()).toBe(false);
+    rec.close();
+    expect((rec as unknown as { toolTimer?: NodeJS.Timeout }).toolTimer).toBeUndefined();
+
+    const dist = path.resolve(__dirname, "../dist/index.js");
+    if (!fs.existsSync(dist)) throw new Error(`${dist} is not built: run \`npm run build\` in js/ (\`npm test\` does)`);
+    const script = `import * as fs from "node:fs";\nimport { declareTools, getRecorder } from ${JSON.stringify(dist)};\ndeclareTools(["b"], { agent: "child-bot" });\nconsole.log(fs.readFileSync(getRecorder().state.toolsPath("child-bot"), "utf8"));\n`;
+    fs.writeFileSync(path.join(ctx.root, "declare.mjs"), script);
+    const started = Date.now();
+    const child = spawn(process.execPath, [path.join(ctx.root, "declare.mjs")], { cwd: ctx.root, env: { PATH: process.env.PATH ?? "", SIGNAFAIDE_TEST: "0" } });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    expect(await new Promise((r) => child.on("close", r))).toBe(0);
+    expect(Date.now() - started).toBeLessThan(10_000); // an hourly timer that held the process would time this test out
+    expect(Object.keys(JSON.parse(out).sources)).toEqual(["sdk"]); // while it ran
+    expect(getRecorder().state.toolSources("child-bot")).toEqual({}); // after its normal exit
   });
 });

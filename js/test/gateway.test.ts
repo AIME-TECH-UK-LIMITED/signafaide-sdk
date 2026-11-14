@@ -349,14 +349,25 @@ describe("gateway: names", () => {
   it("two gateways of one agent: each keeps its own tools in the agent's list", async () => {
     const a = new Session({ namePrefix: "a." }, { FAKE_TOOLS: JSON.stringify(["read"]) });
     await a.list(1);
-    await a.close();
     const b = new Session({ namePrefix: "b." }, { FAKE_TOOLS: JSON.stringify(["write"]) });
     await b.list(1);
     b.call(2, "write");
     await b.answer(2);
-    await b.close();
     expect(names()).toEqual(["note:signafaide.tools", "note:signafaide.tool/a.read", "note:signafaide.tools", "note:signafaide.tool/a.read", "note:signafaide.tool/b.write", "decision:b.write", "outcome:b.write"]);
+    expect(Object.keys(ctx.rec.state.toolSources(AGENT))).toEqual(["gateway:a.", "gateway:b."]);
     expect((await verify()).coverageLines()).toEqual([`_pending/nokey/${AGENT}: all 2 declared tools are recorded`]);
+
+    // A gateway that ends leaves the agent's tool list: the next declaration no longer counts
+    // its tools as recorded (its server may now be called with no gateway in front).
+    await a.close();
+    expect(Object.keys(ctx.rec.state.toolSources(AGENT))).toEqual(["gateway:b."]);
+    expect(names()).toHaveLength(7); // ending writes nothing to the chain
+    const c = new Session({ namePrefix: "c." }, { FAKE_TOOLS: JSON.stringify(["search"]) });
+    await c.list(1);
+    expect(names().slice(7)).toEqual(["note:signafaide.tools", "note:signafaide.tool/b.write", "note:signafaide.tool/c.search"]);
+    await b.close();
+    await c.close();
+    expect(ctx.rec.state.toolSources(AGENT)).toEqual({});
   });
 });
 
