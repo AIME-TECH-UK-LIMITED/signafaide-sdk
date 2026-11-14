@@ -21774,6 +21774,335 @@
         ]
       },
       "service_keys_plain_http": true
+    },
+    {
+      "expect": {
+        "chain_note": "a new instance continued the chain, so records an earlier instance wrote but had not sent are not known: agent-a after seq 2",
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "pass",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "result": "PASS",
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      },
+      "name": "a new instance continued the chain after seq 2 (an instance-start note)",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEI2gDB1/Vn6yBF5zHecXTbX5+3df1FhblwVDD3LWR/jXjwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "0d2d1d7eda54830c6fc59f63de6f560906c92b26af8fdd85cfd2251cc068cf68",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "lOnUAsADWxcakjZSy9EQVHvV9rrtZK4MwUs4nLKt4fQ14DaYY0EAstvEugtLpZnTpiykHGVpK6OpgrqeSJQtCg",
+            "paths": {
+              "06ed5232d8dc836a68c97a78593395871bb834010f8e4b815ad38359c1c74658": {
+                "index": 0,
+                "path": [
+                  "69ac247703e68cf15aaf9b925563978cb29f90588ef59a015d347b57b38a1b2f"
+                ]
+              },
+              "8332718408e9ef136dd72bc1d954d3630befd8cba969f4552cdac324c5ec5443": {
+                "index": 1,
+                "path": [
+                  "ef36c7c657d5a9570f711d3faa9bbca73a2ad053147bdb8e191f20130733c12a"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "q_gS6xKlrt-WRn7Qbm3TQDpe_eXR58hfWqZVRM0OvxLK24tGCHiUKBfu3uggPKD9ZeE9-4u8ed_3PIZ2qJAGCw",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "decb530f911bba8cb7ece3ebae68d61cfab95ee052c0233a330927496a5f93c0",
+              "seq": 4,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "mYwbc4pxRN8my7dxcKqlHcZ-whG2F6EBOsOwMpfVezBaRSPclXU0kIdaq_fQKJeBcTTyjr4jA6W_CRojVj7OBQ"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "content": {
+              "input": {
+                "amount": 1250.5,
+                "invoice": "INV-1001"
+              },
+              "meta": {
+                "big": 1e+21,
+                "ratio": 0.1,
+                "tags": [
+                  "finance",
+                  "été",
+                  "😀"
+                ],
+                "zero": -0.0
+              },
+              "model": "model-x",
+              "output": {
+                "approved": true
+              },
+              "reason": "Within the approval limit."
+            },
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "76c901c607c2cc0cf5d5bb5438ed08de78a5c5d02e94402330e02acbffc09583",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "bc407548b5e150fd28abfae837b0195fc2538f06c5e24907367501135d8da68d",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "06ed5232d8dc836a68c97a78593395871bb834010f8e4b815ad38359c1c74658",
+              "batch_sig": "EO7I1EcnR4E5iUOx1J9rhR8j5Mtq8LwxvOWiqV9shMwGPMwVVF2c8HdqXkUPmPCise1SqzCwQZtIVeNCbgusCQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "48333aaf567de82d98a7a77b596a8cbff98b523bfe4eed578b4f6cea505c9c31",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "T0avFuz20v0zCPcggaQaKjMXd4qfr0i9RQSD61lNH_qwjnhArg_gGm58EAUkKE3xHyYKdIDDM4LBS_r9BriACw",
+              "index": 0,
+              "proof": [
+                "83bfa6d344d4ee899c63639c18d4706097bad8331d95bba5db06ddcc4d72d07f",
+                "c6e24ec3902490f467e0b2357e5ce7d1f011af5259e129d431e53720cee51555"
+              ],
+              "record_hash": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "salt": "f1726c91b8c845da8bbf8e22abc7ee89",
+            "sig": "ImFIfua-6Uko3WHZL7j0NgmlQHRQYdLUUSVNLUsUsMzKAvyEqjYo83mpZKpoEY6VA0cJq0y9-EkC1PcFwNdtAQ"
+          },
+          {
+            "content": {
+              "output": {
+                "amount": 1250.5,
+                "paid": true
+              }
+            },
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "742d3dd383fee36858f3e10007ecab5a2cc6a34bb808cf094bf87299f1fca0e4",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "9bd4d79731fdd3cff69df127d430c64a3a6a4843c3269e9a6b8b200f05e77541",
+              "seq": 2,
+              "time": "2026-11-13T10:00:00.500Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "bc407548b5e150fd28abfae837b0195fc2538f06c5e24907367501135d8da68d",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "06ed5232d8dc836a68c97a78593395871bb834010f8e4b815ad38359c1c74658",
+              "batch_sig": "EO7I1EcnR4E5iUOx1J9rhR8j5Mtq8LwxvOWiqV9shMwGPMwVVF2c8HdqXkUPmPCise1SqzCwQZtIVeNCbgusCQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "48333aaf567de82d98a7a77b596a8cbff98b523bfe4eed578b4f6cea505c9c31",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "T0avFuz20v0zCPcggaQaKjMXd4qfr0i9RQSD61lNH_qwjnhArg_gGm58EAUkKE3xHyYKdIDDM4LBS_r9BriACw",
+              "index": 1,
+              "proof": [
+                "f2c3809f9fcfb9f5cfa860915fd610b3331a19bcf4117f9d9fbc79abc833d5a8",
+                "c6e24ec3902490f467e0b2357e5ce7d1f011af5259e129d431e53720cee51555"
+              ],
+              "record_hash": "61438bacbfe79730d8753801866ef2e931dedfad8cfb676e8efa86cd2dbc6976",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "salt": "9677838199f12d36f5ee971d49f68abc",
+            "sig": "XQ23vEVfNRP_mPI-S9Z3erhB9OV34zvdZItPBRfS3pSLWa-EIIL64C62jvAn0sy-wuE2-Pn9Je2S7tQKp3AYBw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "09a28a3262c77e2cf341621cec8bb8b54e7a8d11cc7b412be5371f673bacdc41",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.instance_start",
+              "prev": "61438bacbfe79730d8753801866ef2e931dedfad8cfb676e8efa86cd2dbc6976",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "bc407548b5e150fd28abfae837b0195fc2538f06c5e24907367501135d8da68d",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "06ed5232d8dc836a68c97a78593395871bb834010f8e4b815ad38359c1c74658",
+              "batch_sig": "EO7I1EcnR4E5iUOx1J9rhR8j5Mtq8LwxvOWiqV9shMwGPMwVVF2c8HdqXkUPmPCise1SqzCwQZtIVeNCbgusCQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "48333aaf567de82d98a7a77b596a8cbff98b523bfe4eed578b4f6cea505c9c31",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "T0avFuz20v0zCPcggaQaKjMXd4qfr0i9RQSD61lNH_qwjnhArg_gGm58EAUkKE3xHyYKdIDDM4LBS_r9BriACw",
+              "index": 2,
+              "proof": [
+                "e2e618c65747638d978709e919dc2aa3092262a76acd5a8221269008cdc58cfa"
+              ],
+              "record_hash": "48333aaf567de82d98a7a77b596a8cbff98b523bfe4eed578b4f6cea505c9c31",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "p8bRjcOarc2WF7HzsYwECBVAcU6G6oBsu5uVhvvztVdbioDFNqhQ7vMGJGxzpZ1cu0kAGInYkk2CUNX0U8ovAA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "4c4f417de6fd0153f0d9ee6088beda8899099f50436aa53a8803ebcd561ed026",
+              "env": "live",
+              "kind": "decision",
+              "name": "reject_refund",
+              "prev": "48333aaf567de82d98a7a77b596a8cbff98b523bfe4eed578b4f6cea505c9c31",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:04:59.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "06ed5232d8dc836a68c97a78593395871bb834010f8e4b815ad38359c1c74658",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "17a27fe8f7bf39206928f0ad870e51232e978938af83f06d277b54d8d6dd14fa",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 1,
+                "v": 1
+              },
+              "batch_hash": "8332718408e9ef136dd72bc1d954d3630befd8cba969f4552cdac324c5ec5443",
+              "batch_sig": "3JjH2ySoNognSzYoj-1bYFzT0XkP3wzJPvoKFHiQKjR38yCwLNjkv-453tFDW8gOzFndnw2OPNm7E02FwLSICA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "decb530f911bba8cb7ece3ebae68d61cfab95ee052c0233a330927496a5f93c0",
+                "seq": 4,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "mYwbc4pxRN8my7dxcKqlHcZ-whG2F6EBOsOwMpfVezBaRSPclXU0kIdaq_fQKJeBcTTyjr4jA6W_CRojVj7OBQ",
+              "index": 0,
+              "proof": [],
+              "record_hash": "decb530f911bba8cb7ece3ebae68d61cfab95ee052c0233a330927496a5f93c0",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "_ySaEIx2-l8dC2EtrIlWN-xzR2NxRPjLIZgFpr2j5XRdxZHlMRcrjayCB2mdZGNHzrT4vyfgghPf-FAhm3j-Bg"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
     }
   ]
 }

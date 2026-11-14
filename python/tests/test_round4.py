@@ -45,9 +45,9 @@ def test_empty_home_with_known_project_continues_the_witness_chain(recorder, ser
     assert r.get("draft") is True, "no chain on this disk: a draft until the witness's head is known"
     assert rec.flush()["errors"] == {}
     prj = next(iter(service.projects.values()))
-    assert prj["heads"]["lambda-bot"]["head"]["seq"] == 3
+    assert prj["heads"]["lambda-bot"]["head"]["seq"] == 4  # the instance-start note is seq 3 (round 5)
     chain = f"{bucket}/lambda-bot"
-    assert [x["envelope"]["seq"] for x in rec.state.read_all(chain)] == [3]
+    assert [x["envelope"]["seq"] for x in rec.state.read_all(chain)] == [3, 4]
     assert rec.state.chain_base(chain)["head"]["seq"] == 2
     # #13: the local verify passes and says where the chain starts.
     v = signafaide.verify()
@@ -195,11 +195,11 @@ def test_upgrade_lines_never_in_json(recorder, service, project, monkeypatch, ca
     assert main(["verify", "--json"]) == 0
     assert "upgrade:" not in capsys.readouterr().out
     assert main(["verify"]) == 0
-    assert capsys.readouterr().out.count("upgrade: Solo ($19 a month)") == 1
+    assert capsys.readouterr().out.count("upgrade: Solo (£19 a month)") == 1
     assert main(["verify"]) == 0
     assert "upgrade:" not in capsys.readouterr().out, "at most once a week"
     service.fail_always = err(429, "quota_exceeded", "This request needs 1 record but only 0 of the 25000 monthly records are left.")
     signafaide.note("m", {})
     main(["flush"])
-    assert capsys.readouterr().out.count("upgrade: Solo ($19 a month) takes 100,000 live records a month") == 1
+    assert capsys.readouterr().out.count("upgrade: Solo (£19 a month) takes 100,000 live records a month") == 1
     rec._stopped = True

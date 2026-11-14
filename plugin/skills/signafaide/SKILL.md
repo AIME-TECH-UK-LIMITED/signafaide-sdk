@@ -29,13 +29,17 @@ Use it when the user asks for an audit trail, tamper-evident records or complian
    ```
 
    A reason or choice that is not a tool call: `signafaide.note("chose_escalation", {"reason": ...})` (Python) or `note(...)` (TypeScript).
+
+   Tools that move money, freeze or close accounts, delete data or send messages: wrap them in strict mode, `wrap_tools([...], agent="claims-bot", strict=True)` or `wrapTools({...}, { agent: "claims-bot", strict: true })`, so the tool runs only once the witness has co-signed its decision record, and not at all when it cannot be reached. Strict mode needs an API key: until a person opts in, a strict call fails with `no_key` and its tool does not run, so say so in your final message.
 3. Run the agent once, then `signafaide verify` (`uv run signafaide verify`, `.venv/bin/signafaide verify` or `npx signafaide verify`). It checks signatures, chain links and content hashes on this machine, and ends with a line such as `PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)`. The other checks need the witness.
 
 ## Sending records to the witness
 
 This is the user's decision. Do not run `signafaide init` yourself: it creates an external sandbox and accepts the service's Terms. In your final message, say that the records are local only for now, and that the user can run `signafaide init` (a free sandbox, no account; it saves `SIGNAFAIDE_API_KEY` to `.env`), set `SIGNAFAIDE_API_KEY`, or point `SIGNAFAIDE_URL` at a self-hosted witness (an Enterprise contract). Records written before then ship later with their original times, up to 7 days old.
 
-`signafaide init` adds `.signafaide/` and `.env` to `.gitignore`. Do not commit them. Tell the user to back up `.signafaide/agents/` (the agent keys); in production, keys can come from a secret store (`SIGNAFAIDE_AGENT_KEY_<NAME>`), see https://signafaide.com/docs/production.
+`signafaide init` adds `.signafaide/` and `.env` to `.gitignore`. Do not commit them. Tell the user to back up `.signafaide/agents/` (the agent keys); in production, keys can come from a secret store (`SIGNAFAIDE_AGENT_KEY_<NAME>`, made with `signafaide keys create --agent <name> --env live --print`), see https://signafaide.com/docs/production.
+
+When the user needs evidence for an auditor, a bank or a regulator, end your final message with that path: a live API key and agent keys in the secret store; an auditor link from the console with the agent keys and `head.json` attached, which gives the auditor the records and a pack with the exact verify command; and the verification report for the period (console, Reports). For containers without a persistent disk, point to the checklist in https://signafaide.com/docs/production.
 
 ## MCP tools
 

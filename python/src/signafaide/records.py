@@ -279,6 +279,18 @@ def draft_errors(rec: Any) -> list:
     return errs
 
 
+#: The name of the note a new instance writes first when it continues a chain its disk does not
+#: hold (§8): records an earlier instance wrote but had not sent are not in the chain.
+INSTANCE_START = "signafaide.instance_start"
+#: The check 4 note (§7) naming the chains that continue in a new instance.
+INSTANCE_NOTE = "a new instance continued the chain, so records an earlier instance wrote but had not sent are not known"
+
+
+def instance_start_content(seq: int, record_hash_: str) -> dict:
+    """The content of an instance-start note continuing after the witness's head *seq*."""
+    return {"continues_after_seq": seq, "continues_after": record_hash_, "earlier_unsent": "unknown"}
+
+
 def sign_draft(key: SigningKey, draft: dict, *, project: str, env: str, prev: Optional[str], ref: Optional[str], seq: Optional[int] = None) -> dict:
     """The signed record for a draft once its project is known (§8)."""
     d = draft["envelope"]

@@ -10,7 +10,7 @@ import re
 import shutil
 import sys
 import threading
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from datetime import datetime, timedelta, timezone
 
@@ -70,6 +70,8 @@ class Recorder:
         via: str = "sdk",
         key_provider: Optional[KeyProvider] = None,
         exit_flush: Optional[float] = None,
+        head_file: Optional[str] = None,
+        on_head: Optional[Callable[[List[dict]], None]] = None,
     ):
         self.test = test_mode()
         if home is None and self.test and not os.environ.get("SIGNAFAIDE_HOME"):
@@ -81,6 +83,12 @@ class Recorder:
             atexit.register(shutil.rmtree, home, True)
         self.state = State.discover(home)
         self.state.key_provider = key_provider
+        #: Also keep the newest signed heads in this file (default ``SIGNAFAIDE_HEAD_FILE``): a path
+        #: on a persistent volume or mounted bucket, so an ephemeral container's heads outlive it.
+        self.state.head_file = head_file or os.environ.get("SIGNAFAIDE_HEAD_FILE") or None
+        #: Called with the newest signed heads after every accepted batch, to keep them anywhere
+        #: (an object store, a database). An exception it raises is logged and never stops recording.
+        self.on_head = on_head
         self._url = url
         self._api_key = api_key
         self.store_content = store_content
@@ -573,6 +581,11 @@ class Recorder:
                 self.state.drop_outbox(chain, [r["envelope"]["seq"] for r in batch if record_hash(r) in got])
                 for w in self.state.update_heads(resp.get("heads", [])):
                     log.warning("signafaide: %s", w)
+                if self.on_head is not None and resp.get("heads"):
+                    try:
+                        self.on_head(resp["heads"])
+                    except Exception as e:  # noqa: BLE001 - a hook never stops recording
+                        log.warning("signafaide: on_head failed (the heads are still in head.json): %s", e)
                 received.update(got)
                 self._pending = 0
                 if not got:
@@ -580,6 +593,56 @@ class Recorder:
                 self.state.set_blocked(chain, None)
         finally:
             self._ship_lock.release()
+
+    def create_key(self, agent: str, env: str, print_only: bool) -> dict:
+        """``signafaide keys create``: a new key for *agent* in *env*, registered with the witness
+        under the API key (which must be of that env), writing no record. With *print_only*,
+        nothing is written here: the key file is returned for a secret store
+        (``SIGNAFAIDE_AGENT_KEY_LIVE_<NAME>`` for live). Otherwise it becomes the agent's key
+        file. Refused when the agent already has a key here or from the environment; the witness
+        refuses it when the agent already has an active key there."""
+        api_key = self.api_key
+        if not api_key:
+            raise SignafaideError("keys create registers the new key with the witness: set SIGNAFAIDE_API_KEY to a key of that env first "
+                                  "(a live key from the console for --env live).", code="no_key")
+        if _env_of(api_key) != env:
+            raise SignafaideError(f"SIGNAFAIDE_API_KEY is a {_env_of(api_key)} key; --env {env} needs a {env} key.", code="invalid_key")
+        scope = "live" if env == "live" else ""
+        if self.state.provided_key(agent, scope):
+            raise StateError(f"agent {agent} already has a key from {agent_key_env_name(agent, scope)} (or a key provider); unset it to make a new one, "
+                             "or use `signafaide keys rotate`")
+        if not print_only and self.state.key_path(agent, scope).exists():
+            raise StateError(f"agent {agent} already has a key file ({self.state.key_path(agent, scope)}); use `signafaide keys rotate` to replace it")
+        # The key's project, asked of the witness: with --print nothing is written here, not even
+        # the project mapping in config.json.
+        known = self.state.bucket(api_key)
+        if not known.startswith(PENDING + "/"):
+            project, key_env = known.split("/")
+        else:
+            resp = self.client(api_key=api_key).project()
+            project, key_env = (resp.get("project"), resp.get("env")) if isinstance(resp, dict) else (None, None)
+            if key_env != env or not valid_project_id(project):
+                raise SignafaideError(f"The service at {self.url} answered GET /v1/project with an invalid project or env; check SIGNAFAIDE_URL.", code="bad_response")
+            if not print_only:
+                self.state.learn_project(api_key, project, key_env)
+        key, doc = self.state.new_key_file(agent)
+        reg = registration(project, key_env, agent, doc["public_key"], doc["created"])
+        try:
+            resp = self.client(api_key=api_key).register_agent(agent, doc["public_key"], doc["created"], key.sign("register", hash_json(reg)), None)
+        except SignafaideError as e:
+            if e.code == "bad_signature":
+                raise SignafaideError(
+                    f"agent {agent} already has an active key on the witness, so a new one needs the old key's rotation signature: run "
+                    f"`signafaide keys rotate --agent {agent} --env {env}` where that key is, or have an admin revoke it in the console, then run keys create again.",
+                    code="bad_signature") from None
+            raise
+        if resp.get("key_id") not in (None, key.key_id):
+            raise SignafaideError(f"The service registered key {resp.get('key_id')} for {agent}, expected {key.key_id}.", code="key_mismatch")
+        self._registered.add((api_key, agent, key.key_id))
+        out = {"doc": doc, "env_name": agent_key_env_name(agent, scope), "project": project}
+        if not print_only:
+            out["file"] = str(self.state.save_key_file(doc, scope))
+        return out
 
     def _register(self, client: Client, agent: str, scope: str) -> None:
         """§2.4: register the agent's key with its proof of possession, and a rotation

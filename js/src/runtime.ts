@@ -72,6 +72,12 @@ export interface RecorderOptions {
   /** The longest a finished program is kept open to ship the outbox (default 3000 ms, or
    * SIGNAFAIDE_EXIT_FLUSH_MS; 0: never). */
   exitFlushMs?: number;
+  /** Also keep the newest signed heads in this file (default `SIGNAFAIDE_HEAD_FILE`): a path on
+   * a persistent volume or mounted bucket, so an ephemeral container's heads outlive it. */
+  headFile?: string;
+  /** Called with the newest signed heads after every accepted batch, to keep them anywhere (an
+   * object store, a database). An error it throws is reported and never stops recording. */
+  onHead?: (heads: { head: Record<string, unknown>; head_sig: string }[]) => void | Promise<void>;
 }
 
 export interface FlushResult {
@@ -142,6 +148,7 @@ export class Recorder {
   private toldBadKey = false;
   private exitFlushed = false;
   private closed = false;
+  private onHead?: RecorderOptions["onHead"];
 
   constructor(opts: RecorderOptions = {}) {
     this.test = testMode();
@@ -151,6 +158,8 @@ export class Recorder {
     const home = opts.home ?? temp;
     this.state = State.discover(home, opts.root);
     this.state.keyProvider = opts.keyProvider;
+    this.state.headFile = opts.headFile || process.env.SIGNAFAIDE_HEAD_FILE || undefined;
+    this.onHead = opts.onHead;
     this._url = opts.url;
     this._apiKey = opts.apiKey;
     this.storeContent = opts.storeContent ?? false;
@@ -635,11 +644,65 @@ export class Recorder {
         batch.filter((r) => got.has(recordHash(r))).map((r) => r.envelope.seq),
       );
       for (const w of this.state.updateHeads(resp.heads ?? [])) console.warn(`signafaide: ${w}`);
+      if (this.onHead && resp.heads?.length) {
+        try {
+          await this.onHead(resp.heads);
+        } catch (e) {
+          console.warn(`signafaide: onHead failed (the heads are still in head.json): ${(e as Error).message}`);
+        }
+      }
       for (const [h, r] of got) received.set(h, r);
       this.pending = 0;
       if (!got.size) throw new SignafaideError("The service accepted the batch but returned no matching receipts.", { code: "no_receipts" });
       this.state.setBlocked(chain, null);
     }
+  }
+
+  /** `signafaide keys create`: a new key for `agent` in `env`, registered with the witness under
+   * the API key (which must be of that env), writing no record. With `print`, nothing is written
+   * here: the key file is returned for a secret store (`SIGNAFAIDE_AGENT_KEY_LIVE_<NAME>` for
+   * live). Otherwise it becomes the agent's key file. Refused when the agent already has a key
+   * here or from the environment; the witness refuses it when the agent already has an active
+   * key there (`keys rotate` on the machine that holds it, or revoke it in the console first). */
+  async createKey(agent: string, env: "test" | "live", print: boolean): Promise<{ doc: Record<string, string>; envName: string; file?: string; project: string }> {
+    const apiKey = this.apiKey;
+    if (!apiKey) throw new SignafaideError("keys create registers the new key with the witness: set SIGNAFAIDE_API_KEY to a key of that env first (a live key from the console for --env live).", { code: "no_key" });
+    if (envOf(apiKey) !== env) throw new SignafaideError(`SIGNAFAIDE_API_KEY is a ${envOf(apiKey)} key; --env ${env} needs a ${env} key.`, { code: "invalid_key" });
+    const scope: KeyScope = env === "live" ? "live" : "";
+    if (this.state.providedKey(agent, scope)) throw new StateError(`agent ${agent} already has a key from ${agentKeyEnvName(agent, scope)} (or a key provider); unset it to make a new one, or use \`signafaide keys rotate\``);
+    if (!print && fs.existsSync(this.state.keyPath(agent, scope))) throw new StateError(`agent ${agent} already has a key file (${this.state.keyPath(agent, scope)}); use \`signafaide keys rotate\` to replace it`);
+    // The key's project, asked of the witness: with --print nothing is written here, not even
+    // the project mapping in config.json.
+    const known = this.state.bucket(apiKey);
+    let project: string, keyEnv: string;
+    if (!known.startsWith(PENDING + "/")) [project, keyEnv] = known.split("/");
+    else {
+      const resp = await this.client(10_000, apiKey).project();
+      if (resp?.env !== env || !validProjectId(resp?.project)) {
+        throw new SignafaideError(`The service at ${this.url} answered GET /v1/project with an invalid project or env; check SIGNAFAIDE_URL.`, { code: "bad_response" });
+      }
+      [project, keyEnv] = [resp.project, resp.env];
+      if (!print) this.state.learnProject(apiKey, project, keyEnv);
+    }
+    const { key, doc } = this.state.newKeyFile(agent);
+    const reg = registration(project, keyEnv, agent, doc.public_key, doc.created);
+    const h = hashJson(reg);
+    let resp;
+    try {
+      resp = await this.client(10_000, apiKey).registerAgent(agent, doc.public_key, doc.created, key.sign("register", h));
+    } catch (e) {
+      if (e instanceof SignafaideError && e.code === "bad_signature") {
+        throw new SignafaideError(
+          `agent ${agent} already has an active key on the witness, so a new one needs the old key's rotation signature: run \`signafaide keys rotate --agent ${agent} --env ${env}\` where that key is, or have an admin revoke it in the console, then run keys create again.`,
+          { code: "bad_signature" },
+        );
+      }
+      throw e;
+    }
+    if (resp?.key_id && resp.key_id !== key.keyId) throw new SignafaideError(`The service registered key ${resp.key_id} for ${agent}, expected ${key.keyId}.`, { code: "key_mismatch" });
+    this.registered.add(`${apiKey}\n${agent}\n${key.keyId}`);
+    const out = { doc, envName: agentKeyEnvName(agent, scope), project };
+    return print ? out : { ...out, file: this.state.saveKeyFile(doc, scope) };
   }
 
   private async register(client: Client, agent: string, scope: KeyScope): Promise<void> {
@@ -727,13 +790,18 @@ export class Recorder {
   }
 
   private async flushLogged(timeoutMs = 10_000, mode: IoMode = "fg"): Promise<FlushResult | null> {
+    // A background attempt cut off at exit (the exit flush takes over) is not a network
+    // problem: its abort is never reported as "no answer within 10 s".
+    const cut = mode === "bg" ? this.bgAbort.signal : undefined;
     let r: FlushResult;
     try {
       r = await this.flush(timeoutMs, mode);
     } catch (e) {
+      if (cut?.aborted) return null;
       this.report(`signafaide: ${(e as Error).message}`);
       return null;
     }
+    if (cut?.aborted) return r;
     const errs = Object.entries(r.errors);
     if (errs.length) this.report("signafaide: " + errs.map(([a, e]) => (e.message.includes(a) ? e.message : `${a}: ${e.message}`)).join("; "));
     else if (this.failing && r.shipped) {

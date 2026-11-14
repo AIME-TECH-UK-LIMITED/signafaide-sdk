@@ -240,6 +240,18 @@ export function makeRecord(key: SigningKey, f: RecordFields): SignedRecord {
   return { envelope, key_id: key.keyId, sig: key.sign("record", hashJson(envelope)), content: f.content, salt };
 }
 
+/** The name of the note a new instance writes first when it continues a chain it does not hold
+ * (§8, an empty disk): records an earlier instance wrote but had not sent are not in the chain. */
+export const INSTANCE_START = "signafaide.instance_start";
+
+/** The content of an instance-start note continuing after the witness's head `seq`/`recordHash`. */
+/** The check 4 note (§7) naming the chains that continue in a new instance. */
+export const INSTANCE_NOTE = "a new instance continued the chain, so records an earlier instance wrote but had not sent are not known";
+
+export function instanceStartContent(seq: number, recordHash: string): Record<string, unknown> {
+  return { continues_after_seq: seq, continues_after: recordHash, earlier_unsent: "unknown" };
+}
+
 export function recordHash(rec: { envelope: unknown }): string {
   return hashJson(rec.envelope);
 }

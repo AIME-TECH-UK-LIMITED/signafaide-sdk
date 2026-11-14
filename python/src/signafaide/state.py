@@ -37,7 +37,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from . import jcs
 from .crypto import SigningKey, b64url, b64url_decode
-from .records import AGENT_KEYS_FORMAT, AGENT_RE, ENVS, _valid_time, manifest_entry, now, parse_time, record_hash, sign_draft, valid_project_id
+from .records import AGENT_KEYS_FORMAT, AGENT_RE, ENVS, INSTANCE_START, _valid_time, instance_start_content, make_record, manifest_entry, now, parse_time, record_hash, sign_draft, valid_project_id
 
 _MARKERS = (".git", "pyproject.toml", "package.json")
 LOCK_STALE_S = 10.0
@@ -309,6 +309,15 @@ class State:
                 prev: Optional[str] = base["record_hash"] if base else None
                 offset = base["seq"] if base else 0
                 out = []
+                if base and lines:
+                    # A new instance continues a chain this disk does not hold: its first record
+                    # says so, signed, since an earlier instance may have written records it never
+                    # sent (§8).
+                    note = make_record(key(agent, first), kind="note", project=project, env=env, agent=agent, seq=base["seq"] + 1, prev=prev,
+                                       name=INSTANCE_START, content=instance_start_content(base["seq"], base["record_hash"]), ref=None, time=first)
+                    prev = record_hash(note)
+                    offset += 1
+                    out.append((note, lines[0].get("store_content")))
                 for d in lines:
                     if not d.get("draft"):
                         raise StateError(f"{path} holds a signed record; pending chains hold drafts only. Move it aside and run `signafaide verify`")
@@ -426,7 +435,8 @@ class State:
                              f"as {agent}.<key id>.key in .signafaide/agents/{scope + '/' if scope else ''}retired/")
         old = self.load_key(agent, create=False, scope=scope)
         if old is None:
-            raise StateError(f"agent {agent} has no key to rotate; it gets one with its first record")
+            raise StateError(f"agent {agent} has no key to rotate; it gets one with its first record, or make one for a secret store with "
+                             f"`signafaide keys create --agent {agent} --env {'live' if scope == 'live' else 'test'} --print`")
         self.retired_dir(scope).mkdir(parents=True, exist_ok=True)
         self.key_path(agent, scope).replace(self.retired_dir(scope) / f"{agent}.{old.key_id}.key")
         new = self.load_key(agent, scope=scope)
@@ -501,11 +511,41 @@ class State:
         except (ValueError, KeyError, TypeError) as e:
             raise StateError(f"{path} is not a valid signafaide key file ({e}); restore it from backup") from None
 
+    def new_key_file(self, agent: str) -> Tuple[SigningKey, dict]:
+        """A new agent key file ``{agent, key_id, public_key, private_key, created}`` (§8), not
+        written anywhere: ``keys create`` registers it and prints it for a secret store, or saves
+        it as the agent's key file with ``save_key_file``."""
+        if not AGENT_RE.match(agent):
+            raise StateError(f"agent {agent!r} is invalid")
+        key = SigningKey.generate()
+        return key, {"agent": agent, "key_id": key.key_id, "public_key": b64url(key.public_key), "private_key": b64url(key.seed()), "created": now()}
+
+    def save_key_file(self, doc: dict, scope: str = "") -> Path:
+        """Write a key file made by ``new_key_file`` as the agent's key (mode 0600); never replaces one."""
+        self.ensure()
+        path = self.key_path(doc["agent"], scope)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            raise StateError(f"agent {doc['agent']} already has a key file ({path}); use `signafaide keys rotate` to replace it") from None
+        except OSError as e:
+            raise fs_error(e, self.home) from None
+        with os.fdopen(fd, "w") as f:
+            f.write(jcs.dumps(doc) + "\n")
+        return path
+
     # --- locking ------------------------------------------------------------
 
     @contextlib.contextmanager
     def lock(self, chain: str) -> Iterator[None]:
-        path = self.home / "chain" / f"{chain}.lock"
+        with self._lock_at(self.home / "chain" / f"{chain}.lock"):
+            self._recover(chain)
+            yield
+
+    @contextlib.contextmanager
+    def _lock_at(self, path: Path) -> Iterator[None]:
+        """Hold the lock file *path* (§8 chain locks)."""
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -530,7 +570,6 @@ class State:
                     raise StateError(f"{path} is held by another process; delete it if no signafaide process is running") from None
                 time.sleep(0.002)
         try:
-            self._recover(chain)
             yield
         finally:
             with contextlib.suppress(FileNotFoundError):
@@ -758,7 +797,31 @@ class State:
                 continue
             slot[head.get("agent")] = sh
         _write_json(self.home / "head.json", heads)
+        if self.head_file:
+            warnings.extend(self._persist_heads(signed_heads))
         return warnings
+
+    #: ``SIGNAFAIDE_HEAD_FILE`` (or ``configure(head_file=...)``): a copy of the newest signed
+    #: heads kept outside this folder (a persistent volume, a mounted bucket), in the
+    #: ``head.json`` format, so an ephemeral container's heads outlive it. Several processes may
+    #: share one file: each merges its heads in under ``<file>.lock``, keeping the higher seq.
+    head_file: Optional[str] = None
+
+    def _persist_heads(self, signed_heads: List[dict]) -> List[str]:
+        file = Path(self.head_file or "")
+        try:
+            file.resolve().parent.mkdir(parents=True, exist_ok=True)
+            with self._lock_at(file.with_name(file.name + ".lock")):
+                doc = _read_json(file) or {}
+                for sh in signed_heads:
+                    head = sh.get("head") or {}
+                    slot = doc.setdefault(head.get("project"), {}).setdefault(head.get("env"), {})
+                    if ((slot.get(head.get("agent")) or {}).get("head") or {}).get("seq", 0) <= head.get("seq", 0):
+                        slot[head.get("agent")] = sh
+                _write_json(file, doc)
+            return []
+        except (OSError, StateError) as e:
+            return [f"could not write the head file {file} (SIGNAFAIDE_HEAD_FILE): {e}"]
 
     def config(self) -> dict:
         """``config.json``: settings kept with the project (the coding agent that set it up)."""

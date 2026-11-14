@@ -35,9 +35,9 @@ export function siteOf(url: string): string {
 
 /** One plain line each, never in --json output. The verify one shows at most once a week. */
 export const UPGRADE_LIMIT = (site: string): string =>
-  `upgrade: Solo ($19 a month) takes 100,000 live records a month and keeps recording past them at $5 per 100,000: ${site}/pricing`;
+  `upgrade: Solo (£19 a month) takes 100,000 live records a month and keeps recording past them at £5 per 100,000: ${site}/pricing`;
 export const UPGRADE_VERIFY = (site: string): string =>
-  `upgrade: Solo ($19 a month) adds a verification report for a period and auditor links up to 90 days: ${site}/pricing`;
+  `upgrade: Solo (£19 a month) adds a verification report for a period and auditor links up to 90 days: ${site}/pricing`;
 const HINT_EVERY_MS = 7 * 86_400_000;
 
 /** After a passing verify on a live key of a Free organisation: one line, once a week. */
@@ -223,9 +223,9 @@ export const COMMANDS: Record<string, Command> = {
   },
 
   keys: {
-    help: "export the agent public keys for auditors, or rotate an agent's key",
-    usage: "keys export [-o agent-keys.json] | keys rotate [--agent X] [--env test|live]",
-    options: { output: { type: "string", short: "o" }, agent: { type: "string" }, env: { type: "string" } },
+    help: "export the agent public keys for auditors, make a key for a secret store, or rotate an agent's key",
+    usage: "keys export [-o agent-keys.json] | keys create [--agent X] [--env test|live] [--print] | keys rotate [--agent X] [--env test|live]",
+    options: { output: { type: "string", short: "o" }, agent: { type: "string" }, env: { type: "string" }, print: { type: "boolean" } },
     async run(v, pos) {
       const rec = recorder();
       if (pos[0] === "export" && pos.length === 1) {
@@ -237,6 +237,22 @@ export const COMMANDS: Record<string, Command> = {
         const file = v.output ?? "agent-keys.json";
         fs.writeFileSync(file, JSON.stringify(doc, null, 2) + "\n");
         out(`wrote ${file} (${plural(doc.keys.length, "key")}); give it to your auditors with pack.json and head.json: signafaide verify pack.json --keys <witness>/.well-known/signafaide-keys.json --agent-keys ${file} --head head.json`);
+        return 0;
+      }
+      if (pos[0] === "create" && pos.length === 1) {
+        const agent = v.agent ?? rec.defaultAgent;
+        const env = v.env ?? envOf(rec.apiKey);
+        if (env !== "test" && env !== "live") throw new SyntaxError("--env must be test or live");
+        const r = await rec.createKey(agent, env, !!v.print);
+        if (v.print) {
+          out(JSON.stringify(r.doc));
+          err(
+            `signafaide: registered key ${r.doc.key_id} for ${agent} (${r.project}, ${env}); no record was written and nothing was saved here. ` +
+              `Store the line above in your secret store as ${r.envName} and keep a backup: it is the only copy of the private key.`,
+          );
+        } else {
+          out(`${agent}: registered key ${r.doc.key_id} (${r.project}, ${env}) and saved it as ${r.file}; no record was written. For a secret store, store that file's content as ${r.envName}.`);
+        }
         return 0;
       }
       if (pos[0] === "rotate" && pos.length === 1) {

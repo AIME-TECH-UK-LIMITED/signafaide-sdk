@@ -46,8 +46,8 @@ def _site(url: str) -> str:
 
 
 #: One plain line each, never in --json output. The verify one shows at most once a week.
-UPGRADE_LIMIT = "upgrade: Solo ($19 a month) takes 100,000 live records a month and keeps recording past them at $5 per 100,000: {site}/pricing"
-UPGRADE_VERIFY = "upgrade: Solo ($19 a month) adds a verification report for a period and auditor links up to 90 days: {site}/pricing"
+UPGRADE_LIMIT = "upgrade: Solo (£19 a month) takes 100,000 live records a month and keeps recording past them at £5 per 100,000: {site}/pricing"
+UPGRADE_VERIFY = "upgrade: Solo (£19 a month) adds a verification report for a period and auditor links up to 90 days: {site}/pricing"
 HINT_EVERY_S = 7 * 86_400
 
 
@@ -235,13 +235,16 @@ def cmd_verify(a: argparse.Namespace) -> int:
 
 
 def _keys_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("action", choices=["export", "rotate"], help="export: write the agent-key manifest for auditors; rotate: give an agent a new key")
-    p.add_argument("--agent", help="rotate: the agent (default: this project's folder name)")
-    p.add_argument("--env", choices=["test", "live"], help="rotate: the key of this env (default: the API key's env)")
+    p.add_argument("action", choices=["export", "create", "rotate"],
+                   help="export: write the agent-key manifest for auditors; create: make and register a key for a secret store, writing no record; "
+                        "rotate: give an agent a new key")
+    p.add_argument("--agent", help="create, rotate: the agent (default: this project's folder name)")
+    p.add_argument("--env", choices=["test", "live"], help="create, rotate: the key of this env (default: the API key's env)")
+    p.add_argument("--print", dest="print_key", action="store_true", help="create: print the key file for a secret store and save nothing here")
     p.add_argument("-o", "--output", help="export: output file (default agent-keys.json)")
 
 
-@command("keys", "export the agent public keys for auditors, or rotate an agent's key", _keys_args)
+@command("keys", "export the agent public keys for auditors, make a key for a secret store, or rotate an agent's key", _keys_args)
 def cmd_keys(a: argparse.Namespace) -> int:
     rec = _recorder()
     if a.action == "export":
@@ -256,6 +259,19 @@ def cmd_keys(a: argparse.Namespace) -> int:
         return 0
     agent = a.agent or rec.default_agent
     env = a.env or runtime._env_of(rec.api_key)
+    if a.action == "create":
+        if env not in ("test", "live"):
+            print("signafaide keys create: --env must be test or live (or set SIGNAFAIDE_API_KEY)", file=sys.stderr)
+            return 2
+        r = rec.create_key(agent, env, a.print_key)
+        if a.print_key:
+            print(json.dumps(r["doc"], separators=(",", ":")), flush=True)
+            print(f"signafaide: registered key {r['doc']['key_id']} for {agent} ({r['project']}, {env}); no record was written and nothing was saved here. "
+                  f"Store the line above in your secret store as {r['env_name']} and keep a backup: it is the only copy of the private key.", file=sys.stderr)
+        else:
+            print(f"{agent}: registered key {r['doc']['key_id']} ({r['project']}, {env}) and saved it as {r['file']}; no record was written. "
+                  f"For a secret store, store that file's content as {r['env_name']}.")
+        return 0
     old, new = rec.state.rotate_key(agent, "live" if env == "live" else "")
     print(f"{agent}: new key {new.key_id} signs from now on. Records the old key {old.key_id} signed earlier ship first; the next record then "
           "registers the new key, signed by the old one, and the service retires the old key at that moment")

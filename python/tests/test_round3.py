@@ -237,7 +237,7 @@ def test_ephemeral_disk_continues_the_witness_chain(recorder, service, project, 
     signafaide.note("c", {}, agent="worker-0")
     assert rec.flush()["errors"] == {}
     prj = next(iter(service.projects.values()))
-    assert prj["heads"]["worker-0"]["head"]["seq"] == 3
+    assert prj["heads"]["worker-0"]["head"]["seq"] == 4  # seq 3 is the instance-start note (round 5)
     rec._stopped = True
 
 

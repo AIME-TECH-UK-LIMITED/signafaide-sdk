@@ -32,6 +32,8 @@ export class FakeService {
   headsUnknownAgent = false;
   /** Monthly allowance per project; null: unlimited. */
   quota: number | null = null;
+  /** Wait this long before answering (a slow network). */
+  delayMs = 0;
   url = "";
   private server = http.createServer((req, res) => void this.handle(req, res));
   private n = 0;
@@ -62,6 +64,7 @@ export class FakeService {
     for await (const chunk of req) raw += chunk;
     const u = new URL(req.url!, "http://x");
     this.clientIds.push(req.headers["x-signafaide-client"] as string | undefined);
+    if (this.delayMs) await new Promise((r) => setTimeout(r, this.delayMs));
     const [status, body] = this.route(req.method!, u.pathname, Object.fromEntries(u.searchParams), raw ? JSON.parse(raw) : null, req.headers.authorization);
     const text = typeof body === "string" ? body : JSON.stringify(body);
     res.writeHead(status, { "content-type": typeof body === "string" ? "text/plain" : "application/json" });

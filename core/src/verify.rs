@@ -509,6 +509,7 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         }
     }
     let mut edge = 0;
+    let mut starts: Vec<String> = Vec::new();
     for (agent, chain) in &chains {
         acc[3].checked += chain.len();
         let mut prev: Option<&Rec> = None;
@@ -532,6 +533,9 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
                 None if seq > 1 => acc[3].fail(&x.label, format!("the pack is missing seq 1..{} of agent {agent} and its export declares no from filter", seq - 1)),
                 None => {}
             }
+            if e.kind == Kind::Note && e.name == INSTANCE_START {
+                starts.push(format!("{agent} after seq {}", seq - 1));
+            }
             let server = &x.r.receipt.batch.server_time;
             if e.time_ms() > time::parse(server).unwrap_or(i64::MAX - MAX_CLOCK_SKEW_MS) + MAX_CLOCK_SKEW_MS {
                 acc[3].fail(&x.label, format!("time {} is more than 300 s after its batch's server_time {server}", e.time));
@@ -541,6 +545,9 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
     }
     if edge > 0 {
         acc[3].notes.push(format!("{} start after seq 1, as the export's from filter allows", plural(edge as u64, "chain", "chains")));
+    }
+    if !starts.is_empty() {
+        acc[3].notes.push(format!("{INSTANCE_NOTE}: {}", starts.join(", ")));
     }
 
     // 5. Merkle proofs

@@ -81,6 +81,8 @@ def init(
     quiet: bool = False,
     key_provider: Optional[Callable[[str, str], Any]] = None,
     exit_flush: Optional[float] = None,
+    head_file: Optional[str] = None,
+    on_head: Optional[Callable[[list], Any]] = None,
 ) -> Recorder:
     """Configure signafAIde (optional). Finds SIGNAFAIDE_API_KEY (env or .env).
     Without one, records stay local (signed, chained, verifiable in ``.signafaide/``)
@@ -88,7 +90,7 @@ def init(
     ``signafaide init`` or by setting the key. Never raises when the service is
     offline: records are kept in the outbox."""
     rec = runtime.configure(url=url, api_key=api_key, home=home, store_content=store_content, quiet=quiet, key_provider=key_provider,
-                            exit_flush=exit_flush)
+                            exit_flush=exit_flush, head_file=head_file, on_head=on_head)
     key = rec.api_key
     if not key:
         return rec

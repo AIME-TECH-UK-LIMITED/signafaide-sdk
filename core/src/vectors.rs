@@ -185,6 +185,8 @@ enum Build {
     TwoAgents,
     /// Batch 1 claims a drand round far beyond any protocol time.
     HugeRound,
+    /// Seq 3 is an instance-start note (§8): a new instance continued after seq 2.
+    InstanceStart,
 }
 
 pub struct Fixture {
@@ -221,7 +223,13 @@ fn build(mode: Build) -> Fixture {
     let (ak, sk) = (agent_key(), service_key());
     let mut records: Vec<(SignedRecord, Hash)> = Vec::new();
     let mut prev = None;
-    for (i, (kind, name, time, content, store)) in sample_contents().into_iter().enumerate() {
+    for (i, (kind, name, time, mut content, store)) in sample_contents().into_iter().enumerate() {
+        let name = if mode == Build::InstanceStart && i == 2 {
+            content = json!({"continues_after_seq": 2, "continues_after": records[1].1, "earlier_unsent": "unknown"});
+            INSTANCE_START
+        } else {
+            name
+        };
         let time = match (mode, i) {
             (Build::TimeBackwards, 2) => "2026-11-13T10:00:00.200Z",
             (Build::TimeAfterBatch, 3) => "2026-11-13T10:10:00.001Z",
@@ -684,6 +692,7 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
     let not_yet_anchored = signed(&|p| {
         p["anchors"] = json!([]);
     });
+    let instance_start = build(Build::InstanceStart).pack;
     vec![
         ("independent service and agent keys, offline", valid.clone(), none()),
         ("young batches no anchor covers yet: anchors and public timestamp pending", not_yet_anchored, none()),
@@ -718,6 +727,7 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         ("batches older than the anchor window that no anchor covers: not timestamped", unanchored, none()),
         ("checked by the service with its own key registry", valid.clone(), Inputs { agent_keys: Some(Value::Null), by_service: true, ..none() }),
         ("service keys fetched over plain http from a local address", valid, Inputs { service_keys_plain_http: true, ..none() }),
+        ("a new instance continued the chain after seq 2 (an instance-start note)", instance_start, none()),
     ]
 }
 
@@ -920,6 +930,10 @@ pub fn generate() -> Value {
             let r = verify::verify_pack(&t["pack"], &Inputs::options(&t, &defaults)).unwrap();
             assert!(r.passed(), "{name}\n{}", r.to_text());
             t["expect"] = expected(&r);
+            // The instance-start note (§7 check 4) is part of the expected chain detail.
+            if let Some(n) = r.checks[3].detail.split("; ").find(|n| n.starts_with(INSTANCE_NOTE)) {
+                t["expect"]["chain_note"] = json!(n);
+            }
             t
         })
         .collect();

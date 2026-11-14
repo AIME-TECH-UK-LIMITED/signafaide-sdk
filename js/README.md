@@ -160,6 +160,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 | `signafaide repair [--agent X] [--dry-run]` | sets aside records no witness can take (kept in `.signafaide/held/`, still verified), gives the agent a new key and starts a new segment |
 | `signafaide verify [pack.json] [--keys ...] [--agent-keys ...] [--head ...] [--offline] [--fail-on-pending-send] [--json]` | verifies; exit 0 PASS, 1 FAIL or BLOCKED, 2 unreadable input |
 | `signafaide keys export [-o agent-keys.json]` / `signafaide keys rotate [--agent X] [--env test\|live]` | the agent-key file for auditors / a new key for an agent |
+| `signafaide keys create [--agent X] [--env test\|live] [--print]` | a new key, registered with the witness, for a secret store; writes no record (`--print`: prints the key file and saves nothing here) |
 | `signafaide export [--agent X] [--from T] [--to T] [-o pack.json]` | downloads a verification pack of the whole project (every agent); `--agent` narrows it to one |
 | `signafaide replay [--agent X] [--from T] [--to T] [--record H] [--html out.html] [--json]` | the verified timeline from the local chain; exit 1 on FAIL |
 | `signafaide compare --module file.mjs:fn [--agent X] [--name N] [--from T] [--to T] [--limit N] [--upload [--values]]` | re-runs recorded decisions with a candidate and compares; `--values` sends the values too (stored-content decisions only) |
@@ -206,7 +207,8 @@ The header and the events hold no content, file paths, hostnames or user names. 
 | `SIGNAFAIDE_API_KEY` | read from the environment, then `.env`; created by `signafaide init`; none: local only |
 | `SIGNAFAIDE_URL` | `https://api.signafaide.com`; a self-hosted witness, or `http://127.0.0.1:7474` for a local dev server. Alone it sends nothing |
 | `SIGNAFAIDE_HOME` | `.signafaide/` in the project root; a mounted volume or `/tmp/signafaide` in production |
-| `SIGNAFAIDE_AGENT_KEY_<NAME>` | an agent's key file content from a secret store (or `keyProvider` in code) |
+| `SIGNAFAIDE_AGENT_KEY_<NAME>` | an agent's key file content from a secret store (or `keyProvider` in code); live keys can use `SIGNAFAIDE_AGENT_KEY_LIVE_<NAME>`, made with `signafaide keys create --env live --print` |
+| `SIGNAFAIDE_HEAD_FILE` | unset: a file outside `.signafaide/` (a persistent volume) that also keeps the newest signed heads, for containers whose disk does not last; or `onHead` in `configure()` |
 | `SIGNAFAIDE_EXIT_FLUSH_MS` | `3000`: the longest a finished program is kept open to send; `0` never |
 | `SIGNAFAIDE_TEST` | test mode is on by itself under Vitest, Jest and `node --test` (records in a temporary folder, nothing sent); `1` forces it, `0` turns it off |
 | `SIGNAFAIDE_DISABLED` | `1`: wrapped functions run and nothing is recorded |

@@ -26,7 +26,7 @@ from . import ots
 from ._plural import plural
 from .bitcoin import check_header
 from .crypto import HEX64, b64url, b64url_decode, check_content, hash_json, key_id, sha256_hex, verify_inclusion, verify_sig
-from .records import AGENT_RE, MAX_CLOCK_SKEW_MS, draft_errors, key_entry_errors, manifest_errors, parse_time, receipt_errors, record_errors, valid_project_id
+from .records import AGENT_RE, INSTANCE_NOTE, INSTANCE_START, MAX_CLOCK_SKEW_MS, draft_errors, key_entry_errors, manifest_errors, parse_time, receipt_errors, record_errors, valid_project_id
 
 CHECKS = [
     ("schema", "Envelope schema"),
@@ -848,6 +848,7 @@ class _Verifier:
             chain.setdefault(seq, x)
         edge = 0
         based: List[str] = []
+        starts: List[str] = []
         for agent, chain in sorted(chains.items()):
             acc.checked += len(chain)
             prev = None
@@ -876,6 +877,8 @@ class _Verifier:
                         acc.fail(label, f"the pack is missing seq 1..{seq - 1} of agent {agent}; its export's from filter is not after the agent's first key, so they belong in it")
                     else:
                         acc.fail(label, f"the pack is missing seq 1..{seq - 1} of agent {agent} and its export declares no from filter")
+                if e["kind"] == "note" and e["name"] == INSTANCE_START:
+                    starts.append(f"{agent} after seq {seq - 1}")
                 if "receipt" in r:
                     server = r["receipt"]["batch"]["server_time"]
                     if _epoch_ms(e["time"]) > _epoch_ms(server) + MAX_CLOCK_SKEW_MS:
@@ -883,6 +886,8 @@ class _Verifier:
                 prev = chain[seq]
         if edge:
             acc.notes.append(f"{plural(edge, 'chain')} start after seq 1, as the export's from filter allows")
+        if starts:
+            acc.notes.append(f"{INSTANCE_NOTE}: {', '.join(starts)}")
         if based:
             acc.notes.append(f"continues after a co-signed record this machine does not hold: {', '.join(based)} (the witness's signed head, see signed heads)")
         return chains

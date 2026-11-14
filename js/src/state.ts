@@ -28,7 +28,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { SigningKey, b64url, b64urlDecode } from "./crypto.js";
 import { canonicalize } from "./jcs.js";
-import { AGENT_KEYS_FORMAT, AGENT_RE, manifestEntry, now, recordHash, signDraft, validProjectId, validTime, type AgentKeyEntry, type Receipt, type SignedRecord } from "./records.js";
+import { AGENT_KEYS_FORMAT, AGENT_RE, INSTANCE_START, instanceStartContent, makeRecord, manifestEntry, now, recordHash, signDraft, validProjectId, validTime, type AgentKeyEntry, type Receipt, type SignedRecord } from "./records.js";
 
 const MARKERS = [".git", "pyproject.toml", "package.json"];
 /** A shipped chain file larger than this rolls into a sealed segment (SIGNAFAIDE_SEGMENT_BYTES). */
@@ -306,8 +306,27 @@ export class State {
           // disk lost it): the drafts continue after the service's head instead of conflicting (§8).
           const base = bases[agent];
           let prev: string | null = base ? base.record_hash : null;
-          const offset = base ? base.seq : 0;
+          let offset = base ? base.seq : 0;
           const out: [SignedRecord, boolean | undefined][] = [];
+          if (base && lines.length) {
+            // A new instance continues a chain this disk does not hold: its first record says so,
+            // signed, since an earlier instance may have written records it never sent (§8).
+            const note = makeRecord(key(agent, first), {
+              kind: "note",
+              project,
+              env,
+              agent,
+              seq: base.seq + 1,
+              prev,
+              name: INSTANCE_START,
+              content: instanceStartContent(base.seq, base.record_hash),
+              ref: null,
+              time: first,
+            });
+            prev = recordHash(note);
+            offset += 1;
+            out.push([note, lines[0].store_content]);
+          }
           for (const d of lines) {
             if (!d.draft) throw new StateError(`${this.chainPath(`${src}/${agent}`)} holds a signed record; pending chains hold drafts only. Move it aside and run \`signafaide verify\``);
             const ref = d.envelope.ref;
@@ -505,10 +524,36 @@ export class State {
       throw new StateError(`agent ${agent}'s key comes from ${agentKeyEnvName(agent, scope)} (or a key provider): make a new key with \`signafaide keys rotate\` on a machine with the key file, store the new file in your secret store, and keep the old one as ${agent}.<key id>.key in .signafaide/agents/${scope ? scope + "/" : ""}retired/`);
     }
     const old = this.loadKey(agent, false, scope);
-    if (!old) throw new StateError(`agent ${agent} has no key to rotate; it gets one with its first record`);
+    if (!old) throw new StateError(`agent ${agent} has no key to rotate; it gets one with its first record, or make one for a secret store with \`signafaide keys create --agent ${agent} --env ${scope === "live" ? "live" : "test"} --print\``);
     fs.mkdirSync(this.retiredDir(scope), { recursive: true });
     fs.renameSync(this.keyPath(agent, scope), path.join(this.retiredDir(scope), `${agent}.${old.keyId}.key`));
     return [old, this.loadKey(agent, true, scope)];
+  }
+
+  /** A new agent key file `{agent, key_id, public_key, private_key, created}` (§8), not
+   * written anywhere: `keys create` registers it and prints it for a secret store, or saves it
+   * as the agent's key file with `saveKeyFile`. */
+  newKeyFile(agent: string): { key: SigningKey; doc: { agent: string; key_id: string; public_key: string; private_key: string; created: string } } {
+    if (!AGENT_RE.test(agent)) throw new StateError(`agent "${agent}" is invalid`);
+    const key = SigningKey.generate((n) => new Uint8Array(randomBytes(n)));
+    return { key, doc: { agent, key_id: key.keyId, public_key: b64url(key.publicKey), private_key: b64url(key.seed()), created: now() } };
+  }
+
+  /** Write a key file made by `newKeyFile` as the agent's key (mode 0600); never replaces one. */
+  saveKeyFile(doc: { agent: string }, scope: KeyScope = ""): string {
+    this.ensure();
+    const p = this.keyPath(doc.agent, scope);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    let fd: number;
+    try {
+      fd = fs.openSync(p, "wx", 0o600);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new StateError(`agent ${doc.agent} already has a key file (${p}); use \`signafaide keys rotate\` to replace it`);
+      throw fsError(e, this.home);
+    }
+    fs.writeSync(fd, canonicalize(doc) + "\n");
+    fs.closeSync(fd);
+    return p;
   }
 
   /** Every current and retired agent key: `{agent, key_id, public_key, created, retired}`
@@ -597,7 +642,14 @@ export class State {
   // --- locking ----------------------------------------------------------------
 
   lock<T>(chain: string, fn: () => T): T {
-    const p = path.join(this.home, "chain", `${chain}.lock`);
+    return this.lockAt(path.join(this.home, "chain", `${chain}.lock`), () => {
+      this.recover(chain);
+      return fn();
+    });
+  }
+
+  /** Hold the lock file `p` (§8 chain locks) while `fn` runs. */
+  private lockAt<T>(p: string, fn: () => T): T {
     try {
       fs.mkdirSync(path.dirname(p), { recursive: true });
     } catch (e) {
@@ -625,7 +677,6 @@ export class State {
       }
     }
     try {
-      this.recover(chain);
       return fn();
     } finally {
       try {
@@ -921,7 +972,33 @@ export class State {
       slot[agent] = sh;
     }
     writeJson(path.join(this.home, "head.json"), heads);
+    if (this.headFile) warnings.push(...this.persistHeads(signed));
     return warnings;
+  }
+
+  /** `SIGNAFAIDE_HEAD_FILE` (or `RecorderOptions.headFile`): a copy of the newest signed heads
+   * kept outside this folder (a persistent volume, a mounted bucket), in the `head.json` format,
+   * so an ephemeral container's heads outlive it. Several processes may share one file: each
+   * merges its heads in under `<file>.lock`, keeping the higher seq per chain. */
+  headFile?: string;
+
+  private persistHeads(signed: SignedHead[]): string[] {
+    const file = this.headFile as string;
+    try {
+      fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+      return this.lockAt(file + ".lock", () => {
+        const doc = readJson<Record<string, Record<string, Record<string, SignedHead>>>>(file) ?? {};
+        for (const sh of signed) {
+          const { project = "", env = "", agent } = sh.head ?? ({} as SignedHead["head"]);
+          const slot = ((doc[project] ??= {})[env] ??= {});
+          if ((slot[agent]?.head?.seq ?? 0) <= (sh.head.seq ?? 0)) slot[agent] = sh;
+        }
+        writeJson(file, doc);
+        return [];
+      });
+    } catch (e) {
+      return [`could not write the head file ${file} (SIGNAFAIDE_HEAD_FILE): ${(e as Error).message}`];
+    }
   }
 
   /** `config.json`: settings kept with the project (the coding agent that set it up). */

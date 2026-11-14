@@ -157,7 +157,7 @@ describe("ephemeral disk", () => {
     note("c", {}, { agent: "worker-0" });
     const f = await flush();
     expect(f.errors).toEqual({});
-    expect(ctx.service.project().heads.get("worker-0").head.seq).toBe(3);
+    expect(ctx.service.project().heads.get("worker-0").head.seq).toBe(4); // seq 3 is the instance-start note (round 5)
     expect(env).toContain("SIGNAFAIDE_API_KEY");
   });
 });

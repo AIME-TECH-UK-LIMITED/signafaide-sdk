@@ -44,9 +44,9 @@ describe("#11, #13: an empty home with a known project", () => {
     const rec = r.write("note", "c", {}, { agent: "lambda-bot" });
     expect((rec as any).draft).toBe(true); // no chain on this disk: a draft until the head is known
     expect((await r.flush()).errors).toEqual({});
-    expect(ctx.service.project().heads.get("lambda-bot").head.seq).toBe(3);
+    expect(ctx.service.project().heads.get("lambda-bot").head.seq).toBe(4); // the instance-start note is seq 3 (round 5)
     const chain = `${bucket}/lambda-bot`;
-    expect(r.state.readAll(chain).map((x: any) => x.envelope.seq)).toEqual([3]);
+    expect(r.state.readAll(chain).map((x: any) => x.envelope.seq)).toEqual([3, 4]);
     expect(r.state.chainBase(chain)?.head.seq).toBe(2);
     const v = await verify();
     expect(v.ok).toBe(true);
@@ -171,11 +171,11 @@ describe("#22: housekeeping", () => {
       note("n", {});
       await r.flush();
       expect((await cli("verify", "--json"))[1]).not.toContain("upgrade:");
-      expect((await cli("verify"))[1].split("upgrade: Solo ($19 a month)").length - 1).toBe(1);
+      expect((await cli("verify"))[1].split("upgrade: Solo (£19 a month)").length - 1).toBe(1);
       expect((await cli("verify"))[1]).not.toContain("upgrade:");
       ctx.service.failAlways = reply(429, "quota_exceeded", "This request needs 1 record but only 0 of the 25000 monthly records are left.");
       note("m", {});
-      expect((await cli("flush"))[1]).toContain("upgrade: Solo ($19 a month) takes 100,000 live records a month");
+      expect((await cli("flush"))[1]).toContain("upgrade: Solo (£19 a month) takes 100,000 live records a month");
     } finally {
       delete process.env.SIGNAFAIDE_API_KEY;
       ctx.service.failAlways = null;

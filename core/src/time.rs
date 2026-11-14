@@ -27,6 +27,55 @@ pub fn parse(s: &str) -> Result<i64> {
     Ok((days_from_civil(y, mo, d) * 86_400 + h * 3600 + mi * 60 + sec) * 1000 + ms)
 }
 
+/// Milliseconds since the Unix epoch for a time a person or program passes to the API outside a
+/// record (§1): RFC 3339 with or without fractional seconds (extra digits after the
+/// milliseconds are dropped) and with `Z` or a numeric offset, e.g. `2026-12-14T23:59:59Z` or
+/// `2026-12-14T23:59:59.5+01:00`. Signed and hashed times use `parse`, which takes only the
+/// protocol form.
+pub fn parse_input(s: &str) -> Result<i64> {
+    let bad = || crate::Error::new(format!("time {s} is not an RFC 3339 time such as 2026-11-13T10:00:00Z or 2026-11-13T10:00:00.000Z"));
+    let b = s.as_bytes();
+    if b.len() < 20 || !b[..19].iter().enumerate().all(|(i, &c)| match i {
+        4 | 7 => c == b'-',
+        10 => c == b'T' || c == b't',
+        13 | 16 => c == b':',
+        _ => c.is_ascii_digit(),
+    }) {
+        return Err(bad());
+    }
+    let mut i = 19;
+    let mut ms = 0i64;
+    if b[i] == b'.' {
+        let start = i + 1;
+        i = start;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == start {
+            return Err(bad());
+        }
+        let frac = &s[start..i.min(start + 3)];
+        ms = format!("{frac:0<3}").parse::<i64>().map_err(|_| bad())?;
+    }
+    let offset_min = match &b[i..] {
+        [b'Z' | b'z'] => 0,
+        [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] if [h1, h2, m1, m2].iter().all(|c| c.is_ascii_digit()) => {
+            let (h, m) = (((h1 - b'0') * 10 + (h2 - b'0')) as i64, ((m1 - b'0') * 10 + (m2 - b'0')) as i64);
+            if h > 23 || m > 59 {
+                return Err(bad());
+            }
+            if *sign == b'+' { h * 60 + m } else { -(h * 60 + m) }
+        }
+        _ => return Err(bad()),
+    };
+    let base = parse(&format!("{}.000Z", &s[..19].replace('t', "T"))).map_err(|_| bad())?;
+    let t = base + ms - offset_min * 60_000;
+    if !(parse("0001-01-01T00:00:00.000Z").unwrap_or(i64::MIN)..=parse("9999-12-31T23:59:59.999Z").unwrap_or(i64::MAX)).contains(&t) {
+        return Err(bad());
+    }
+    Ok(t)
+}
+
 /// Format milliseconds since the epoch as a protocol timestamp.
 pub fn format(ms: i64) -> String {
     let (days, rem) = (ms.div_euclid(86_400_000), ms.rem_euclid(86_400_000));
@@ -104,6 +153,20 @@ mod tests {
         assert_eq!((t.as_str(), raised), ("2026-11-13T10:00:10.000Z", false));
         let (t, raised) = clamp("2026-11-13T10:00:00.000Z", None, Some("2026-11-13T10:00:00.001Z")).unwrap();
         assert_eq!((t.as_str(), raised), ("2026-11-13T10:00:00.001Z", true));
+    }
+
+    #[test]
+    fn input_times() {
+        let at = |s: &str| format(parse_input(s).unwrap());
+        assert_eq!(at("2026-12-14T23:59:59Z"), "2026-12-14T23:59:59.000Z");
+        assert_eq!(at("2026-12-14T23:59:59.000Z"), "2026-12-14T23:59:59.000Z");
+        assert_eq!(at("2026-12-14T23:59:59.5Z"), "2026-12-14T23:59:59.500Z");
+        assert_eq!(at("2026-12-14T23:59:59.123456Z"), "2026-12-14T23:59:59.123Z");
+        assert_eq!(at("2026-12-15T00:59:59+01:00"), "2026-12-14T23:59:59.000Z");
+        assert_eq!(at("2026-12-14T22:59:59.25-01:00"), "2026-12-14T23:59:59.250Z");
+        for s in ["2026-12-14", "2026-12-14T23:59:59", "2026-12-14T23:59:59.Z", "2026-12-14T23:59:59+0100", "2026-02-30T00:00:00Z", "2026-12-14T23:59:59+24:00", "0000-01-01T00:00:00Z"] {
+            assert!(parse_input(s).is_err(), "{s}");
+        }
     }
 
     #[test]

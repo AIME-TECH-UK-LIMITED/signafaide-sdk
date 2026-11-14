@@ -214,7 +214,13 @@ fn variants_pass_with_their_values() {
             let got = c.value.clone().unwrap_or_else(|| serde_json::to_value(c.status).unwrap().as_str().unwrap().to_string());
             assert_eq!(&json!(got), want, "{} check {id}", t["name"]);
         }
+        if let Some(n) = t["expect"]["chain_note"].as_str() {
+            assert!(r.check("chain").detail.contains(n), "{}\n{}", t["name"], r.to_text());
+        }
     }
+    // The instance-start note (§8) names the chain and the seq it continues after.
+    let notes: Vec<&str> = variants.iter().filter_map(|t| t["expect"]["chain_note"].as_str()).collect();
+    assert_eq!(notes, vec![format!("{INSTANCE_NOTE}: agent-a after seq 2").as_str()]);
 }
 
 #[test]

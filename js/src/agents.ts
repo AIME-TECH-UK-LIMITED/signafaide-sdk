@@ -44,6 +44,8 @@ export function SETUP_NOTES(url?: string): string[] {
     url
       ? `witness: ${url} (SIGNAFAIDE_URL in each MCP entry); it needs an API key from that instance, or \`signafaide init\` against it`
       : "witness: https://api.signafaide.com by default; a self-hosted witness (Enterprise contract) is set with --url <witness url> (https://signafaide.com/docs/self-host)",
+    "strict mode: wrap tools that move money, freeze, delete or send with strict: true (strict=True in Python), so they run only once the witness has co-signed the decision",
+    "for an auditor: a live key, agent keys in a secret store (signafaide keys create --agent <name> --env live --print), an auditor link with the keys and head.json attached, and the verification report for the period",
     "agent names: give each agent an explicit name, e.g. wrapTools(tools, { agent: \"claims-bot\" }) or wrap_tools(tools, agent=\"claims-bot\"); otherwise the folder name is used. Production set-up: https://signafaide.com/docs/production",
   ];
 }

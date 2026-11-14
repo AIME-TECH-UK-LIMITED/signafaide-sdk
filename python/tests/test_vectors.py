@@ -219,6 +219,9 @@ def test_variants(v, bls):
         r = verify_pack(case["pack"], keys, **o)
         assert r.result_line == case["expect"]["result_line"], (case["name"], str(r))
         assert {c.id: c.value or c.status for c in r.checks} == case["expect"]["checks"], (case["name"], str(r))
+        if "chain_note" in case["expect"]:
+            assert case["expect"]["chain_note"] in r.check("chain").detail, (case["name"], str(r))
+    assert sum(1 for c in v["variants"] if "chain_note" in c["expect"]) == 1
 
 
 def test_pack_without_bls_says_not_checked(v):

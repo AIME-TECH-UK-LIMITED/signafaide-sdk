@@ -208,7 +208,9 @@ describe.skipIf(!v)("spec/vectors.json", () => {
       const r = verifyPack(c.pack, ...inputs(c, { drand }));
       expect(r.resultLine, c.name).toBe(c.expect.result_line);
       expect(Object.fromEntries(r.checks.map((x) => [x.id, x.value ?? x.status])), c.name).toEqual(c.expect.checks);
+      if (c.expect.chain_note) expect(r.check("chain").detail, c.name).toContain(c.expect.chain_note);
     }
+    expect(v.variants.filter((c: any) => c.expect.chain_note).length).toBe(1);
   });
 
   it("monotonic time: the client's time for a new record (spec §2.2)", () => {

@@ -479,6 +479,13 @@ impl AgentKeyEntry {
 
 pub const AGENT_KEYS_FORMAT: &str = "signafaide-agent-keys/1";
 
+/// The name of the note a new instance writes first when it continues a chain its disk does not
+/// hold (§8): records an earlier instance wrote but had not sent are not in the chain.
+pub const INSTANCE_START: &str = "signafaide.instance_start";
+
+/// The check 4 note (§7) naming the chains that continue in a new instance.
+pub const INSTANCE_NOTE: &str = "a new instance continued the chain, so records an earlier instance wrote but had not sent are not known";
+
 /// §2.5 the agent-key manifest a customer gives auditors (`--agent-keys`).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
