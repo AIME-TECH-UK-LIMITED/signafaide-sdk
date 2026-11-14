@@ -1,7 +1,7 @@
 {
   "name": "signafaide",
   "displayName": "signafAIde",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Signed, tamper-evident records of what your AI agents decided: an MCP server to set it up and verify it, and a skill that says when to use it.",
   "author": { "name": "AIMETECH" },
   "license": "Apache-2.0",

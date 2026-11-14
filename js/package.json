@@ -1,6 +1,6 @@
 {
   "name": "signafaide",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Signed, chained records of what your AI agents decided. Hash-only by default.",
   "license": "Apache-2.0",
   "type": "module",
@@ -62,5 +62,25 @@
     "typescript": "^5.9.3",
     "vitest": "^3.2.4",
     "zod": "^4.6.7"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk.git",
+    "directory": "js"
+  },
+  "homepage": "https://signafaide.co.uk",
+  "bugs": {
+    "url": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues"
+  },
+  "author": "AIME TECH UK LIMITED (https://signafaide.co.uk)",
+  "keywords": [
+    "ai-agents",
+    "audit-trail",
+    "tamper-evident",
+    "verifiable",
+    "eu-ai-act",
+    "provenance",
+    "signing",
+    "mcp"
+  ]
 }

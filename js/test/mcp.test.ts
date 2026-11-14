@@ -154,7 +154,7 @@ describe("mcp server", () => {
 
   it("setup: a Python script with no dependency file is Python, even next to a package.json that only holds signafaide", async () => {
     write("agent.py", "def issue_refund(ticket_id, amount):\n    return {}\n");
-    write("package.json", JSON.stringify({ dependencies: { signafaide: "file:signafaide-0.2.0.tgz" } }));
+    write("package.json", JSON.stringify({ dependencies: { signafaide: "file:signafaide-0.2.1.tgz" } }));
     let [out] = await call("signafaide_setup");
     expect(out).toContain("Language: python");
     expect(out).toContain("agent.py:1 issue_refund");

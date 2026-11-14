@@ -1,6 +1,6 @@
 {
   "name": "signafaide-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The signafAIde MCP server for coding agents (Claude Code, Codex, Cursor, Gemini CLI, Copilot, Windsurf).",
   "license": "Apache-2.0",
   "type": "module",
@@ -26,5 +26,22 @@
     "@noble/ed25519": "^2.3.0",
     "@noble/hashes": "^1.8.0",
     "zod": "^4.6.7"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk.git",
+    "directory": "js/mcp"
+  },
+  "homepage": "https://signafaide.co.uk",
+  "bugs": {
+    "url": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues"
+  },
+  "author": "AIME TECH UK LIMITED (https://signafaide.co.uk)",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "audit-trail",
+    "signafaide"
+  ]
 }

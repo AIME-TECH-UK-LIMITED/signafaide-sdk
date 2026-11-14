@@ -9,6 +9,13 @@ The record format changed between v0.1.1 and v0.1.2 (salted content hashes) and 
 (packs name their project), before any public release. Records and packs written by a version
 verify with that version and later ones unless an entry below says otherwise.
 
+## v0.2.1 (2026-11-14)
+
+First release published to npm and PyPI.
+
+- Package metadata: repository, homepage, issue tracker and keywords for `signafaide`, `signafaide-mcp` and the Python package.
+- No code or protocol change from v0.2.0.
+
 ## v0.2.0 (2026-11-14)
 
 Fix round 6.

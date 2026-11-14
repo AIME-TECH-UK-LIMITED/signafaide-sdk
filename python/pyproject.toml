@@ -4,16 +4,26 @@ build-backend = "hatchling.build"
 
 [project]
 name = "signafaide"
-version = "0.2.0"
+version = "0.2.1"
 description = "Signed, chained records of what your AI agents decided. Hash-only by default."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
 dependencies = ["cryptography>=41", "py_ecc>=7"]
+keywords = ["ai-agents", "audit-trail", "tamper-evident", "verifiable", "eu-ai-act", "provenance"]
 classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Topic :: Security :: Cryptography",
   "Programming Language :: Python :: 3",
   "Operating System :: OS Independent",
 ]
+
+[project.urls]
+Homepage = "https://signafaide.co.uk"
+Documentation = "https://signafaide.co.uk/docs"
+Repository = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk"
+Changelog = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues"
 
 [project.optional-dependencies]
 # Kept so `pip install "signafaide[bls]"` still works; BLS is now a regular dependency.
