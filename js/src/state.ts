@@ -16,7 +16,7 @@
  * - `head.json`                  newest signed head, `{project: {env: {agent: {head, head_sig}}}}`
  * - `tools/<agent>.json`         the tools each source last declared for the agent (§2.6)
  * - `config.json`                coding agent; API key fingerprint -> {project, env}
- * - `sandbox.json`               the sandbox project and claim link
+ * - `sandbox.json`               the sandbox project, its claim link and when it expires unclaimed
  *
  * Writers take a per-chain lock file, so several processes can record for the same agent
  * without forking its chain. Receipts are filled into the trailing chain lines through a
@@ -1120,7 +1120,7 @@ export class State {
     }
   }
 
-  sandbox(): { project?: string; claim_url?: string; free_quota?: number; url?: string; created?: string; terms_url?: string; privacy_url?: string; claimed?: boolean } | null {
+  sandbox(): { project?: string; claim_url?: string; free_quota?: number; url?: string; created?: string; terms_url?: string; privacy_url?: string; claimed?: boolean; expires_at?: string } | null {
     return readJson(path.join(this.home, "sandbox.json"));
   }
 

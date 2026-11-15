@@ -49,8 +49,8 @@ export const ERRORS: ErrorDoc[] = [
   {
     code: "invalid_key",
     status: 401,
-    means: "The API key is missing, malformed or revoked.",
-    fix: "Check SIGNAFAIDE_API_KEY in the environment or `.env`. Remove it and run `signafaide init` to create a new sandbox, or paste a live key from the console.",
+    means: "The API key is missing, malformed or revoked, or it is the key of a sandbox that nobody claimed before it expired: the service deletes such a sandbox and its records there, and its key with them.",
+    fix: "Check SIGNAFAIDE_API_KEY in the environment or `.env`. Remove it and run `signafaide init` to create a new sandbox (then claim it: `signafaide status` shows the link and the days left), or paste a live key from the console. Records on this machine are kept and still verify.",
   },
   {
     code: "invalid_record",

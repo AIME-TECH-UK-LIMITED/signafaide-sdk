@@ -117,7 +117,7 @@ export class Client {
     return ctype.includes("json") || /^[[{]/.test(text) ? JSON.parse(text) : text;
   }
 
-  sandbox(): Promise<{ project: string; api_key: string; claim_url: string; free_quota: number; terms_url?: string; privacy_url?: string }> {
+  sandbox(): Promise<{ project: string; api_key: string; claim_url: string; free_quota: number; expires_at?: string; terms_url?: string; privacy_url?: string }> {
     return this.request("POST", "/v1/sandbox", { body: {}, auth: false });
   }
 
@@ -132,8 +132,8 @@ export class Client {
     return this.request("POST", "/v1/agents", { body: { name, public_key: publicKey, valid_from: validFrom, proof, ...(rotation ? { rotation } : {}) } });
   }
 
-  /** `{project, env}` of this API key (§6). */
-  project(): Promise<{ project: string; env: string; claimed?: boolean; name?: string | null }> {
+  /** `{project, env}` of this API key (§6); `expires_at` while it is an unclaimed sandbox. */
+  project(): Promise<{ project: string; env: string; claimed?: boolean; name?: string | null; expires_at?: string }> {
     return this.request("GET", "/v1/project");
   }
 

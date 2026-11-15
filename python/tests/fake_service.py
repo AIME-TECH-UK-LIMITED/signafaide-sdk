@@ -21,6 +21,12 @@ def err(status, code, message, **extra):
     return status, {"error": {"code": code, "message": message, "docs": f"https://docs.example/errors#{code}", **extra}}
 
 
+def _rfc3339(t: float) -> str:
+    """Unix seconds as RFC 3339 UTC with milliseconds."""
+    ms = int(round(t * 1000))
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ms // 1000)) + f".{ms % 1000:03d}Z"
+
+
 class FakeService:
     def __init__(self):
         self.key = SigningKey.generate()
@@ -33,6 +39,7 @@ class FakeService:
         self.hang = 0.0  # seconds to wait before answering any request (a slow or hanging witness)
         self.lock = threading.Lock()
         self.sandbox_n = 0
+        self.sandbox_days = 30  # days an unclaimed sandbox is kept; None: a witness that sends no expires_at (an older one)
         self.registrations = []
         self.client_ids = []  # X-Signafaide-Client of every request
         self.events = []
@@ -45,6 +52,14 @@ class FakeService:
     def close(self):
         self.server.shutdown()
         self.server.server_close()
+
+    def cleanup(self):
+        """The daily cleanup: delete every unclaimed sandbox whose time has passed; their keys are then refused."""
+        from signafaide import _claim
+
+        for key, prj in list(self.projects.items()):
+            if prj.get("expires_at") and not prj.get("claimed") and _claim.days_left(prj["expires_at"]) == 0:
+                del self.projects[key]
 
     def add_project(self, api_key, env="test"):
         self.n_projects = getattr(self, "n_projects", 0) + 1
@@ -64,7 +79,10 @@ class FakeService:
             self.sandbox_n += 1
             key = "sfa_test_" + f"{self.sandbox_n:032d}"
             prj = self.add_project(key)
+            if self.sandbox_days is not None:
+                prj["expires_at"] = _rfc3339(time.time() + self.sandbox_days * 86_400)
             return 200, {"project": prj["project"], "api_key": key, "claim_url": f"{self.url}/app/claim/{self.sandbox_n}", "free_quota": 1000,
+                         **({"expires_at": prj["expires_at"]} if prj.get("expires_at") else {}),
                          "terms_url": f"{self.url}/legal/terms", "privacy_url": f"{self.url}/legal/privacy"}
         if method == "POST" and path == "/v1/events":
             self.events.append(body.get("name"))
@@ -73,7 +91,9 @@ class FakeService:
         if prj is None:
             return err(401, "invalid_key", "The API key is not valid; run `signafaide init` for a new sandbox key.")
         if method == "GET" and path == "/v1/project":
-            return 200, {"project": prj["project"], "env": prj["env"], "claimed": bool(prj.get("claimed")), "name": prj.get("name")}
+            # As the service: expires_at only while the sandbox is unclaimed.
+            return 200, {"project": prj["project"], "env": prj["env"], "claimed": bool(prj.get("claimed")), "name": prj.get("name"),
+                         **({"expires_at": prj["expires_at"]} if prj.get("expires_at") and not prj.get("claimed") else {})}
         if method == "POST" and path == "/v1/agents":
             pk = body["public_key"]
             kid = key_id(b64url_decode(pk))

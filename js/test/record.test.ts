@@ -281,19 +281,21 @@ describe("init", () => {
     expect(fs.existsSync(path.join(ctx.root, ".env"))).toBe(false);
   });
 
-  it("createSandbox (signafaide init) creates one sandbox and prints one line", async () => {
+  it("createSandbox (signafaide init) creates one sandbox and prints it once, with why to claim and the time left", async () => {
     const lines: string[] = [];
     const orig = console.error;
     console.error = (s: string) => lines.push(s);
     try {
       await configure({ url: ctx.service.url }).createSandbox();
-      expect(lines).toHaveLength(1);
+      expect(lines).toHaveLength(3);
       expect(lines[0]).toContain(`claim it at ${ctx.service.url}/app/claim/`);
+      expect(lines[1]).toMatch(/^signafaide: claiming is free and needs no card/);
+      expect(lines[2]).toMatch(/^signafaide: 30 days left: /);
       const env = fs.readFileSync(path.join(ctx.root, ".env"), "utf8");
       expect(env.match(/SIGNAFAIDE_API_KEY=sfa_test_/g)).toHaveLength(1);
       await configure({ url: ctx.service.url }).createSandbox();
       expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf8")).toBe(env);
-      expect(lines).toHaveLength(1);
+      expect(lines).toHaveLength(3);
       expect(getRecorder().state.sandbox()?.claim_url).toContain(ctx.service.url);
       expect(fs.readFileSync(path.join(ctx.root, ".gitignore"), "utf8").split("\n")).toEqual(expect.arrayContaining([".signafaide/", ".env"]));
     } finally {

@@ -1,6 +1,6 @@
 {
   "name": "signafaide",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Signed, tamper-evident records of AI agent tool calls: an MCP server to set it up and verify it, and a skill that says when to use it.",
   "author": { "name": "AIMETECH" },
   "homepage": "https://signafaide.co.uk",

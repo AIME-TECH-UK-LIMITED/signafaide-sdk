@@ -8,6 +8,7 @@ import { b64url, hashJson, type SigningKey } from "./crypto.js";
 import { Client, DEFAULT_URL, SignafaideError, type Transport } from "./http.js";
 import { nodeTransport } from "./nodehttp.js";
 import { plural } from "./plural.js";
+import { claimNotes, daysLeft, parseExpiry } from "./claim.js";
 import {
   API_KEY_RE,
   AGENT_RE,
@@ -332,9 +333,15 @@ export class Recorder {
       this.state.ignoreInGit(".env"); // the key must not be committed
       this.state.learnProject(resp.api_key, resp.project, "test");
       const legal = legalLinks(resp, this.url);
-      this.state.saveSandbox({ project: resp.project, claim_url: resp.claim_url, free_quota: resp.free_quota, url: this.url, created: now(), ...legal });
+      // When the witness deletes the sandbox unless it is claimed; a witness that does not say is not guessed.
+      const expires = parseExpiry(resp.expires_at);
+      this.state.saveSandbox({ project: resp.project, claim_url: resp.claim_url, free_quota: resp.free_quota, url: this.url, created: now(), ...(expires ? { expires_at: expires } : {}), ...legal });
       this._apiKey = resp.api_key;
-      if (!this.quiet) console.error(`signafaide: sandbox ready, key saved to .env; claim it at ${resp.claim_url}. ${termsNotice(legal)}`);
+      if (!this.quiet) {
+        console.error(`signafaide: sandbox ready, key saved to .env; claim it at ${resp.claim_url}. ${termsNotice(legal)}`);
+        const view = { claim_url: resp.claim_url, claimed: false, expires_at: expires, days_left: expires ? daysLeft(expires) : null, refused: false, unconfirmed: false };
+        for (const line of claimNotes(view)) console.error(`signafaide: ${line}`);
+      }
       return resp.api_key;
     });
   }

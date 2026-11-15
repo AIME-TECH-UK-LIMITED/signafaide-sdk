@@ -124,8 +124,8 @@ describe("#54: the skill", () => {
     expect(body).not.toMatch(/—|–/);
   });
 
-  it("the version is 0.3.1 everywhere the package says it", () => {
-    expect(VERSION).toBe("0.3.1");
+  it("the version is 0.3.2 everywhere the package says it", () => {
+    expect(VERSION).toBe("0.3.2");
     expect(JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8")).version).toBe(VERSION);
     expect(JSON.parse(fs.readFileSync(path.join(__dirname, "../mcp/package.json"), "utf8")).version).toBe(VERSION);
   });
@@ -146,6 +146,7 @@ describe("#46: the release check", () => {
     "scripts/release-check.mjs", "CHANGELOG.md", "js/package.json", "js/mcp/package.json", "js/src/version.ts", "js/src/http.ts",
     "python/pyproject.toml", "python/src/signafaide/_version.py", "python/src/signafaide/http.py", "plugin/.mcp.json",
     "plugin/.claude-plugin/plugin.json", "core/Cargo.toml", "verifier/Cargo.toml", "verifier/src/main.rs",
+    "gemini-extension.json", ".cursor-plugin/plugin.json", "mcp.json", "README.md",
   ];
   const sdk = path.join(__dirname, "../..");
   const run = (dir: string): string => spawnSync(process.execPath, ["scripts/release-check.mjs", "--offline", "--no-build"], { cwd: dir, encoding: "utf8", env: { ...process.env, CARGO_TARGET_DIR: path.join(dir, "no-target") } }).stdout;

@@ -8,6 +8,7 @@ import * as path from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { statusLines } from "./cli.js";
+import { claimLines, sandboxGone, sandboxView } from "./claim.js";
 import { explainError } from "./errors.js";
 import { verify } from "./index.js";
 import { FRAMEWORKS, LANGUAGES, detectProject, installCommand, snippet, verifyCommand, type Framework, type Language } from "./project.js";
@@ -58,14 +59,23 @@ async function guard(fn: () => Promise<string>): Promise<Result> {
   }
 }
 
-/** One line on the API key, without creating anything. */
-function keyLine(rec: Recorder): string {
+/** The API key, without creating anything; with a sandbox key, the claim step for the human. */
+async function keyLine(rec: Recorder, refresh = true): Promise<string> {
   const had = rec.apiKey;
   if (!had) {
     return "API key: none. Records stay on this machine (signed, chained, verifiable with signafaide verify); nothing is sent and no sandbox exists.";
   }
-  const claim = had.startsWith("sfa_test_") ? rec.state.sandbox()?.claim_url : undefined;
-  return `API key: found (${envOf(had)} env); record hashes are sent to ${rec.url}${claim ? `; the human claims the sandbox at ${claim}` : ""}.`;
+  const line = `API key: found (${envOf(had)} env); record hashes are sent to ${rec.url}.`;
+  const view = await sandboxView(rec, { refresh });
+  return view ? `${line}\n${claimText(view, rec)}` : line;
+}
+
+/** The claim step, for the agent to pass on to the human as it stands. */
+function claimText(view: NonNullable<Awaited<ReturnType<typeof sandboxView>>>, rec: Recorder): string {
+  const lines = claimLines(view, rec.state.root);
+  if (view.claimed) return lines.join("\n");
+  if (sandboxGone(view)) return `Tell the human:\n${lines.join("\n")}`;
+  return `Give the human the claim link and what follows it, in these words; do not open the link yourself:\n${lines.join("\n")}`;
 }
 
 /** What `signafaide_init` (or `signafaide init`) would create and send. */
@@ -120,7 +130,7 @@ export function createServer(root: string = process.cwd()): McpServer {
           return out.join("\n");
         }
         out.push(`Language: ${p.language}; framework: ${p.framework === "plain" ? "none detected (plain functions)" : p.framework}`);
-        out.push(keyLine(rec));
+        out.push(await keyLine(rec, false)); // a preview: the witness is not asked and nothing is saved
         out.push("", steps(p.language, p.framework, p.installed ? `already a dependency (${p.install.split(",")[0]} updates it)` : p.install, p.verify));
         if (p.candidates.length) out.push("", "Functions that look like actions (check which ones the agent calls):", ...p.candidates.map((c) => `- ${c}`));
         out.push(
@@ -140,7 +150,7 @@ export function createServer(root: string = process.cwd()): McpServer {
     {
       title: "Create an external signafAIde sandbox (ask the user first)",
       description:
-        "Creates an external sandbox project on the signafAIde service (or the SIGNAFAIDE_URL witness), saves its API key to .env and returns the claim link. " +
+        "Creates an external sandbox project on the signafAIde service (or the SIGNAFAIDE_URL witness), saves its API key to .env and returns the claim link, what claiming gives and when an unclaimed sandbox is deleted. " +
         "From then on record hashes (never content) are sent there, and records written earlier ship with their original times. " +
         "This is an external side effect: ask the user and call it only after they agree. Without it, records stay local and still verify. " +
         "Creating a sandbox means the user agrees to the signafAIde Terms and Privacy notice (<service>/legal/terms and <service>/legal/privacy, where <service> is SIGNAFAIDE_URL or the signafAIde service): show them both links when you ask, and pass on the notice this tool returns. " +
@@ -157,7 +167,7 @@ export function createServer(root: string = process.cwd()): McpServer {
     ({ directory: dir, confirm_user_agreed, user_words }) =>
       guard(async () => {
         const rec = open(dir);
-        if (rec.apiKey) return keyLine(rec) + " Nothing was created.";
+        if (rec.apiKey) return `Nothing was created. ${await keyLine(rec)}`;
         const words = (user_words ?? "").trim();
         if (confirm_user_agreed !== true || words.length < 2) {
           const legal = legalLinks({}, rec.url);
@@ -169,10 +179,11 @@ export function createServer(root: string = process.cwd()): McpServer {
         }
         rec.rememberAgent();
         await rec.createSandbox();
-        const claim = rec.state.sandbox()?.claim_url;
+        const view = await sandboxView(rec, { refresh: false });
         return (
           `Created a sandbox at ${rec.url} (no account) and saved SIGNAFAIDE_API_KEY to ${path.join(rec.state.root, ".env")} (in .gitignore). ` +
-          `Give the human this claim link so they can keep the records: ${claim}. Records written before now ship on the next run, or call signafaide_verify.\n` +
+          "Records written before now ship on the next run, or call signafaide_verify.\n" +
+          (view ? `${claimText(view, rec)}\n` : "") +
           `Tell the human: ${termsNotice(rec.legal())}`
         );
       }),
@@ -227,7 +238,7 @@ export function createServer(root: string = process.cwd()): McpServer {
     "signafaide_status",
     {
       title: "signafAIde status",
-      description: "API key and env, the service URL, each agent chain with its record count and last receipt, records waiting in the outbox, the quota and the claim link.",
+      description: "API key and env, the service URL, each agent chain with its record count and last receipt, records waiting in the outbox, the quota, and the claim link with how long an unclaimed sandbox has left.",
       inputSchema: z.object({ directory }),
     },
     ({ directory: dir }) => guard(async () => (await statusLines(open(dir))).join("\n")),
@@ -247,16 +258,16 @@ export function createServer(root: string = process.cwd()): McpServer {
     "signafaide_claim_link",
     {
       title: "signafAIde sandbox claim link",
-      description: "The link the human opens to claim this project's free sandbox and keep its records. Show it to the user; do not open it yourself.",
+      description: "The link the human opens to claim this project's free sandbox and keep its records, what claiming gives and how long an unclaimed sandbox has left. Show it to the user; do not open it yourself.",
       inputSchema: z.object({ directory }),
     },
     ({ directory: dir }) =>
       guard(async () => {
         const rec = open(dir);
         if (rec.apiKey?.startsWith("sfa_live_")) return "This project uses a live key; there is nothing to claim.";
-        const claim = rec.state.sandbox()?.claim_url;
-        return claim
-          ? `Claim link for the human: ${claim}`
+        const view = await sandboxView(rec);
+        return view
+          ? claimText(view, rec)
           : "No sandbox in this project: records stay local. A sandbox is created only when the user agrees (signafaide_init, or `npx signafaide init`).";
       }),
   );

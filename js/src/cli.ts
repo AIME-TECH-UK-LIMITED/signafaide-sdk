@@ -9,6 +9,7 @@ import { verify } from "./index.js";
 import { VerificationFailed, compare } from "./experiments.js";
 import { replay } from "./replay.js";
 import { plural } from "./plural.js";
+import { CLAIM_DONE, claimLines, claimNotes, sandboxGone, sandboxJson, sandboxView } from "./claim.js";
 import { configure, envOf, termsNotice, type Recorder } from "./runtime.js";
 import { StateError, findRoot } from "./state.js";
 import { AGENT_IDS, SETUP_NOTES, setup } from "./agents.js";
@@ -67,12 +68,16 @@ export async function statusLines(rec: Recorder): Promise<string[]> {
           (s.env ? ` (env ${s.env})` : "; records stay on this machine (signed and chained, nothing is sent). `signafaide init` creates a free sandbox and sends hashes; or set SIGNAFAIDE_API_KEY"),
   );
   lines.push(`service: ${s.url}`);
-  let project: { project?: string; env?: string; claimed?: boolean; name?: string | null } = {};
+  let project: { project?: string; env?: string; claimed?: boolean; name?: string | null; expires_at?: string } = {};
+  let answered = false;
+  let refused = false;
   if (s.api_key) {
     try {
       project = (await rec.client(5000).project()) ?? {};
-    } catch {
+      answered = true;
+    } catch (e) {
       project = {};
+      refused = (e as { code?: string }).code === "invalid_key";
     }
   }
   const name = typeof project.name === "string" && project.name ? project.name : null;
@@ -93,7 +98,6 @@ export async function statusLines(rec: Recorder): Promise<string[]> {
   for (const h of s.held) lines.push(`held: ${h.chain}: ${plural(h.records, "record")} set aside by \`signafaide repair\` in ${h.file} (kept, verifiable locally, not co-signed)`);
   lines.push(`outbox: ${plural(s.outbox, "record")} waiting` + (s.outbox && !blocked.length ? "; run `signafaide flush`" : ""));
   lines.push(...blocked);
-  let claimed = !!s.sandbox?.claimed;
   if (s.api_key) {
     try {
       const u = await rec.client(5000).usage();
@@ -102,23 +106,18 @@ export async function statusLines(rec: Recorder): Promise<string[]> {
     } catch (e) {
       lines.push(`quota: unknown (${(e as Error).message})`);
     }
-    if (!claimed && s.api_key.startsWith("sfa_test_") && s.sandbox?.claim_url) {
-      try {
-        claimed = project.claimed === true;
-        if (claimed) rec.state.saveSandbox({ ...s.sandbox, claimed: true });
-      } catch {
-        /* shown as unclaimed */
-      }
-    }
   }
-  if (s.sandbox?.claim_url && s.api_key?.startsWith("sfa_test_")) lines.push(claimed ? "claim: done (this sandbox belongs to an organisation now)" : `claim: ${s.sandbox.claim_url}`);
+  // The claim step, from the answer above: the link and why to claim, the time left when the
+  // witness gave it, "done" once claimed, and how to carry on when the sandbox is gone.
+  const view = await sandboxView(rec, { answer: answered ? project : null, refused });
+  if (view) lines.push(...claimLines(view, rec.state.root));
   return lines;
 }
 
 export const COMMANDS: Record<string, Command> = {
   init: {
     help:
-      "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link. " +
+      "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link and how long an unclaimed sandbox is kept. " +
       "The witness is https://api.signafaide.co.uk unless SIGNAFAIDE_URL names another (a self-hosted witness, or http://127.0.0.1:7474 for a local one). " +
       "Adds .signafaide/ and .env to .gitignore",
     usage: "init   (environment: SIGNAFAIDE_URL=<witness url>, SIGNAFAIDE_API_KEY=<existing key>)",
@@ -128,14 +127,18 @@ export const COMMANDS: Record<string, Command> = {
       rec.state.ignoreInGit();
       const had = rec.apiKey;
       const key = await rec.createSandbox();
-      const claim = rec.state.sandbox()?.claim_url;
+      // A sandbox made just now is described from the witness's own answer; an existing one is asked about.
+      const view = await sandboxView(rec, { refresh: !!had });
       if (!had) {
-        out(`sandbox ready at ${rec.url}, key saved to ${path.join(rec.state.root, ".env")}; claim it at ${claim}`);
+        out(`sandbox ready at ${rec.url}, key saved to ${path.join(rec.state.root, ".env")}; claim it at ${view?.claim_url}`);
+        if (view) for (const line of claimNotes(view)) out(line);
         out(termsNotice(rec.legal()));
         out("from now on record hashes (never content) are sent for co-signature and public timestamps; records written before now ship with their original times on the next run or with `signafaide flush`");
-      }
-      else if (key.startsWith("sfa_test_") && claim) out(`key found (${mask(key)}); claim the sandbox at ${claim}`);
-      else out(`key found (${mask(key)}, env ${envOf(key)}); nothing to create`);
+      } else if (view) {
+        const [first, ...rest] = claimLines(view, rec.state.root);
+        out(view.claimed || sandboxGone(view) ? `key found (${mask(key)}); ${first}` : `key found (${mask(key)}); claim the sandbox at ${view.claim_url}`);
+        for (const line of rest) out(line);
+      } else out(`key found (${mask(key)}, env ${envOf(key)}); nothing to create`);
       return 0;
     },
   },
@@ -216,9 +219,14 @@ export const COMMANDS: Record<string, Command> = {
         await rec.event("verify");
         return 2;
       }
-      out(v.json ? JSON.stringify(report, null, 2) : String(report));
+      // The sandbox's claim step goes with the result: as data in --json, as plain lines after a pass.
+      const view = await sandboxView(rec, { refresh: !v.offline });
+      out(v.json ? JSON.stringify(view ? { ...(report.toJSON() as object), sandbox: sandboxJson(view) } : report, null, 2) : String(report));
       await rec.event("verify");
-      if (report.ok && !v.json) await upgradeAfterVerify(rec);
+      if (report.ok && !v.json) {
+        if (view && !view.claimed) for (const line of claimLines(view, rec.state.root)) out(line);
+        await upgradeAfterVerify(rec);
+      }
       return report.ok ? 0 : 1;
     },
   },
@@ -354,19 +362,30 @@ export const COMMANDS: Record<string, Command> = {
   },
 
   claim: {
-    help: "print the sandbox claim link again",
+    help: "print the sandbox claim link again, why to claim it and how long an unclaimed sandbox has left",
     async run() {
       const rec = recorder();
       if (rec.apiKey?.startsWith("sfa_live_")) {
         out("this project uses a live key; there is nothing to claim");
         return 0;
       }
-      const claim = rec.state.sandbox()?.claim_url;
-      if (!claim) {
+      const view = await sandboxView(rec);
+      if (!view) {
         err("no sandbox here; run `signafaide init` first");
         return 1;
       }
-      out(claim);
+      if (view.claimed) {
+        out(CLAIM_DONE);
+        return 0;
+      }
+      if (sandboxGone(view)) {
+        for (const line of claimLines(view, rec.state.root)) err(line);
+        return 1;
+      }
+      // The link alone on the first line, for scripts; then why to claim and the time left.
+      const [, ...rest] = claimLines(view, rec.state.root);
+      out(view.claim_url);
+      for (const line of rest) out(line);
       return 0;
     },
   },

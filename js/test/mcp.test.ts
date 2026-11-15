@@ -104,7 +104,7 @@ describe("mcp server", () => {
     expect(fs.existsSync(path.join(ctx.root, ".env"))).toBe(false);
     [out, err] = await call("signafaide_init", AGREED);
     expect(err).toBe(false);
-    expect(out).toMatch(/Created a sandbox at .*claim link.*\/claim\//);
+    expect(out).toMatch(/Created a sandbox at .*claim link.*\/claim\//s);
     expect(out).toContain(`Tell the human: By creating a sandbox you agree to the signafAIde Terms (${ctx.service.url}/legal/terms) and Privacy notice (${ctx.service.url}/legal/privacy).`);
     expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf8")).toMatch(/^SIGNAFAIDE_API_KEY=sfa_test_/);
     expect(fs.readFileSync(path.join(ctx.root, ".gitignore"), "utf8").split("\n")).toEqual(expect.arrayContaining([".signafaide/", ".env"]));
@@ -113,7 +113,7 @@ describe("mcp server", () => {
     expect(ctx.service.calls.filter((c) => c === "POST /v1/sandbox")).toHaveLength(1);
     [out] = await call("signafaide_setup");
     expect(out).toContain("API key: found (test env); record hashes are sent to");
-    expect(out).toContain("the human claims the sandbox at");
+    expect(out).toContain("claim: http");
     expect(out).not.toContain("What a sandbox would send");
   });
 
@@ -249,7 +249,7 @@ describe("mcp server", () => {
     write("requirements.txt", "");
     await call("signafaide_init", AGREED);
     [out] = await call("signafaide_claim_link");
-    expect(out).toMatch(/^Claim link for the human: http.*\/claim\//);
+    expect(out).toMatch(/^Give the human the claim link .*\nclaim: http.*\/claim\//);
     [out] = await call("signafaide_status");
     expect(out).toContain("(env test)");
     expect(out).toContain("quota: 0 of");

@@ -136,7 +136,8 @@ def test_cli_events_never_fail_the_command(cli, service, tmp_path, monkeypatch, 
     keys.write_text(json.dumps({"keys": [service.key_doc]}))
     monkeypatch.setenv("SIGNAFAIDE_URL", dead_url)  # the event cannot be delivered
     code, out = cli("verify", str(pack), "--keys", str(keys))
-    assert code == 0 and no_counts(out.out.strip().splitlines()[-1]).startswith("PASS: export of every agent, all records, generated ") and out.err == ""
+    # The result line, then the sandbox's claim step from sandbox.json (the witness cannot be asked).
+    assert code == 0 and no_counts(out.out.strip().splitlines()[-4]).startswith("PASS: export of every agent, all records, generated ") and out.err == ""
 
 
 def test_cli_opt_out_sends_no_events(cli, service, tmp_path, monkeypatch):

@@ -1,11 +1,11 @@
 {
   "name": "signafaide",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Signed, tamper-evident records of AI agent tool calls: set up, record, verify and check coverage.",
   "mcpServers": {
     "signafaide": {
       "command": "npx",
-      "args": ["-y", "signafaide-mcp@0.3.1"]
+      "args": ["-y", "signafaide-mcp@0.3.2"]
     }
   }
 }

@@ -2,7 +2,7 @@
   "mcpServers": {
     "signafaide": {
       "command": "npx",
-      "args": ["-y", "signafaide-mcp@0.3.1"]
+      "args": ["-y", "signafaide-mcp@0.3.2"]
     }
   }
 }

@@ -18,7 +18,7 @@ signafAIde records the decisions AI agents make. Each record is signed with the 
 | [`python-langchain/`](python-langchain/README.md) | `langchain-signafaide`: a LangChain agent middleware that records every tool call the agent makes |
 | [`js/`](js/README.md) | the TypeScript SDK, CLI and `agent setup` for coding agents (`signafaide` on npm), and the MCP server (`signafaide-mcp`, in `js/mcp`) |
 | [`scripts/release-check.mjs`](scripts/release-check.mjs) | run before a release: the default witness is the hosted service, every version agrees and was bumped since the last tag, `CHANGELOG.md` has its entry, the verifier binary is built from this source, and the npm and PyPI names are claimed |
-| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.3.1`) |
+| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.3.2`) |
 | [`verifier/`](verifier) | `signafaide-verify`, the standalone Rust verifier of a pack (also builds to WebAssembly) |
 | [`core/`](core) | the Rust protocol core shared by the verifier and the service |
 | [`plugin/`](plugin/README.md) | the Claude Code plugin: the MCP server and the skill |
@@ -40,14 +40,14 @@ The MCP server (`signafaide-mcp`, Node.js 20 or later) lets a coding agent previ
 ```json
 {
   "mcpServers": {
-    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.3.1"] }
+    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.3.2"] }
   }
 }
 ```
 
-- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.3.1`
+- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.3.2`
 - Gemini CLI: `gemini extensions install https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk`
-- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.3.1%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
+- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.3.2%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
 
 There are no API keys or other settings. To check it works, ask the agent to call `signafaide_status`.
 

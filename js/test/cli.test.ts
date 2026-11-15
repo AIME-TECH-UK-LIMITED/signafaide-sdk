@@ -35,7 +35,7 @@ describe("cli", () => {
   it("init, then claim", async () => {
     const [code, out] = await cli("init");
     expect(code).toBe(0);
-    expect(out.split("\n")).toHaveLength(3);
+    expect(out.split("\n")).toHaveLength(5); // ready + claim link, why claim, time left, terms, what is sent
     expect(out).toContain(`claim it at ${ctx.service.url}/app/claim/`);
     expect(out).toContain(`By creating a sandbox you agree to the signafAIde Terms (${ctx.service.url}/legal/terms) and Privacy notice (${ctx.service.url}/legal/privacy).`);
     expect(out).toContain("records written before now ship with their original times");
@@ -44,7 +44,7 @@ describe("cli", () => {
     const [, again] = await cli("init");
     expect(again).toContain("key found");
     expect(again).toContain(claim);
-    expect((await cli("claim"))[1]).toBe(claim);
+    expect((await cli("claim"))[1].split("\n")[0]).toBe(claim); // the link alone on the first line
   });
 
   it("without a key: status, flush and verify are local and send nothing", async () => {
@@ -88,7 +88,8 @@ describe("cli", () => {
     [code, out] = await cli("verify");
     expect(code).toBe(0);
     // The test service is plain http on this machine: accepted, and said not to be independent.
-    expect(noCounts(out.split("\n").at(-1))).toBe("PASS (service keys fetched over plain http, not independent)");
+    // The result line, then the sandbox's claim step (three lines while it is unclaimed).
+    expect(noCounts(out.split("\n").at(-4))).toBe("PASS (service keys fetched over plain http, not independent)");
 
     const pack = path.join(ctx.root, "pack.json");
     [code, out] = await cli("export", "-o", pack);
@@ -98,7 +99,7 @@ describe("cli", () => {
     [code, out] = await cli("verify", pack);
     expect(code).toBe(0);
     expect(out).toMatch(/^12\. Content hashes +PASS +2 records/m);
-    expect(noCounts(out.split("\n").at(-1))).toMatch(/^PASS \(service keys fetched over plain http, not independent\): export of every agent, all records, generated /);
+    expect(noCounts(out.split("\n").at(-4))).toMatch(/^PASS \(service keys fetched over plain http, not independent\): export of every agent, all records, generated /);
     expect(out).toMatch(/^head: this project's own/m); // the local head.json, with no flag
     [code, out] = await cli("verify", pack, "--json");
     expect(JSON.parse(out).result).toBe("PASS");

@@ -129,7 +129,8 @@ describe("CLI events", () => {
     process.env.SIGNAFAIDE_URL = await deadUrl(); // the event cannot be delivered
     const [code, out, err] = await cli("verify", pack, "--keys", keys);
     expect(code).toBe(0);
-    expect(noCounts(out.split("\n").at(-1))).toMatch(/^PASS: export of every agent, all records, generated /);
+    // The result line, then the sandbox's claim step from sandbox.json (the witness cannot be asked).
+    expect(noCounts(out.split("\n").at(-4))).toMatch(/^PASS: export of every agent, all records, generated /);
     expect(err).toBe("");
   });
 

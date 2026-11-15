@@ -31,8 +31,18 @@ co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, o
 
 Co-signature and the public timestamp need a witness. A person opts in once:
 
-- `npx signafaide init` creates a free sandbox (no account, email or card), saves `SIGNAFAIDE_API_KEY` to `.env`, adds `.env` to `.gitignore` and prints a link to claim it; or
+- `npx signafaide init` creates a free sandbox (no account, email or card), saves `SIGNAFAIDE_API_KEY` to `.env`, adds `.env` to `.gitignore` and prints a link to claim it, with what claiming gives and how long an unclaimed sandbox is kept (below); or
 - set `SIGNAFAIDE_API_KEY` (a live key from the console), with `SIGNAFAIDE_URL` for a self-hosted witness. `SIGNAFAIDE_URL` alone sends nothing.
+
+`init` says what the claim link is for and how long it is good for:
+
+```
+sandbox ready at https://api.signafaide.co.uk, key saved to /work/claims/.env; claim it at https://signafaide.co.uk/app/claim/3fK9...
+claiming is free and needs no card: the sandbox moves into your own organisation and stops expiring, and you get the console, live keys and auditor links
+30 days left: an unclaimed sandbox and its records on the service are deleted on 15 December 2026. Records on this machine are kept and still verify
+```
+
+`signafaide status`, `signafaide claim` and a passing `signafaide verify` repeat the link with the days left, counted from what the witness says (`expires_at`); a witness that does not say gets no line about days. `verify --json` has the same as data (`sandbox: {claim_url, claimed, expires_at, days_left}`). Once the sandbox is claimed, `status` shows `claim: done (this sandbox belongs to an organisation now)` and nothing counts down. An unclaimed sandbox past its date is deleted from the service within a day and its key is then refused (`invalid_key`); the records on this machine are kept and still verify, and the same commands say how to carry on: remove `SIGNAFAIDE_API_KEY` from `.env`, run `signafaide init` for a new sandbox and claim it.
 
 Records written before the opt-in ship afterwards with their original times. The service accepts records up to 7 days old (an agent key's `valid_from` is at most 7 days before its registration); a local chain that starts earlier stays local, still verifies, and `signafaide flush` reports it as `too_old`. The SDK's `init()` only configures: it never creates a sandbox.
 
@@ -199,7 +209,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 
 | command | does |
 |---|---|
-| `signafaide init` | the opt-in: creates a free sandbox if there is no key (no account, email or card), prints the claim link |
+| `signafaide init` | the opt-in: creates a free sandbox if there is no key (no account, email or card), prints the claim link, what claiming gives and when an unclaimed sandbox is deleted |
 | `signafaide status` | key and env, agents, last receipt, outbox size, quota; BLOCKED chains (exit 1) |
 | `signafaide repair [--agent X] [--dry-run]` | sets aside records no witness can take (kept in `.signafaide/held/`, still verified), gives the agent a new key and starts a new segment |
 | `signafaide verify [pack.json] [--keys ...] [--agent-keys ...] [--head ...] [--offline] [--fail-on-pending-send] [--json]` | verifies; exit 0 PASS, 1 FAIL or BLOCKED, 2 unreadable input |
@@ -208,7 +218,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 | `signafaide export [--agent X] [--from T] [--to T] [-o pack.json]` | downloads a verification pack of the whole project (every agent); `--agent` narrows it to one |
 | `signafaide replay [--agent X] [--from T] [--to T] [--record H] [--html out.html] [--json]` | the verified timeline from the local chain; exit 1 on FAIL |
 | `signafaide compare --module file.mjs:fn [--agent X] [--name N] [--from T] [--to T] [--limit N] [--upload [--values]]` | re-runs recorded decisions with a candidate and compares; `--values` sends the values too (stored-content decisions only) |
-| `signafaide claim` | prints the claim link again |
+| `signafaide claim` | prints the claim link again, what claiming gives and how many days an unclaimed sandbox has left |
 | `signafaide flush` | ships the outbox now (with no key it sends nothing and says so) |
 | `signafaide gateway [--agent X] [--name-prefix P] [--strict \| --strict-tools a,b] [--store-content] -- <command> [args...]` | runs an MCP server behind a recording proxy: every tool call that passes through is recorded, and one that cannot be recorded is not forwarded (see "Recording everything an agent can call") |
 | `signafaide agent setup [--agent <name>]... [--url <witness>] [--dry-run] [--dir <project>]` | installs the MCP server and the skill in your coding agents; `--url` sets `SIGNAFAIDE_URL` in each MCP entry |
@@ -231,14 +241,14 @@ finds the coding agents installed or in use and, for each one, adds the signafAI
 | GitHub Copilot (VS Code) | `.vscode/mcp.json` | `.github/copilot-instructions.md` section |
 | Windsurf | `.devin/mcp_config.json` | `AGENTS.md` section |
 
-The MCP tools: `signafaide_setup` (a preview that changes, creates and sends nothing: the language and framework, the install command, the code edit and what a sandbox would send), `signafaide_init` (creates the external sandbox, and nothing unless the agent passes `confirm_user_agreed: true` and `user_words`, what the person wrote when they agreed), `signafaide_quickstart`, `signafaide_verify`, `signafaide_status`, `signafaide_explain_error` and `signafaide_claim_link`. The MCP server needs Node.js 20 or later.
+The MCP tools: `signafaide_setup` (a preview that changes, creates and sends nothing: the language and framework, the install command, the code edit and what a sandbox would send), `signafaide_init` (creates the external sandbox, and nothing unless the agent passes `confirm_user_agreed: true` and `user_words`, what the person wrote when they agreed), `signafaide_quickstart`, `signafaide_verify`, `signafaide_status`, `signafaide_explain_error` and `signafaide_claim_link`. The three that return the claim link (`signafaide_init`, `signafaide_status`, `signafaide_claim_link`) return it with what claiming gives and the days an unclaimed sandbox has left, for the agent to pass on to the person. The MCP server needs Node.js 20 or later.
 
 ## What is sent besides records
 
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-js/0.3.1 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
+X-Signafaide-Client: signafaide-js/0.3.2 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
 ```
 
 It holds the SDK and its version, the JavaScript runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `vercel-ai` or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`, `signafaide agent setup`) and kept in `.signafaide/config.json`; it is never guessed per process, so a program started from a terminal inside a coding agent is not labelled as that agent. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.

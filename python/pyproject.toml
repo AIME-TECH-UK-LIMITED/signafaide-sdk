@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "signafaide"
-version = "0.3.1"
+version = "0.3.2"
 description = "Signed, chained records of what your AI agents decided. Hash-only by default."
 readme = "README.md"
 requires-python = ">=3.9"

@@ -18,7 +18,7 @@ sandbox response or a receipt names it.
 - ``outbox/<chain>/<seq>.json``          signed records not yet accepted by the service
 - ``head.json``                          newest signed head, ``{project: {env: {agent: {head, head_sig}}}}``
 - ``config.json``                        coding agent; API key fingerprint -> {project, env}
-- ``sandbox.json``                       the sandbox project and claim link
+- ``sandbox.json``                       the sandbox project, its claim link and when it expires unclaimed
 
 Writers take a per-chain lock file, so several processes can record for the same
 agent without forking its chain. The chain file is append-only, except that

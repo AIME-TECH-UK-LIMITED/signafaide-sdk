@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-from . import runtime
+from . import _claim, runtime
 from . import KeysRequired
 from . import verify as run_verify
 from ._version import __version__
@@ -80,7 +80,8 @@ def _upgrade_at_limit(rec: runtime.Recorder, errors) -> None:
         print(UPGRADE_LIMIT.format(site=_site(rec.url)))
 
 
-@command("init", "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link. "
+@command("init", "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link "
+         "and how long an unclaimed sandbox is kept. "
          "The witness is https://api.signafaide.co.uk unless SIGNAFAIDE_URL names another (a self-hosted witness, or http://127.0.0.1:7474 "
          "for a local one); an existing key is read from SIGNAFAIDE_API_KEY. Adds .signafaide/ and .env to .gitignore")
 def cmd_init(a: argparse.Namespace) -> int:
@@ -90,14 +91,21 @@ def cmd_init(a: argparse.Namespace) -> int:
     had = rec.api_key
     key = rec.create_sandbox()
     sandbox = rec.state.sandbox() or {}
-    claim = sandbox.get("claim_url")
+    # A sandbox made just now is described from the witness's own answer; an existing one is asked about.
+    view = _claim.sandbox_view(rec, refresh=bool(had))
     if not had:
-        print(f"sandbox ready at {rec.url}, key saved to {rec.state.root / '.env'}; claim it at {claim}")
+        print(f"sandbox ready at {rec.url}, key saved to {rec.state.root / '.env'}; claim it at {sandbox.get('claim_url')}")
+        for line in _claim.claim_notes(view) if view else []:
+            print(line)
         print(runtime.terms_notice(runtime.legal_links(sandbox, sandbox.get("url") or rec.url)))
         print("from now on record hashes (never content) are sent for co-signature and public timestamps; "
               "records written before now ship with their original times on the next run or with `signafaide flush`")
-    elif key.startswith("sfa_test_") and claim:
-        print(f"key found ({_mask(key)}); claim the sandbox at {claim}")
+    elif view:
+        first, *rest = _claim.claim_lines(view, rec.state.root)
+        print(f"key found ({_mask(key)}); {first}" if view["claimed"] or _claim.sandbox_gone(view)
+              else f"key found ({_mask(key)}); claim the sandbox at {view['claim_url']}")
+        for line in rest:
+            print(line)
     else:
         print(f"key found ({_mask(key)}, env {runtime._env_of(key)}); nothing to create")
     return 0
@@ -116,11 +124,14 @@ def cmd_status(a: argparse.Namespace) -> int:
               "; records stay on this machine (signed and chained, nothing is sent). `signafaide init` creates a free sandbox and sends hashes; or set SIGNAFAIDE_API_KEY"))
     print(f"service: {s['url']}")
     project: dict = {}
+    answered = refused = False
     if s["api_key"]:
         try:
             project = rec.client(timeout=5).project() or {}
-        except SignafaideError:
+            answered = True
+        except SignafaideError as e:
             project = {}
+            refused = e.code == "invalid_key"
     name = project.get("name") if isinstance(project.get("name"), str) and project.get("name") else None
     if project.get("project"):
         print(f"project: {name} ({project['project']}, {project.get('env')})" if name else f"project: {project['project']} ({project.get('env')})")
@@ -147,8 +158,6 @@ def cmd_status(a: argparse.Namespace) -> int:
     print(f"outbox: {plural(s['outbox'], 'record')} waiting" + ("; run `signafaide flush`" if s["outbox"] and not blocked else ""))
     for line in blocked:
         print(line)
-    sandbox = s["sandbox"] or {}
-    claimed = bool(sandbox.get("claimed"))
     if s["api_key"]:
         try:
             u = rec.client(timeout=5).usage()
@@ -158,16 +167,11 @@ def cmd_status(a: argparse.Namespace) -> int:
                 print(UPGRADE_LIMIT.format(site=_site(rec.url)))
         except SignafaideError as e:
             print(f"quota: unknown ({e})")
-        if not claimed and s["api_key"].startswith("sfa_test_") and sandbox.get("claim_url"):
-            try:
-                claimed = project.get("claimed") is True
-                if claimed:
-                    rec.state.save_sandbox({**sandbox, "claimed": True})
-            except SignafaideError:
-                pass
-    claim = sandbox.get("claim_url")
-    if claim and (s["api_key"] or "").startswith("sfa_test_"):
-        print("claim: done (this sandbox belongs to an organisation now)" if claimed else f"claim: {claim}")
+    # The claim step, from the answer above: the link and why to claim, the time left when the
+    # witness gave it, "done" once claimed, and how to carry on when the sandbox is gone.
+    view = _claim.sandbox_view(rec, answer=project if answered else None, refused=refused)
+    for line in _claim.claim_lines(view, rec.state.root) if view else []:
+        print(line)
     return 1 if blocked else 0
 
 
@@ -227,9 +231,14 @@ def cmd_verify(a: argparse.Namespace) -> int:
         print(f"signafaide: {e}", file=sys.stderr)
         rec.event("verify")
         return 2
-    print(json.dumps(report.to_dict(), indent=2) if a.json else str(report), flush=True)
+    # The sandbox's claim step goes with the result: as data in --json, as plain lines after a pass.
+    view = _claim.sandbox_view(rec, refresh=not a.offline)
+    print(json.dumps(report.to_dict() | ({"sandbox": _claim.sandbox_json(view)} if view else {}), indent=2) if a.json else str(report), flush=True)
     rec.event("verify")
     if report.ok and not a.json:
+        if view and not view["claimed"]:
+            for line in _claim.claim_lines(view, rec.state.root):
+                print(line)
         _upgrade_after_verify(rec)
     return 0 if report.ok else 1
 
@@ -388,17 +397,28 @@ def cmd_compare(a: argparse.Namespace) -> int:
     return 0
 
 
-@command("claim", "print the sandbox claim link again")
+@command("claim", "print the sandbox claim link again, why to claim it and how long an unclaimed sandbox has left")
 def cmd_claim(a: argparse.Namespace) -> int:
     rec = _recorder()
-    claim = (rec.state.sandbox() or {}).get("claim_url")
     if (rec.api_key or "").startswith("sfa_live_"):
         print("this project uses a live key; there is nothing to claim")
         return 0
-    if not claim:
+    view = _claim.sandbox_view(rec)
+    if not view:
         print("no sandbox here; run `signafaide init` first", file=sys.stderr)
         return 1
-    print(claim)
+    if view["claimed"]:
+        print(_claim.CLAIM_DONE)
+        return 0
+    lines = _claim.claim_lines(view, rec.state.root)
+    if _claim.sandbox_gone(view):
+        for line in lines:
+            print(line, file=sys.stderr)
+        return 1
+    # The link alone on the first line, for scripts; then why to claim and the time left.
+    print(view["claim_url"])
+    for line in lines[1:]:
+        print(line)
     return 0
 
 

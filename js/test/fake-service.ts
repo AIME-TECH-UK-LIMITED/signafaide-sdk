@@ -32,11 +32,14 @@ export class FakeService {
   headsUnknownAgent = false;
   /** Monthly allowance per project; null: unlimited. */
   quota: number | null = null;
+  /** Days an unclaimed sandbox is kept; null: a witness that sends no `expires_at` (an older one). */
+  sandboxDays: number | null = 30;
   /** Wait this long before answering (a slow network). */
   delayMs = 0;
   url = "";
   private server = http.createServer((req, res) => void this.handle(req, res));
   private n = 0;
+  private made = 0;
 
   async start(): Promise<this> {
     await new Promise<void>((r) => this.server.listen(0, "127.0.0.1", r));
@@ -50,13 +53,19 @@ export class FakeService {
   }
 
   addProject(apiKey: string, env: "test" | "live"): any {
-    const prj = { project: `prj_01JC${String(this.projects.size + 1).padStart(22, "0")}`, env, agents: new Map(), heads: new Map(), records: new Map(), batches: [] as any[], used: 0 };
+    // Ids are never reused, as on the service: a sandbox made after one was deleted is a new project.
+    const prj = { project: `prj_01JC${String(++this.made).padStart(22, "0")}`, env, agents: new Map(), heads: new Map(), records: new Map(), batches: [] as any[], used: 0 };
     this.projects.set(apiKey, prj);
     return prj;
   }
 
   project(): any {
     return [...this.projects.values()][0];
+  }
+
+  /** The daily cleanup: delete every unclaimed sandbox whose time has passed; their keys are then refused. */
+  cleanup(): void {
+    for (const [key, prj] of this.projects) if (prj.expires_at && !prj.claimed && Date.parse(prj.expires_at) <= Date.now()) this.projects.delete(key);
   }
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -77,7 +86,19 @@ export class FakeService {
     if (method === "POST" && path === "/v1/sandbox") {
       const key = "sfa_test_" + String(++this.n).padStart(32, "0");
       const prj = this.addProject(key, "test");
-      return [200, { project: prj.project, api_key: key, claim_url: `${this.url}/app/claim/${this.n}`, free_quota: 1000, terms_url: `${this.url}/legal/terms`, privacy_url: `${this.url}/legal/privacy` }];
+      if (this.sandboxDays !== null) prj.expires_at = new Date(Date.now() + this.sandboxDays * 86_400_000).toISOString();
+      return [
+        200,
+        {
+          project: prj.project,
+          api_key: key,
+          claim_url: `${this.url}/app/claim/${this.n}`,
+          free_quota: 1000,
+          ...(prj.expires_at ? { expires_at: prj.expires_at } : {}),
+          terms_url: `${this.url}/legal/terms`,
+          privacy_url: `${this.url}/legal/privacy`,
+        },
+      ];
     }
     if (method === "POST" && path === "/v1/events") {
       this.events.push(body.name);
@@ -85,7 +106,10 @@ export class FakeService {
     }
     const prj = this.projects.get((auth ?? "").replace(/^Bearer /, ""));
     if (!prj) return err(401, "invalid_key", "The API key is not valid; run `signafaide init` for a new sandbox key.");
-    if (method === "GET" && path === "/v1/project") return [200, { project: prj.project, env: prj.env, claimed: !!prj.claimed, name: prj.name ?? null }];
+    // As the service: `expires_at` only while the sandbox is unclaimed.
+    if (method === "GET" && path === "/v1/project") {
+      return [200, { project: prj.project, env: prj.env, claimed: !!prj.claimed, name: prj.name ?? null, ...(prj.expires_at && !prj.claimed ? { expires_at: prj.expires_at } : {}) }];
+    }
     if (method === "GET" && path.startsWith("/v1/heads/")) {
       const sh = prj.heads.get(decodeURIComponent(path.slice("/v1/heads/".length)));
       if (sh) return [200, sh];

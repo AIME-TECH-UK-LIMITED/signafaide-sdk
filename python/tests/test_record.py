@@ -307,7 +307,8 @@ def test_create_sandbox_once(project, service, capsys):
     rec.create_sandbox()
     try:
         err = capsys.readouterr().err.strip().splitlines()
-        assert len(err) == 1 and "claim it at" in err[0] and service.url in err[0]
+        assert len(err) == 3 and "claim it at" in err[0] and service.url in err[0]
+        assert err[1].startswith("signafaide: claiming is free and needs no card") and err[2].startswith("signafaide: 30 days left: ")
         env = (project / ".env").read_text()
         assert env.count("SIGNAFAIDE_API_KEY=sfa_test_") == 1
         runtime.configure(url=service.url).create_sandbox()

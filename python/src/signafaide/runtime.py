@@ -268,12 +268,21 @@ class Recorder:
             self.state.ignore_in_git(".env")  # the key must not be committed
             self.state.learn_project(key, resp["project"], "test")
             legal = legal_links(resp, self.url)
+            from . import _claim
+
+            # When the witness deletes the sandbox unless it is claimed; a witness that does not say is not guessed.
+            expires = _claim.parse_expiry(resp.get("expires_at"))
             self.state.save_sandbox(
-                {k: resp.get(k) for k in ("project", "claim_url", "free_quota")} | {"url": self.url, "created": now()} | legal
+                {k: resp.get(k) for k in ("project", "claim_url", "free_quota")} | {"url": self.url, "created": now()}
+                | ({"expires_at": expires} if expires else {}) | legal
             )
             self._api_key = key
             if not self.quiet:
                 print(f"signafaide: sandbox ready, key saved to .env; claim it at {resp.get('claim_url')}. {terms_notice(legal)}", file=sys.stderr)
+                view = {"claim_url": resp.get("claim_url"), "claimed": False, "expires_at": expires,
+                        "days_left": _claim.days_left(expires) if expires else None, "refused": False, "unconfirmed": False}
+                for line in _claim.claim_notes(view):
+                    print(f"signafaide: {line}", file=sys.stderr)
         return key
 
     def resolve_project(self, api_key: str) -> None:

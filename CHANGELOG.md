@@ -9,6 +9,32 @@ The record format changed between v0.1.1 and v0.1.2 (salted content hashes) and 
 (packs name their project), before any public release. Records and packs written by a version
 verify with that version and later ones unless an entry below says otherwise.
 
+## v0.3.2 (2026-11-15)
+
+The claim step says why to claim a sandbox and how long is left. No change to records, packs or the verifiers.
+
+- `POST /v1/sandbox` and `GET /v1/project` carry `expires_at` (SPEC §6): the moment the service deletes
+  an unclaimed sandbox and its records. `GET /v1/project` has it only while the sandbox is unclaimed.
+  The SDKs save it in `sandbox.json`; for a sandbox made by an earlier SDK, `signafaide status` learns it
+  from `GET /v1/project`. A witness that does not send it (an older or self-hosted one) gets no line
+  about days: the SDKs never assume a number.
+- `signafaide init`, `status`, `claim` and a passing `verify` (TypeScript and Python, the same words),
+  and the MCP tools `signafaide_init`, `signafaide_claim_link` and `signafaide_status`, say with the
+  claim link that claiming is free and needs no card, what it gives (the sandbox moves into your own
+  organisation and stops expiring; the console, live keys and auditor links), and how long is left, for
+  example "12 days left: an unclaimed sandbox and its records on the service are deleted on
+  15 December 2026. Records on this machine are kept and still verify".
+- `signafaide claim` still prints the link alone on its first line; the other lines follow it. Once the
+  sandbox is claimed it prints `claim: done` like `status`, and nothing counts down.
+- After the date: the claim link no longer works, the service deletes the sandbox within a day and then
+  refuses its key (`invalid_key`). The commands say so, that local records are kept and still verify,
+  and how to carry on (remove `SIGNAFAIDE_API_KEY`, run `signafaide init` again). `signafaide claim`
+  then exits 1.
+- `signafaide verify --json` has `sandbox: {claim_url, claimed, expires_at, days_left}` when the project
+  uses a sandbox key; no prose is added to JSON output.
+- `signafaide init` run again with a claimed sandbox says `claim: done` in place of a link that can no
+  longer be used.
+
 ## v0.3.1 (2026-11-14)
 
 Listing metadata only; no change to the SDKs, the verifiers or the protocol.

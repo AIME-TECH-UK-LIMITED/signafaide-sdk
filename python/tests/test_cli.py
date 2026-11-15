@@ -34,7 +34,8 @@ def test_commands_registered():
 
 def test_init_then_claim(cli, project, service):
     code, out, _ = cli("init")
-    assert code == 0 and out.count("\n") == 3 and "claim it at " + service.url in out
+    # ready + claim link, why claim, time left, terms, what is sent
+    assert code == 0 and out.count("\n") == 5 and "claim it at " + service.url in out
     assert f"By creating a sandbox you agree to the signafAIde Terms ({service.url}/legal/terms) and Privacy notice ({service.url}/legal/privacy)." in out
     assert "records written before now ship with their original times" in out
     claim = out.splitlines()[0].rsplit(" ", 1)[1]
@@ -43,7 +44,7 @@ def test_init_then_claim(cli, project, service):
     assert f"SIGNAFAIDE_URL={service.url}\n" in env  # not the default service: its URL goes with the key
     code, out, _ = cli("init")
     assert code == 0 and "key found" in out and claim in out
-    assert cli("claim")[1].strip() == claim
+    assert cli("claim")[1].splitlines()[0] == claim  # the link alone on the first line
 
 
 def test_no_key_status_flush_verify_send_nothing(cli, service):
@@ -95,14 +96,15 @@ def test_status_flush_verify_export(cli, project, service, tmp_path):
 
     code, out, _ = cli("verify")
     # The test service is plain http on this machine: accepted, and said not to be independent.
-    assert code == 0 and no_counts(out.strip().splitlines()[-1]) == "PASS (service keys fetched over plain http, not independent)"
+    # The result line, then the sandbox's claim step (three lines while it is unclaimed).
+    assert code == 0 and no_counts(out.strip().splitlines()[-4]) == "PASS (service keys fetched over plain http, not independent)"
 
     pack = tmp_path / "pack.json"
     code, out, _ = cli("export", "-o", str(pack))
     assert code == 0 and "2 records" in out and f"signafaide verify {pack}" in out
 
     code, out, _ = cli("verify", str(pack))
-    assert code == 0 and no_counts(out.strip().splitlines()[-1]).startswith("PASS (service keys fetched over plain http, not independent): export of every agent, all records, generated ")
+    assert code == 0 and no_counts(out.strip().splitlines()[-4]).startswith("PASS (service keys fetched over plain http, not independent): export of every agent, all records, generated ")
     assert any(line.startswith("head: this project's own") for line in out.splitlines())  # the local head.json, with no flag
     assert any(line.startswith("12. Content hashes") and " PASS " in line and "2 records" in line for line in out.splitlines())
 
@@ -199,10 +201,10 @@ def test_keys_export_then_pack_verify_with_agent_keys_and_head(cli, project, ser
     keys = tmp_path / "keys.json"
     keys.write_text(json.dumps({"keys": [service.key_doc]}))
     code, out, err = cli("verify", str(tmp_path / "pack.json"), "--keys", str(keys), "--agent-keys", str(tmp_path / "agent-keys.json"), "--head", str(head), "--offline")
-    last = out.rstrip().splitlines()[-1]
+    last = out.rstrip().splitlines()[-4]  # the result line; the sandbox's claim step (three lines) follows it
     assert code == 0 and no_counts(last).startswith("PASS: export of every agent, all records, generated "), out + err
     code, out, err = cli("verify", str(tmp_path / "pack.json"), "--keys", str(keys), "--trust-embedded-agent-keys", "--offline")
-    assert code == 0 and no_counts(out.rstrip().splitlines()[-1]).startswith("PASS (agent keys taken from the pack, not independent): export of ")
+    assert code == 0 and no_counts(out.rstrip().splitlines()[-4]).startswith("PASS (agent keys taken from the pack, not independent): export of ")
     # Keys over plain http only from this machine.
     code, out, err = cli("verify", str(tmp_path / "pack.json"), "--keys", "http://192.0.2.1/keys.json", "--offline")
     assert code == 2 and "plain http" in err
