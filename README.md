@@ -20,6 +20,7 @@ signafAIde records the decisions AI agents make. Each record is signed with the 
 | [`verifier/`](verifier) | `signafaide-verify`, the standalone Rust verifier of a pack (also builds to WebAssembly) |
 | [`core/`](core) | the Rust protocol core shared by the verifier and the service |
 | [`plugin/`](plugin/README.md) | the Claude Code plugin: the MCP server and the skill |
+| `gemini-extension.json`, `.cursor-plugin/`, `mcp.json`, `glama.json` | listing files for the Gemini CLI gallery, the Cursor marketplace and Glama |
 
 ## Quick start
 
@@ -29,6 +30,24 @@ npm install signafaide            # TypeScript or JavaScript
 ```
 
 Wrap the tools that act, run the agent, then `signafaide verify` (`npx signafaide verify` for TypeScript). See the [Python](python/README.md) and [TypeScript](js/README.md) READMEs.
+
+## Add the MCP server to a coding agent
+
+The MCP server (`signafaide-mcp`, Node.js 20 or later) lets a coding agent preview the setup, verify records and show status. It sends nothing until a person agrees to create a sandbox. In a project, `npx signafaide agent setup` writes this for each coding agent it finds. To add it by hand, put this in the agent's MCP configuration (Cline, Cursor, Windsurf, Kiro, Zed and others use the same shape):
+
+```json
+{
+  "mcpServers": {
+    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.3.1"] }
+  }
+}
+```
+
+- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.3.1`
+- Gemini CLI: `gemini extensions install https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk`
+- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.3.1%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
+
+There are no API keys or other settings. To check it works, ask the agent to call `signafaide_status`.
 
 ## Recording everything an agent can call
 

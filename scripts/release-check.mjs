@@ -65,6 +65,11 @@ const versions = {
   "verifier/Cargo.toml": read("verifier/Cargo.toml").match(/^version = "([^"]+)"/m)?.[1],
   "plugin/.mcp.json": read("plugin/.mcp.json").match(/signafaide-mcp@([0-9][^"]*)/)?.[1],
   "plugin/.claude-plugin/plugin.json": JSON.parse(read("plugin/.claude-plugin/plugin.json")).version,
+  "gemini-extension.json": JSON.parse(read("gemini-extension.json")).version,
+  "gemini-extension.json (server)": read("gemini-extension.json").match(/signafaide-mcp@([0-9][^"]*)/)?.[1],
+  ".cursor-plugin/plugin.json": JSON.parse(read(".cursor-plugin/plugin.json")).version,
+  "mcp.json": read("mcp.json").match(/signafaide-mcp@([0-9][^"]*)/)?.[1],
+  ...Object.fromEntries([...read("README.md").matchAll(/signafaide-mcp@([0-9]+\.[0-9]+\.[0-9]+)/g)].map((m, i) => [`README.md (mention ${i + 1})`, m[1]])),
 };
 const v = versions["js/package.json"];
 const off = Object.entries(versions).filter(([, x]) => x !== v);

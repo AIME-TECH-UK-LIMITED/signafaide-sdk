@@ -1,0 +1,11 @@
+{
+  "name": "signafaide",
+  "version": "0.3.1",
+  "description": "Signed, tamper-evident records of AI agent tool calls: an MCP server to set it up and verify it, and a skill that says when to use it.",
+  "author": { "name": "AIMETECH" },
+  "homepage": "https://signafaide.co.uk",
+  "repository": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk",
+  "license": "Apache-2.0",
+  "keywords": ["audit-trail", "ai-agents", "tamper-evidence", "compliance", "mcp"],
+  "skills": "plugin/skills"
+}
