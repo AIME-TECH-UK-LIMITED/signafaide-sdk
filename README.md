@@ -14,6 +14,7 @@ signafAIde records the decisions AI agents make. Each record is signed with the 
 | [`spec/SPEC.md`](spec/SPEC.md) | the protocol: records, batches, receipts, anchors, the HTTP API, verification packs, local state |
 | [`spec/vectors.json`](spec/vectors.json) | test vectors every implementation reproduces byte for byte |
 | [`python/`](python/README.md) | the Python SDK and CLI (`signafaide` on PyPI) |
+| [`python-langchain/`](python-langchain/README.md) | `langchain-signafaide`: a LangChain agent middleware that records every tool call the agent makes |
 | [`js/`](js/README.md) | the TypeScript SDK, CLI and `agent setup` for coding agents (`signafaide` on npm), and the MCP server (`signafaide-mcp`, in `js/mcp`) |
 | [`scripts/release-check.mjs`](scripts/release-check.mjs) | run before a release: the default witness is the hosted service, every version agrees and was bumped since the last tag, `CHANGELOG.md` has its entry, the verifier binary is built from this source, and the npm and PyPI names are claimed |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.3.1`) |

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langchain-signafaide"
+version = "0.1.0"
+description = "signafAIde for LangChain: signed, tamper-evident records of every tool call an agent makes."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "AIME TECH UK LIMITED" }]
+dependencies = ["signafaide>=0.3.1,<0.4", "langchain>=1.0,<2"]
+keywords = ["langchain", "middleware", "ai-agents", "audit-trail", "tamper-evident", "eu-ai-act"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Topic :: Security :: Cryptography",
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://signafaide.co.uk"
+Documentation = "https://signafaide.co.uk/docs/frameworks/langchain"
+Repository = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk"
+Issues = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues"
+
+[dependency-groups]
+dev = ["pytest>=7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/langchain_signafaide"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
