@@ -66,6 +66,12 @@ cargo run --manifest-path verifier/Cargo.toml -- pack.json --keys keys.json --ag
 
 The service keys come from the witness's `/.well-known/signafaide-keys.json` (or a file). The agent keys, `agent-keys.json`, come from the customer, who runs `signafaide keys export` and hands the file over with the pack. `--head` is optional: the customer's newest signed head (`.signafaide/head.json`), which proves no record was dropped from the end. `--offline` skips the public timestamp lookup, so that check is reported as not checked, never as passed. The result line says how many of the 12 checks passed, are pending (a public timestamp that has not confirmed yet) and were not checked, for example `PASS: 11 of 12 checks passed, 1 pending (public timestamp)`. The Python and TypeScript SDKs run the same checks (`signafaide verify pack.json`). Every verifier gives the same check ids, statuses and result for the same inputs (spec §7).
 
+## Privacy and support
+
+- Privacy: [privacy notice](https://signafaide.co.uk/legal/privacy)
+- Support: [open an issue](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues) or email sales@signafaide.co.uk
+- Security reports: see the [security page](https://signafaide.co.uk/security)
+
 ## License
 
 Apache-2.0, see [LICENSE](LICENSE).
