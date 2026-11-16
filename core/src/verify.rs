@@ -1,7 +1,7 @@
 //! The §7 verification-pack verifier. Pure: no I/O, so it also runs in a browser (wasm32).
 
 use crate::bitcoin::{check_header, BlockHeader};
-use crate::coverage::{coverage, coverage_lines, Coverage};
+use crate::coverage::{coverage, coverage_lines, telemetry, telemetry_lines, Coverage, Telemetry};
 use crate::drand::{check_round_time, verify_beacon, BeaconCheck};
 use crate::merkle::verify_path;
 use crate::model::*;
@@ -96,6 +96,10 @@ pub struct Report {
     /// Tool coverage per agent (§7): the agent's current tool declaration and the recorded tools
     /// it does not list. A note, never a failure.
     pub coverage: BTreeMap<String, Coverage>,
+    /// Telemetry notes per agent (§7), for agents that have any: the tools recorded from
+    /// telemetry spans, when their decisions were written, and whether the telemetry is
+    /// sampled. A note, never a failure.
+    pub telemetry: BTreeMap<String, Telemetry>,
 }
 
 impl Report {
@@ -148,6 +152,9 @@ impl Report {
         for line in self.coverage_lines() {
             out += &format!("coverage: {line}\n");
         }
+        for line in self.telemetry_lines() {
+            out += &format!("telemetry: {line}\n");
+        }
         out += &self.result_line();
         out.push('\n');
         out
@@ -157,6 +164,11 @@ impl Report {
     /// tools its declaration does not list.
     pub fn coverage_lines(&self) -> Vec<String> {
         self.coverage.iter().flat_map(|(agent, c)| coverage_lines(agent, c)).collect()
+    }
+
+    /// The telemetry notes in words (§7), agent by agent.
+    pub fn telemetry_lines(&self) -> Vec<String> {
+        self.telemetry.iter().flat_map(|(agent, t)| telemetry_lines(agent, t)).collect()
     }
 
     /// For example `PASS: export of every agent, all records, generated 2026-11-13T12:00:00.000Z`,
@@ -930,6 +942,10 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         .iter()
         .map(|(agent, chain)| (agent.to_string(), coverage(chain.iter().map(|(&seq, x)| (seq, x.r.envelope.kind, x.r.envelope.name.as_str())))))
         .collect();
+    let tool_telemetry: BTreeMap<String, Telemetry> = chains
+        .iter()
+        .filter_map(|(agent, chain)| telemetry(chain.values().map(|x| (x.r.envelope.kind, x.r.envelope.name.as_str()))).map(|t| (agent.to_string(), t)))
+        .collect();
 
     let units = [("record", "records"), ("record", "records"), ("record", "records"), ("record", "records"), ("record", "records"), ("batch", "batches"), ("batch", "batches"), ("head", "heads"), ("round", "rounds"), ("anchor", "anchors"), ("proof", "proofs"), ("record", "records")];
     let checks: Vec<Check> = acc
@@ -969,6 +985,7 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         independent,
         checks,
         coverage: tool_coverage,
+        telemetry: tool_telemetry,
     })
 }
 
@@ -1136,6 +1153,7 @@ fn malformed(why: String, independent: Independent) -> Report {
         independent,
         checks,
         coverage: BTreeMap::new(),
+        telemetry: BTreeMap::new(),
     }
 }
 

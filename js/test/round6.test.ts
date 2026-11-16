@@ -124,8 +124,8 @@ describe("#54: the skill", () => {
     expect(body).not.toMatch(/—|–/);
   });
 
-  it("the version is 0.3.3 everywhere the package says it", () => {
-    expect(VERSION).toBe("0.3.3");
+  it("the version is 0.3.4 everywhere the package says it", () => {
+    expect(VERSION).toBe("0.3.4");
     expect(JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8")).version).toBe(VERSION);
     expect(JSON.parse(fs.readFileSync(path.join(__dirname, "../mcp/package.json"), "utf8")).version).toBe(VERSION);
   });

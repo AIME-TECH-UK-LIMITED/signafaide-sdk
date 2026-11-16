@@ -45,8 +45,16 @@ export {
   declaredName,
   toolNote,
   toolNoteName,
+  TELEMETRY_END_PREFIX,
+  TELEMETRY_SAMPLED,
+  TELEMETRY_START_PREFIX,
+  telemetry,
+  telemetryLines,
+  telemetryNote,
+  telemetryNoteName,
   type Coverage,
   type DeclaredTool,
+  type Telemetry,
 } from "./coverage.js";
 export { MAX_NODES, MAX_PROOF_BYTES, blockAttestations, otsStatus, parseOts } from "./ots.js";
 export { checkHeader, rootsFromVector, target, type BlockHeader, type BlockRoots } from "./timestamps.js";

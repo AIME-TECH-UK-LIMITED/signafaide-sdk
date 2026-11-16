@@ -150,6 +150,9 @@ def cmd_status(a: argparse.Namespace) -> int:
         if c["blocked"]:
             b = c["blocked"]
             blocked.append(f"BLOCKED {c['chain']}: {b['reason']}; {plural(b['records'], 'record')} cannot ship. Next: {b['next']}")
+    for c in s["chains"]:
+        for line in c["telemetry"]:
+            print(f"note: {line}")
     if any(c["agent"] == rec.default_agent for c in s["chains"]):
         print(f'note: agent "{rec.default_agent}" is named after the project folder; give agents explicit names in production '
               '(@signafaide.record(agent="claims-bot"))')

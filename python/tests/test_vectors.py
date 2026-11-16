@@ -247,9 +247,14 @@ def test_variants(v, bls):
         # Tool coverage (§7): the same object and the same lines as the Rust and TypeScript verifiers.
         assert r.to_dict()["coverage"] == case["expect"]["coverage"], case["name"]
         assert r.coverage_lines() == case["expect"]["coverage_lines"], case["name"]
+        # Telemetry notes (§2.7, §7): likewise.
+        assert r.to_dict()["telemetry"] == case["expect"]["telemetry"], case["name"]
+        assert r.telemetry_lines() == case["expect"]["telemetry_lines"], case["name"]
+        assert all(f"telemetry: {line}" in str(r).splitlines() for line in case["expect"]["telemetry_lines"]), case["name"]
         for line in case["expect"]["coverage_lines"]:
             assert f"coverage: {line}" in str(r).split("\n"), (case["name"], str(r))
     assert sum(1 for c in v["variants"] if any(x["declared_at_seq"] is not None for x in c["expect"]["coverage"].values())) == 7
+    assert sum(1 for c in v["variants"] if c["expect"]["telemetry"]) == 2
     assert sum(1 for c in v["variants"] if "chain_note" in c["expect"]) == 3  # an unclean start, a clean restart, a clean restart cut by the window
 
 

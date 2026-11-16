@@ -113,6 +113,35 @@ declareTools(["refund", "lookupOrder", "web_search"], { agent: "support-bot" });
 
 What this shows, and what it does not. The gateway records every call that goes through it; a call the application makes around it is still not recorded, so the deployment has to make the gateway the only route to those tools. A declaration is the program's own signed statement of its tools: evidence of what it said it had, not proof that the list is complete. A tool list is as fresh as its last declaration: a source that stops (a gateway that is removed, a program that ends) leaves the list at its clean exit, or within 24 hours after a crash.
 
+## OpenTelemetry: records from the traces you already have
+
+An agent that is already traced with OpenTelemetry gets records with no tool wrapping. Add one span processor where tracing is set up:
+
+```ts
+import { SignafaideSpanProcessor } from "signafaide/otel";
+
+const provider = new NodeTracerProvider({ spanProcessors: [new SignafaideSpanProcessor()] });
+```
+
+`signafaide/otel` needs `@opentelemetry/api`, which every OpenTelemetry set-up already has; it is an optional peer dependency, and the rest of the package works without it. Node.js only.
+
+The processor runs inside your process and exports nothing: it reads each span where it is, and its records are signed, chained, kept and sent exactly as a wrapped tool's are (hashes only, after the opt-in). It records the spans that are tool calls by one of three conventions:
+
+| convention | a span is a tool call when | used by, for example |
+|---|---|---|
+| OpenTelemetry GenAI | `gen_ai.operation.name` is `execute_tool` | the Vercel AI SDK (`@ai-sdk/otel`), OpenLLMetry |
+| OpenInference | `openinference.span.kind` is `TOOL` | the OpenInference instrumentors |
+| OpenLLMetry | `traceloop.span.kind` is `tool` | the OpenLLMetry (Traceloop) instrumentations |
+
+Each tool call gives a `decision` (the tool's name and the arguments the span holds) and an `outcome` (the result the span holds, or `{"error": {"type", "message"}}` when the span's status is an error). What the instrumentation does not put in the span is not in the record.
+
+- **Before or after.** When a span says at its start that it is a tool call, the decision is written then, before the tool runs. The Vercel AI SDK's OpenTelemetry integration does this. When a span says so only at its end, the decision and the outcome are both written then, after the tool ran. The LangChain instrumentations of OpenInference and of OpenLLMetry do this: they set a span's attributes after it has started. Every record says which it was: in its signed content (`meta.telemetry.decision_written` is `before` or `after`), and in a signed note in the chain that a hash-only verifier reads too. `signafaide verify` and `signafaide status` show it per tool: `2 tools are recorded from telemetry spans: lookup_order (decision written before the tool ran), refund (decision written after the tool ran)`.
+- **Sampling.** A span the sampler drops never reaches the processor, so its tool call has no record. When the tracer provider's sampler is not always-on, the processor writes one signed note per process, and `verify` and `status` say `records come from sampled telemetry: some tool calls may not be recorded`. It is a note, never a failure. OpenTelemetry's default sampler follows the caller's sampling decision, so it counts as sampled; `sampler: new AlwaysOnSampler()` records every tool call that has a span. A span does not name its sampler, so the processor reads it from the registered global tracer provider (`provider.register()`, or the Node SDK). For a provider that is not registered globally, pass it: `new SignafaideSpanProcessor({ sampler })`. When the processor has neither, it cannot tell whether spans are sampled and writes no note.
+- **Strict mode needs the SDK.** "Do not run the tool unless it is recorded" is a feature of wrapping the tool with the SDK (`strict: true`), not of the telemetry processor. The processor never throws into your application and never waits for the network: when a record cannot be written the tool still runs, and one warning is logged.
+- **One record per call.** A tool that is also wrapped with the SDK gives one decision and one outcome, not two: the wrapper's records stand, and a strict wrapper still waits for its receipt. A tool that an MCP gateway on the same machine records for the same agent is left to the gateway. Calls are matched by tool name.
+- **Agent name.** `new SignafaideSpanProcessor({ agent: "support-bot" })` names the chain. Without it the name is the tracer resource's `service.name`, made into a valid agent name, and without that the project folder's name.
+- **Tools.** Each tool seen in a span is declared as one of the agent's recorded tools, as `wrapTools` declares the tools it wraps. That is the list of tools seen so far, not the agent's full tool list: give that with `declareTools([...])`. `declareTools: false` turns the declaration off. `storeContent: true` sends inputs and outputs too.
+
 ## Strict mode: no receipt, no action
 
 ```ts
@@ -248,10 +277,10 @@ The MCP tools: `signafaide_setup` (a preview that changes, creates and sends not
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-js/0.3.3 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
+X-Signafaide-Client: signafaide-js/0.3.4 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
 ```
 
-It holds the SDK and its version, the JavaScript runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `vercel-ai` or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`, `signafaide agent setup`) and kept in `.signafaide/config.json`; it is never guessed per process, so a program started from a terminal inside a coding agent is not labelled as that agent. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
+It holds the SDK and its version, the JavaScript runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `vercel-ai`, `otel` for the OpenTelemetry processor, or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`, `signafaide agent setup`) and kept in `.signafaide/config.json`; it is never guessed per process, so a program started from a terminal inside a coding agent is not labelled as that agent. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
 
 The header and the events hold no content, file paths, hostnames or user names. `SIGNAFAIDE_TELEMETRY=0` removes the adapter, the coding agent and the strict-mode flag from the header, stops the coding agent being saved in `.signafaide/config.json`, and turns the events off. The SDK and its version, the runtime and its version, and how the call was made (`via`) are still sent.
 
@@ -278,4 +307,4 @@ Each project and env has its own chain per agent. A new key, for example a live 
 
 The project root is the nearest folder with `.signafaide/`, `.git`, `pyproject.toml` or `package.json`. `signafaide init` and `agent setup` add `.signafaide/` to `.gitignore` (never a running program). Agent keys live in `.signafaide/agents/<agent>.key` (sandbox) and `.signafaide/agents/live/<agent>.key` (live), mode 0600, and never leave the machine. Back them up. The Python and TypeScript SDKs share this folder and its formats.
 
-ESM and CommonJS, with types. Dependencies: `@noble/ed25519`, `@noble/hashes` and `@noble/curves` (drand). The MCP server is the separate `signafaide-mcp` package, with the MCP SDK and `zod`, so `npm install signafaide` stays small.
+ESM and CommonJS, with types. Dependencies: `@noble/ed25519`, `@noble/hashes` and `@noble/curves` (drand). `signafaide/otel` uses `@opentelemetry/api`, an optional peer dependency. The MCP server is the separate `signafaide-mcp` package, with the MCP SDK and `zod`, so `npm install signafaide` stays small.

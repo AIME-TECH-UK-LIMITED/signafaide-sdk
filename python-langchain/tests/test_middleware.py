@@ -121,3 +121,26 @@ def test_handled_tool_error_stays_visible_in_the_record():
 
     assert _tool_output(ToolMessage(content="ok", tool_call_id="c1")) == "ok"
     assert _tool_output(ToolMessage(content="boom", tool_call_id="c1", status="error")) == {"tool_error": "boom"}
+
+
+def test_middleware_and_the_opentelemetry_processor_record_a_call_once(recorder):
+    """An agent that is traced and also runs through the middleware: each tool call gives one
+    decision and one outcome, the middleware's (written before the tool runs)."""
+    pytest.importorskip("opentelemetry.sdk.trace")
+    pytest.importorskip("openinference.instrumentation.langchain")
+    from openinference.instrumentation.langchain import LangChainInstrumentor
+    from opentelemetry.sdk.trace import TracerProvider
+    from signafaide.otel import SignafaideSpanProcessor
+
+    provider = TracerProvider()
+    provider.add_span_processor(SignafaideSpanProcessor(agent="support-bot"))
+    instrumentor = LangChainInstrumentor()
+    instrumentor.instrument(tracer_provider=provider)
+    try:
+        agent = create_agent(model_calling(("get_weather", {"city": "Paris"})), tools=[get_weather, refund], middleware=[SignafaideMiddleware(agent="support-bot")])
+        agent.invoke({"messages": [("user", "weather")]})
+    finally:
+        instrumentor.uninstrument()
+    recs = records(recorder, "support-bot")
+    assert calls(recs) == [("decision", "get_weather"), ("outcome", "get_weather")]
+    assert "telemetry" not in next(r for r in recs if r["envelope"]["kind"] == "decision")["content"]["meta"]

@@ -4,14 +4,14 @@ import { defineConfig } from "tsup";
 // which ships as ESM only, so `require("signafaide")` works on Node 18.
 export default defineConfig([
   {
-    entry: { index: "src/index.ts", core: "src/core.ts", cli: "src/bin.ts" },
+    entry: { index: "src/index.ts", core: "src/core.ts", otel: "src/otel.ts", cli: "src/bin.ts" },
     format: ["esm"],
-    dts: { entry: { index: "src/index.ts", core: "src/core.ts" } },
+    dts: { entry: { index: "src/index.ts", core: "src/core.ts", otel: "src/otel.ts" } },
     target: "node18",
     splitting: true,
   },
   {
-    entry: { index: "src/index.ts", core: "src/core.ts" },
+    entry: { index: "src/index.ts", core: "src/core.ts", otel: "src/otel.ts" },
     format: ["cjs"],
     dts: true,
     target: "node18",

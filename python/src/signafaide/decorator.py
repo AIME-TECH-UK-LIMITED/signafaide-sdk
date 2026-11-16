@@ -193,33 +193,62 @@ class _Spec:
             rec.warn_strict_refused(self.name, e)
             raise NotRecorded(f"{e.message} (strict mode: {self.name} did not run)", code=e.code, status=e.status, docs=e.docs, body=e.body) from None
 
+    def _begin(self, args: Any) -> Optional[tuple]:
+        """The decision of this call, or None when the telemetry plug-in has already written it for
+        the tool span that is running now (it then writes the outcome too): one call, one decision."""
+        adopt = runtime.telemetry_adopt
+        held = adopt(self.name) if adopt else None
+        if held is not None:
+            return None if not self.strict else (held[0], held[1], True)
+        rec, d = self.decide(args)
+        claim = runtime.telemetry_claim
+        if claim:
+            claim(self.name)
+        return rec, d, False
+
     def call(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None) -> Any:
         """Run *fn* between a decision and an outcome. *output* picks the value the outcome
         records from what *fn* returned (the tool's own return value, for adapters)."""
         if runtime.recording_disabled():
             return fn()
-        rec, d = self.decide(args)
+        begun = self._begin(args)
+        if begun is None:
+            return fn()
+        rec, d, adopted = begun
         if self.strict:
             self.strict_check(rec, d)
+        if adopted:
+            return fn()
+        token = runtime.RECORDING.set(self.name)
         try:
             out = fn()
         except BaseException as e:
             self.outcome(rec, d, _error(e))
             raise
+        finally:
+            runtime.RECORDING.reset(token)
         self.outcome(rec, d, {"output": to_jsonable(output(out) if output else out)})
         return out
 
     async def acall(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None) -> Any:
         if runtime.recording_disabled():
             return await fn()
-        rec, d = self.decide(args)
+        begun = self._begin(args)
+        if begun is None:
+            return await fn()
+        rec, d, adopted = begun
         if self.strict:
             await asyncio.get_running_loop().run_in_executor(None, self.strict_check, rec, d)
+        if adopted:
+            return await fn()
+        token = runtime.RECORDING.set(self.name)
         try:
             out = await fn()
         except BaseException as e:
             self.outcome(rec, d, _error(e))
             raise
+        finally:
+            runtime.RECORDING.reset(token)
         self.outcome(rec, d, {"output": to_jsonable(output(out) if output else out)})
         return out
 

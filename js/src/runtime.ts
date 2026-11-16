@@ -33,7 +33,7 @@ import {
 import { TOOL_SOURCE_REFRESH_MS } from "./state.js";
 import { PENDING, State, StateError, agentKeyEnvName, monotonicMs, appendEnvFile, keyFingerprint, readEnvFile, scopeOf, type Base, type KeyProvider, type KeyScope } from "./state.js";
 import { adapterField, clientHeader, detectAgent, telemetryEnabled } from "./telemetry.js";
-import { TOOLS, byCodePoint, declaredName, toolNoteName } from "./coverage.js";
+import { TOOLS, byCodePoint, declaredName, telemetry, telemetryLines, toolNoteName } from "./coverage.js";
 
 const BATCH_MAX = 1000; // §6: at most 1000 records per POST /v1/records
 /** §2.4: a registration's valid_from is at most 7 days old; keep an hour of margin. */
@@ -44,6 +44,17 @@ const LOCAL_CODES = new Set(["too_old", "chain_exists"]);
 /** Set while a compare runs a candidate function: any record written in that context is
  * refused, so a candidate never adds to a chain (and a recorded tool it calls never runs). */
 export const noWrites = new AsyncLocalStorage<string>();
+
+/** Set while a tool wrapped with the SDK runs: the tool's name. The telemetry plug-in
+ * (`signafaide/otel`) leaves a span of that tool begun inside the call alone, so one tool call is
+ * recorded once (the wrapper's records stand, the span's are not written). */
+export const recording = new AsyncLocalStorage<string>();
+
+/** Set by the telemetry plug-in. `adopt(name)` returns the recorder and the decision when the
+ * plug-in has already written the decision of the tool span that is running now, so a wrapper
+ * inside that span writes no second one; `claim(name)` tells it that a wrapper records the tool
+ * whose span is running now. Neither ever throws. */
+export const telemetryHooks: { adopt?: (name: string) => [Recorder, SignedRecord] | null; claim?: (name: string) => void } = {};
 
 /** `SIGNAFAIDE_DISABLED=1`: `record()` and `wrapTools()` call the function and write nothing. */
 export function recordingDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -1154,6 +1165,26 @@ export class Recorder {
 
   // --- status ---------------------------------------------------------------------
 
+  /** What the chain's telemetry notes say (§2.7), in the verifier's words: the tools recorded
+   * from telemetry spans, and that the telemetry is sampled. Only the lines that name such a
+   * note are parsed, so a long chain is read quickly. Never throws. */
+  telemetryNotes(chain: string): string[] {
+    const found: { kind: unknown; name: unknown }[] = [];
+    for (const file of [...this.state.segments(chain), this.state.chainPath(chain)]) {
+      try {
+        const data = fs.readFileSync(file);
+        if (!data.includes('"signafaide.telemetry')) continue;
+        for (const line of data.toString("utf8").split("\n")) {
+          if (line.includes('"signafaide.telemetry')) found.push((JSON.parse(line) as SignedRecord).envelope);
+        }
+      } catch {
+        continue;
+      }
+    }
+    const t = telemetry(found);
+    return t ? telemetryLines(chain, t) : [];
+  }
+
   status() {
     const heads = this.state.chainHeads();
     const bucket = this.state.bucket(this.apiKey);
@@ -1172,6 +1203,7 @@ export class Recorder {
         receipt_seq: h?.seq ?? null,
         receipt_time: h?.server_time ?? null,
         blocked: blocked.get(chain) ?? null,
+        telemetry: this.telemetryNotes(chain),
       };
     });
     const held = this.state.heldSegments().map(([chain, file, recs]) => ({ chain, file, records: recs.length }));

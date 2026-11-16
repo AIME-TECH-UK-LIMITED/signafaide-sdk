@@ -214,8 +214,13 @@ describe.skipIf(!v)("spec/vectors.json", () => {
       expect(JSON.parse(JSON.stringify(r.toJSON())).coverage, c.name).toEqual(c.expect.coverage);
       expect(r.coverageLines(), c.name).toEqual(c.expect.coverage_lines);
       for (const line of c.expect.coverage_lines) expect(String(r).split("\n"), c.name).toContain(`coverage: ${line}`);
+      // Telemetry notes (§2.7, §7): likewise.
+      expect(JSON.parse(JSON.stringify(r.toJSON())).telemetry, c.name).toEqual(c.expect.telemetry);
+      expect(r.telemetryLines(), c.name).toEqual(c.expect.telemetry_lines);
+      for (const line of c.expect.telemetry_lines) expect(String(r).split("\n"), c.name).toContain(`telemetry: ${line}`);
     }
     expect(v.variants.filter((c: any) => Object.values<any>(c.expect.coverage).some((x) => x.declared_at_seq !== null)).length).toBe(7);
+    expect(v.variants.filter((c: any) => Object.keys(c.expect.telemetry).length).length).toBe(2);
     expect(v.variants.filter((c: any) => c.expect.chain_note).length).toBe(3); // an unclean start, a clean restart, a clean restart cut by the window
   });
 

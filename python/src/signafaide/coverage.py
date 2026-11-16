@@ -105,3 +105,70 @@ def coverage_lines(agent: str, c: dict) -> List[str]:
     if c["undeclared_recorded"]:
         out.append(f"{agent}: {_count_is(len(c['undeclared_recorded']), 'recorded tool')} not in the declared tool list: {', '.join(c['undeclared_recorded'])}")
     return out
+
+
+# --- telemetry notes (SPEC §2.7) ----------------------------------------------------
+
+#: ``signafaide.telemetry/start/<tool name>``: the decisions of this tool that follow were
+#: derived from telemetry spans and written when the span started, before the tool ran.
+TELEMETRY_START_PREFIX = "signafaide.telemetry/start/"
+#: ``signafaide.telemetry/end/<tool name>``: the decisions of this tool that follow were derived
+#: from telemetry spans and written when the span ended, after the tool ran.
+TELEMETRY_END_PREFIX = "signafaide.telemetry/end/"
+#: The records of this agent come from sampled telemetry: some tool calls may not be recorded.
+TELEMETRY_SAMPLED = "signafaide.telemetry_sampled"
+#: What a verifier says for an agent whose chain holds a ``signafaide.telemetry_sampled`` note.
+SAMPLED_LINE = "records come from sampled telemetry: some tool calls may not be recorded"
+_DECISION_WORDS = {
+    "before": "decision written before the tool ran",
+    "after": "decision written after the tool ran",
+    "both": "decisions written before and after the tool ran",
+}
+
+
+def telemetry_note_name(tool: str, at_start: bool) -> str:
+    """The envelope name of the note that says how *tool* is recorded from telemetry."""
+    return (TELEMETRY_START_PREFIX if at_start else TELEMETRY_END_PREFIX) + declared_name(tool)
+
+
+def telemetry_note(kind: Any, name: Any) -> Union[None, str, Tuple[str, str]]:
+    """What a record says about telemetry, from its kind and name alone: ``"sampled"``,
+    ``(tool name, "before" | "after")``, or None when it is not a telemetry note."""
+    if kind != "note" or not isinstance(name, str):
+        return None
+    if name == TELEMETRY_SAMPLED:
+        return "sampled"
+    for prefix, when in ((TELEMETRY_START_PREFIX, "before"), (TELEMETRY_END_PREFIX, "after")):
+        if name.startswith(prefix):
+            rest = name[len(prefix):]
+            return (rest, when) if rest else None
+    return None
+
+
+def telemetry(records: Iterable[Tuple[int, Any, Any]]) -> Optional[dict]:
+    """What one agent's records, given as (seq, kind, name), say about telemetry (§7):
+    ``{"tools": [{"name", "decision": "before" | "after" | "both"}], "sampled": bool}``, tools in
+    code point order, or None when the records hold no telemetry note."""
+    tools: Dict[str, str] = {}
+    sampled = False
+    for _seq, kind, name in records:
+        t = telemetry_note(kind, name)
+        if t == "sampled":
+            sampled = True
+        elif t is not None:
+            tools[t[0]] = t[1] if tools.get(t[0], t[1]) == t[1] else "both"
+    if not tools and not sampled:
+        return None
+    return {"tools": [{"name": n, "decision": tools[n]} for n in sorted(tools)], "sampled": sampled}
+
+
+def telemetry_lines(agent: str, t: dict) -> List[str]:
+    """The telemetry notes of *agent* in words (§7): the tools recorded from telemetry spans and
+    when their decisions were written, then whether the telemetry is sampled."""
+    out = []
+    if t["tools"]:
+        names = ", ".join(f"{x['name']} ({_DECISION_WORDS[x['decision']]})" for x in t["tools"])
+        out.append(f"{agent}: {_count_is(len(t['tools']), 'tool')} recorded from telemetry spans: {names}")
+    if t["sampled"]:
+        out.append(f"{agent}: {SAMPLED_LINE}")
+    return out

@@ -115,3 +115,69 @@ export function coverageLines(agent: string, c: Coverage): string[] {
   if (c.undeclared_recorded.length) out.push(`${agent}: ${countIs(c.undeclared_recorded.length, "recorded tool")} not in the declared tool list: ${c.undeclared_recorded.join(", ")}`);
   return out;
 }
+
+// --- telemetry notes (SPEC §2.7) ------------------------------------------------------
+
+/** `signafaide.telemetry/start/<tool name>`: the decisions of this tool that follow were derived
+ * from telemetry spans and written when the span started, before the tool ran. */
+export const TELEMETRY_START_PREFIX = "signafaide.telemetry/start/";
+/** `signafaide.telemetry/end/<tool name>`: the decisions of this tool that follow were derived
+ * from telemetry spans and written when the span ended, after the tool ran. */
+export const TELEMETRY_END_PREFIX = "signafaide.telemetry/end/";
+/** The records of this agent come from sampled telemetry: some tool calls may not be recorded. */
+export const TELEMETRY_SAMPLED = "signafaide.telemetry_sampled";
+/** What a verifier says for an agent whose chain holds a `signafaide.telemetry_sampled` note. */
+export const SAMPLED_LINE = "records come from sampled telemetry: some tool calls may not be recorded";
+
+export type DecisionWritten = "before" | "after" | "both";
+const DECISION_WORDS: Record<DecisionWritten, string> = {
+  before: "decision written before the tool ran",
+  after: "decision written after the tool ran",
+  both: "decisions written before and after the tool ran",
+};
+
+/** What one agent's records say about telemetry (§7). */
+export interface Telemetry {
+  /** The tools recorded from telemetry spans, in name order, and when their decisions were written. */
+  tools: { name: string; decision: DecisionWritten }[];
+  /** The chain holds a `signafaide.telemetry_sampled` note. */
+  sampled: boolean;
+}
+
+/** The envelope name of the note that says how `tool` is recorded from telemetry. */
+export function telemetryNoteName(tool: string, atStart: boolean): string {
+  return (atStart ? TELEMETRY_START_PREFIX : TELEMETRY_END_PREFIX) + declaredName(tool);
+}
+
+/** What a record says about telemetry, from its kind and name alone: `"sampled"`, a tool and
+ * when its decisions are written, or null when it is not a telemetry note. */
+export function telemetryNote(kind: unknown, name: unknown): "sampled" | { name: string; decision: "before" | "after" } | null {
+  if (kind !== "note" || typeof name !== "string") return null;
+  if (name === TELEMETRY_SAMPLED) return "sampled";
+  const start = name.startsWith(TELEMETRY_START_PREFIX);
+  if (!start && !name.startsWith(TELEMETRY_END_PREFIX)) return null;
+  const rest = name.slice((start ? TELEMETRY_START_PREFIX : TELEMETRY_END_PREFIX).length);
+  return rest ? { name: rest, decision: start ? "before" : "after" } : null;
+}
+
+/** What one agent's records say about telemetry, or null when they hold no telemetry note. */
+export function telemetry(records: Iterable<{ kind: unknown; name: unknown }>): Telemetry | null {
+  const tools = new Map<string, DecisionWritten>();
+  let sampled = false;
+  for (const { kind, name } of records) {
+    const t = telemetryNote(kind, name);
+    if (t === "sampled") sampled = true;
+    else if (t) tools.set(t.name, (tools.get(t.name) ?? t.decision) === t.decision ? t.decision : "both");
+  }
+  if (!tools.size && !sampled) return null;
+  return { tools: [...tools.keys()].sort(byCodePoint).map((name) => ({ name, decision: tools.get(name)! })), sampled };
+}
+
+/** The telemetry notes of `agent` in words (§7): the tools recorded from telemetry spans and
+ * when their decisions were written, then whether the telemetry is sampled. */
+export function telemetryLines(agent: string, t: Telemetry): string[] {
+  const out: string[] = [];
+  if (t.tools.length) out.push(`${agent}: ${countIs(t.tools.length, "tool")} recorded from telemetry spans: ${t.tools.map((x) => `${x.name} (${DECISION_WORDS[x.decision]})`).join(", ")}`);
+  if (t.sampled) out.push(`${agent}: ${SAMPLED_LINE}`);
+  return out;
+}

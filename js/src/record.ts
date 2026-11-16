@@ -4,7 +4,7 @@
 import { canonicalize, isUnsafeInteger } from "./jcs.js";
 import { SignafaideError } from "./http.js";
 import { recordHash, type SignedRecord } from "./records.js";
-import { getRecorder, noWrites, recordingDisabled, type Recorder } from "./runtime.js";
+import { getRecorder, noWrites, recording, recordingDisabled, telemetryHooks, type Recorder } from "./runtime.js";
 import { ADAPTERS } from "./telemetry.js";
 import { VERSION } from "./version.js";
 
@@ -90,8 +90,15 @@ function declareOwn(rec: Recorder, agentOpt: string | undefined, storeContent?: 
   return rec.declareTools(own[0], { agent, source: "sdk", origin: own[1], storeContent });
 }
 
+/** @internal A tool the telemetry plug-in records from its spans: part of what this program
+ * records for `agent`, and, with `listed`, of the tool list it declares. */
+export function rememberTool(agent: string, name: string, listed: boolean): void {
+  remember(WRAPPED, agent, name);
+  if (listed) remember(LISTED, agent, name);
+}
+
 /** Before a decision: declare the tools, once per change. Never fails the tool call. */
-function declareBeforeCall(rec: Recorder, agentOpt: string | undefined): void {
+export function declareBeforeCall(rec: Recorder, agentOpt: string | undefined): void {
   const agent = agentOpt || rec.defaultAgent;
   const seen = checked.get(rec) ?? new Map<string, number>();
   checked.set(rec, seen);
@@ -193,9 +200,15 @@ class Spec {
   /** Run `fn` between a decision and an outcome. Sync stays sync unless strict. */
   call(input: unknown, fn: () => unknown): unknown {
     if (recordingDisabled()) return this.opts.strict ? Promise.resolve().then(fn) : fn();
+    // The telemetry plug-in has already written the decision of the tool span that is running
+    // now (it then writes the outcome too): one call, one decision.
+    const held = telemetryHooks.adopt?.(this.name);
+    if (held) return this.opts.strict ? this.strictCheck(held[0], held[1]).then(fn) : fn();
     const [rec, d] = this.decide(input);
-    if (this.opts.strict) return this.strictCheck(rec, d).then(() => this.run(rec, d, fn));
-    return this.run(rec, d, fn);
+    telemetryHooks.claim?.(this.name);
+    const run = () => this.run(rec, d, () => recording.run(this.name, fn));
+    if (this.opts.strict) return this.strictCheck(rec, d).then(run);
+    return run();
   }
 
   private run(rec: Recorder, d: SignedRecord, fn: () => unknown): unknown {

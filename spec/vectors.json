@@ -1173,7 +1173,9 @@
         "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
       ],
       "result": "PASS",
-      "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+      "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+      "telemetry": {},
+      "telemetry_lines": []
     },
     "pack": {
       "agent_keys": [
@@ -16395,7 +16397,7 @@
       "unrecorded_note": "signafaide.tool_unrecorded/tool-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx~7f056c65"
     }
   ],
-  "tool_names_note": "Tool declarations (spec 2.6). declared_name is the tool's name as a declaration holds it: the name itself up to 101 characters (Unicode code points), else its first 92 characters, a tilde and the first 8 hex characters of sha256(UTF-8 tool name). recorded_note and unrecorded_note are the envelope names of the two notes that declare the tool. A variant's expect.coverage is the report's coverage object and expect.coverage_lines its coverage lines, in order.",
+  "tool_names_note": "Tool declarations (spec 2.6). declared_name is the tool's name as a declaration holds it: the name itself up to 101 characters (Unicode code points), else its first 92 characters, a tilde and the first 8 hex characters of sha256(UTF-8 tool name). recorded_note and unrecorded_note are the envelope names of the two notes that declare the tool. A variant's expect.coverage is the report's coverage object and expect.coverage_lines its coverage lines, in order. Telemetry notes (spec 2.7): a variant's expect.telemetry is the report's telemetry object (agents with a telemetry note only) and expect.telemetry_lines its telemetry lines, in order.",
   "variants": [
     {
       "expect": {
@@ -16424,7 +16426,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "independent service and agent keys, offline",
       "pack": {
@@ -16762,7 +16766,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 2 pending (anchors, public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 2 pending (anchors, public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "young batches no anchor covers yet: anchors and public timestamp pending",
       "pack": {
@@ -17070,7 +17076,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a pack that names its project (signed in the export statement)",
       "pack": {
@@ -17410,7 +17418,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS (agent keys taken from the pack, not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS (agent keys taken from the pack, not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "agent keys from the pack, trusted explicitly",
       "pack": {
@@ -17755,7 +17765,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 12 of 12 checks passed; export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a confirmed proof checked against its block header",
       "pack": {
@@ -18093,7 +18105,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 not checked (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 not checked (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a confirmed proof, offline",
       "pack": {
@@ -18437,7 +18451,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 not checked (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 not checked (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a block header that does not meet its own proof of work is not trusted: not checked",
       "pack": {
@@ -18781,7 +18797,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 not checked (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 not checked (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a block header that does not hash to the block it was served for is not trusted: not checked",
       "pack": {
@@ -19119,7 +19137,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records from 2026-11-13T10:00:00.500Z, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records from 2026-11-13T10:00:00.500Z, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "an export from a time: the chain starts mid-way",
       "pack": {
@@ -19382,7 +19402,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records before 2026-11-13T10:04:00.000Z, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records before 2026-11-13T10:04:00.000Z, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "an export up to a time: the chain ends before the head",
       "pack": {
@@ -19675,7 +19697,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records before 2026-11-13T10:04:00.000Z, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records before 2026-11-13T10:04:00.000Z, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "head": {
         "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D": {
@@ -19985,7 +20009,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "head": {
         "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D": {
@@ -20367,7 +20393,9 @@
           "agent-b: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records from 2026-11-13T09:30:00.000Z, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, records from 2026-11-13T09:30:00.000Z, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "two agents, exported from a time",
       "pack": {
@@ -20736,7 +20764,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a retired key's records from before its retirement (the customer's manifest)",
       "pack": {
@@ -21074,7 +21104,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 2 not checked (anchors, public timestamp); export of every agent, all records, generated 2026-11-13T13:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 2 not checked (anchors, public timestamp); export of every agent, all records, generated 2026-11-13T13:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "batches older than the anchor window that no anchor covers: not timestamped",
       "pack": {
@@ -21384,7 +21416,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS (checked by the service with its own key registry; not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS (checked by the service with its own key registry; not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "checked by the service with its own key registry",
       "pack": {
@@ -21722,7 +21756,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS (service keys fetched over plain http, not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS (service keys fetched over plain http, not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "service keys fetched over plain http from a local address",
       "pack": {
@@ -22062,7 +22098,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a new instance continued the chain after seq 2 (an instance-start note)",
       "pack": {
@@ -22401,7 +22439,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a clean restart: the start note at seq 3 follows a stop note at seq 2",
       "pack": {
@@ -22739,7 +22779,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, records from 2026-11-13T10:00:01.000Z, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, records from 2026-11-13T10:00:01.000Z, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a clean restart exported from its start note on: the stop note is outside the pack",
       "pack": {
@@ -22951,7 +22993,9 @@
           "agent-a: all 2 declared tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a tool declaration: every declared tool is recorded",
       "pack": {
@@ -23375,7 +23419,9 @@
           "agent-a: 2 recorded tools are not in the declared tool list: escalate, reject_refund"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a tool declaration with unrecorded tools, and recorded tools it does not list",
       "pack": {
@@ -23940,7 +23986,9 @@
           "agent-a: all 2 declared tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a second tool declaration replaces the first; a tool in both forms takes the later note",
       "pack": {
@@ -24455,7 +24503,9 @@
           "agent-a: 1 recorded tool is not in the declared tool list: approve_payout"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a tool declaration with one tool, not recorded",
       "pack": {
@@ -24767,7 +24817,9 @@
           "agent-a: 1 recorded tool is not in the declared tool list: approve_payout"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a tool declaration with no tools",
       "pack": {
@@ -25085,7 +25137,9 @@
           "agent-a: all 2 declared tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a tool name too long for a declaration is cut and matched to its decision",
       "pack": {
@@ -25443,7 +25497,9 @@
           "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, records from 2026-11-13T10:00:02.000Z, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, records from 2026-11-13T10:00:02.000Z, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "a tool declaration exported from after its header: the tool note left is ignored",
       "pack": {
@@ -25727,7 +25783,9 @@
           "agent-b: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
         ],
         "result": "PASS",
-        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z"
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {},
+        "telemetry_lines": []
       },
       "name": "two agents: one declared its tools, the other did not",
       "pack": {
@@ -26015,6 +26073,954 @@
               "service_key_id": "24f6ed6acbfe1009"
             },
             "sig": "oM9Ob_iQ8mekUuu9L2VYSR_FHdU8DxUSTfrQjC8TDv8f9en64P4btrHc-SmJJeagugzOeawwuZpJP5gofXOoCA"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "not_checked",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {
+          "agent-a": {
+            "sampled": true,
+            "tools": [
+              {
+                "decision": "both",
+                "name": "approve_payout"
+              },
+              {
+                "decision": "after",
+                "name": "send_email"
+              }
+            ]
+          }
+        },
+        "telemetry_lines": [
+          "agent-a: 2 tools are recorded from telemetry spans: approve_payout (decisions written before and after the tool ran), send_email (decision written after the tool ran)",
+          "agent-a: records come from sampled telemetry: some tool calls may not be recorded"
+        ]
+      },
+      "name": "telemetry notes: tools recorded from sampled telemetry spans, decisions written before, after and both",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEInGVzLfQMpJsJpvrZ3IbTdPI9lvhryqtEeFSrcsNSxi/wEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "f6d2403d8be8b79cff1c81b5105d59ba29ce8b771d69dd825e00ee22979107cd",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "le6-wCrueNA13zX1nGyflvcdN9OCYrpN6Wo6Tu4T0Zj4q02l1xWivUiZBF1E4ERd939w-343b2zkmL0wTv8jBQ",
+            "paths": {
+              "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301": {
+                "index": 0,
+                "path": [
+                  "ef0f203cd82fa5b8cad57dec471f29e540db9762e78cece59382836b77cd4c81"
+                ]
+              },
+              "dfb89c1a7c8172eb36667dfe418a8588f3eb4c8aef4ccb506377e186314dbcbf": {
+                "index": 1,
+                "path": [
+                  "0ee635657b938f6d006c8c61bb2164c97ba22587a536cacf66d60653ebb4e25e"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "DLqH75ayCbQFcRcdi4i7C2dCzxDH5WFGIYJt_mnaEAXKv4vlLkfP5QCGa17EUL5fRIvxKvFqnCcyNi8k_QMYAg",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "f840773dc417ae4ecc16bf69158b10fbedcb20fdf03f49b2c2cff4f4a37426b4",
+              "seq": 10,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "3Rm_U72bwY89dgv7gh77iwR-FYmHhNe-CmM3sZX5NfVkrN8-59mTnSD_uPXDLTaoujsoTpag6kotorSsHeILCg"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "813bef6682bcf3f934e60b18a6ceae8feeaad912e794c76759ae005ba52bee16",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.telemetry_sampled",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "6123109cf6e76572178b91c1e767f0ed543059e7255695975ebabe1ebce3bc20",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301",
+              "batch_sig": "ixEHrUbX92yF_8-s0qjoLmHCD30rhXX0GAXkIf8Cv9LFgtCNoJWQDEn88aGfR1VZWKTbFuQXvXbdvzibxNIFAQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "a26506b2cbad0888590f2e8fe256442ae1c2f397428170971763e498db3d5fe9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "TkrhcRjPjGxbI6FpMYuwlitLxaXJ6_BebSmrVusLCYYH1dnVm-t4mEpn5u2AmWgge9ujvKjUKnCKYlh4aXCkDA",
+              "index": 0,
+              "proof": [
+                "b64149dd474af14cdbe615c64b0056cc2fb731881e31ba140f39c076f7768501",
+                "9661795f075847e99671c7b53a60ad9ab8c19ee54cff0418c08de2797e5dd5b3"
+              ],
+              "record_hash": "a7be0d15bc994a497aa6ced81c6f299c68b5db30f155596e2510088455db3b36",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "S1ynkfj4v21Btdfflz9kNEXROdhFSBDMWxRvN8N-YgkqGIJY10QX9_qr897-xk6VDSHbmWscHafPeG_VUed9Bw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "c42ff260d17cca27cad6ca6020ee175daaf5c6d0bbfe50425591bfdafa8a1bbf",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.telemetry/start/approve_payout",
+              "prev": "a7be0d15bc994a497aa6ced81c6f299c68b5db30f155596e2510088455db3b36",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 2,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "6123109cf6e76572178b91c1e767f0ed543059e7255695975ebabe1ebce3bc20",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301",
+              "batch_sig": "ixEHrUbX92yF_8-s0qjoLmHCD30rhXX0GAXkIf8Cv9LFgtCNoJWQDEn88aGfR1VZWKTbFuQXvXbdvzibxNIFAQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "a26506b2cbad0888590f2e8fe256442ae1c2f397428170971763e498db3d5fe9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "TkrhcRjPjGxbI6FpMYuwlitLxaXJ6_BebSmrVusLCYYH1dnVm-t4mEpn5u2AmWgge9ujvKjUKnCKYlh4aXCkDA",
+              "index": 1,
+              "proof": [
+                "7cc3e1b9cde8aa9fde30440d5fae990a14bbe07dad1bb41212bcc11e9c2c6117",
+                "9661795f075847e99671c7b53a60ad9ab8c19ee54cff0418c08de2797e5dd5b3"
+              ],
+              "record_hash": "1ec3bd78e4490db7cf5a6db4c987a0f51412d76a7a6ebfbed7c4b79674710016",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "ixOR9dyIZ0zmaVcBxJsPMovfcnmb3j4tjoIzMiIJDOwRPge3r_byuPTMe-xvyxK76gBTpRNepKmhG7iJRKVUDg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "a225d1cac4ec87b7fe0b3ca762749b59518e3fc1ae311092657dd7d90015e29e",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": "1ec3bd78e4490db7cf5a6db4c987a0f51412d76a7a6ebfbed7c4b79674710016",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 3,
+              "time": "2026-11-13T10:00:02.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "6123109cf6e76572178b91c1e767f0ed543059e7255695975ebabe1ebce3bc20",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301",
+              "batch_sig": "ixEHrUbX92yF_8-s0qjoLmHCD30rhXX0GAXkIf8Cv9LFgtCNoJWQDEn88aGfR1VZWKTbFuQXvXbdvzibxNIFAQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "a26506b2cbad0888590f2e8fe256442ae1c2f397428170971763e498db3d5fe9",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "TkrhcRjPjGxbI6FpMYuwlitLxaXJ6_BebSmrVusLCYYH1dnVm-t4mEpn5u2AmWgge9ujvKjUKnCKYlh4aXCkDA",
+              "index": 2,
+              "proof": [
+                "6989163c1ad2478e9203247d14d923d899cabc792fe97e3d710627b5e9dae23d"
+              ],
+              "record_hash": "a26506b2cbad0888590f2e8fe256442ae1c2f397428170971763e498db3d5fe9",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "GWh0TnRXfvQBUmvxTIvYawagMgfh-XAZ93hzS63fNUAlAqAsCCvmg_CIcTjDDOuu_q2wiyPF_wlflxzYRCRIAQ"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "93b1e6961ef214795a23045b4e185e1f2822898f91994dbd401ce990d81b4504",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "a26506b2cbad0888590f2e8fe256442ae1c2f397428170971763e498db3d5fe9",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "a26506b2cbad0888590f2e8fe256442ae1c2f397428170971763e498db3d5fe9",
+              "seq": 4,
+              "time": "2026-11-13T10:00:03.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "cdeae7872efb6467a32d90d1b98cf59e4d6fe93179e6af8304ccd732fdcce252",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 7,
+                "v": 1
+              },
+              "batch_hash": "dfb89c1a7c8172eb36667dfe418a8588f3eb4c8aef4ccb506377e186314dbcbf",
+              "batch_sig": "4NWGfIHugYR5Azhj6B2EgKaKI21iwj54Ys6PGquCnkMHhWHqnpnjyfI5u2Yu-Fz7IOqobfEvxWtIO2Pn47cuBg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "f840773dc417ae4ecc16bf69158b10fbedcb20fdf03f49b2c2cff4f4a37426b4",
+                "seq": 10,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "3Rm_U72bwY89dgv7gh77iwR-FYmHhNe-CmM3sZX5NfVkrN8-59mTnSD_uPXDLTaoujsoTpag6kotorSsHeILCg",
+              "index": 0,
+              "proof": [
+                "fdd296bc2fa3334f849ea604a56bd1264230c0a6d067299e469c28d4d62dce0d",
+                "f72759233090991c03ad865e9e53fc639ca767ca59307d867981f5d2c1a7b523",
+                "f615b41877754e5ff387732ec11a7053cbf6a53075c845e520153ac71282e754"
+              ],
+              "record_hash": "921db6ccfa19bb13669c533f54be3e1091c72e9c368dc856be98c82b023ddf8f",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "4jZj3qGC_wztJUzrwzV5IR_GYH2o_Fn0nCL6sNTqZw880k4K7dHq2Mykie7WU61m7YF0cMPv_9cLjGg08z2bCA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "fa3b18370e8c4163ffbe453990ffa19129bc016db40171b0f610ae47d722f7ea",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.telemetry/end/send_email",
+              "prev": "921db6ccfa19bb13669c533f54be3e1091c72e9c368dc856be98c82b023ddf8f",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 5,
+              "time": "2026-11-13T10:00:04.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "cdeae7872efb6467a32d90d1b98cf59e4d6fe93179e6af8304ccd732fdcce252",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 7,
+                "v": 1
+              },
+              "batch_hash": "dfb89c1a7c8172eb36667dfe418a8588f3eb4c8aef4ccb506377e186314dbcbf",
+              "batch_sig": "4NWGfIHugYR5Azhj6B2EgKaKI21iwj54Ys6PGquCnkMHhWHqnpnjyfI5u2Yu-Fz7IOqobfEvxWtIO2Pn47cuBg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "f840773dc417ae4ecc16bf69158b10fbedcb20fdf03f49b2c2cff4f4a37426b4",
+                "seq": 10,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "3Rm_U72bwY89dgv7gh77iwR-FYmHhNe-CmM3sZX5NfVkrN8-59mTnSD_uPXDLTaoujsoTpag6kotorSsHeILCg",
+              "index": 1,
+              "proof": [
+                "07c6feee9b41e0440ccb2bf5190c4ddaa79878829c2e145cabcc8d3240727e9e",
+                "f72759233090991c03ad865e9e53fc639ca767ca59307d867981f5d2c1a7b523",
+                "f615b41877754e5ff387732ec11a7053cbf6a53075c845e520153ac71282e754"
+              ],
+              "record_hash": "0b9b5fac272aabb330828d7f0ba8b4ee1473624f9c7b35dc7ee90a5fdce81d32",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "wtQIs8whqdxMVqLD_gk48VSiWeUda0mLUI4mTszsKcqbuR6iWBbkXSvSUAESsJ7jjj-BvdYUXhS7RUidSuugBg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "8df3327dcfe684c122e174d64fbe5304b7dad4cc93a23cc52000ff698f6daaea",
+              "env": "live",
+              "kind": "decision",
+              "name": "send_email",
+              "prev": "0b9b5fac272aabb330828d7f0ba8b4ee1473624f9c7b35dc7ee90a5fdce81d32",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 6,
+              "time": "2026-11-13T10:00:05.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "cdeae7872efb6467a32d90d1b98cf59e4d6fe93179e6af8304ccd732fdcce252",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 7,
+                "v": 1
+              },
+              "batch_hash": "dfb89c1a7c8172eb36667dfe418a8588f3eb4c8aef4ccb506377e186314dbcbf",
+              "batch_sig": "4NWGfIHugYR5Azhj6B2EgKaKI21iwj54Ys6PGquCnkMHhWHqnpnjyfI5u2Yu-Fz7IOqobfEvxWtIO2Pn47cuBg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "f840773dc417ae4ecc16bf69158b10fbedcb20fdf03f49b2c2cff4f4a37426b4",
+                "seq": 10,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "3Rm_U72bwY89dgv7gh77iwR-FYmHhNe-CmM3sZX5NfVkrN8-59mTnSD_uPXDLTaoujsoTpag6kotorSsHeILCg",
+              "index": 2,
+              "proof": [
+                "f6e5c59bef76b7540374e60e489a66ec4314958524b3f72edb3395c6e276244b",
+                "db6b599507eece25f75263d7d258c69e54f21e6e77c6322c732debddc5a7e848",
+                "f615b41877754e5ff387732ec11a7053cbf6a53075c845e520153ac71282e754"
+              ],
+              "record_hash": "c97fe849e612ae14f868837acdb64b1da2b53d13f25e5943e2ac1a8bf7ce0310",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "NsVr5NC6HhzuzQBfnHD0hpSJE4d602NRmgVwkkl8VmyTh9Gme7_bVCID_GKZWEIpCV6FmYrkfcICcnHbtJbiBw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "6836ee6eaf03af45c794ba259a810814a16626f83f87a2e976d1f05232006064",
+              "env": "live",
+              "kind": "outcome",
+              "name": "send_email",
+              "prev": "c97fe849e612ae14f868837acdb64b1da2b53d13f25e5943e2ac1a8bf7ce0310",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "c97fe849e612ae14f868837acdb64b1da2b53d13f25e5943e2ac1a8bf7ce0310",
+              "seq": 7,
+              "time": "2026-11-13T10:00:06.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "cdeae7872efb6467a32d90d1b98cf59e4d6fe93179e6af8304ccd732fdcce252",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 7,
+                "v": 1
+              },
+              "batch_hash": "dfb89c1a7c8172eb36667dfe418a8588f3eb4c8aef4ccb506377e186314dbcbf",
+              "batch_sig": "4NWGfIHugYR5Azhj6B2EgKaKI21iwj54Ys6PGquCnkMHhWHqnpnjyfI5u2Yu-Fz7IOqobfEvxWtIO2Pn47cuBg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "f840773dc417ae4ecc16bf69158b10fbedcb20fdf03f49b2c2cff4f4a37426b4",
+                "seq": 10,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "3Rm_U72bwY89dgv7gh77iwR-FYmHhNe-CmM3sZX5NfVkrN8-59mTnSD_uPXDLTaoujsoTpag6kotorSsHeILCg",
+              "index": 3,
+              "proof": [
+                "f0cf39398d1cfa8325f00dcf73c8ff44df52f563cabb01ff706468c84c8e78f7",
+                "db6b599507eece25f75263d7d258c69e54f21e6e77c6322c732debddc5a7e848",
+                "f615b41877754e5ff387732ec11a7053cbf6a53075c845e520153ac71282e754"
+              ],
+              "record_hash": "ab3e9a796e43821c34613121305f5b70eec269efeb24fd49679e4ff9888a9488",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "92uqS0miwCux7OM26IpNDNERiWgNAXtmuPM1J9ZdYPZDbrzaI0vQutVqWin0BSRDwonwjkzG4Ifr1JDxyjEsAw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "fc13276a3bed07552d477129b99e5f78d3bb8551ba34953d50fb3c0e5cb8e535",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.telemetry/end/approve_payout",
+              "prev": "ab3e9a796e43821c34613121305f5b70eec269efeb24fd49679e4ff9888a9488",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 8,
+              "time": "2026-11-13T10:00:07.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "cdeae7872efb6467a32d90d1b98cf59e4d6fe93179e6af8304ccd732fdcce252",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 7,
+                "v": 1
+              },
+              "batch_hash": "dfb89c1a7c8172eb36667dfe418a8588f3eb4c8aef4ccb506377e186314dbcbf",
+              "batch_sig": "4NWGfIHugYR5Azhj6B2EgKaKI21iwj54Ys6PGquCnkMHhWHqnpnjyfI5u2Yu-Fz7IOqobfEvxWtIO2Pn47cuBg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "f840773dc417ae4ecc16bf69158b10fbedcb20fdf03f49b2c2cff4f4a37426b4",
+                "seq": 10,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "3Rm_U72bwY89dgv7gh77iwR-FYmHhNe-CmM3sZX5NfVkrN8-59mTnSD_uPXDLTaoujsoTpag6kotorSsHeILCg",
+              "index": 4,
+              "proof": [
+                "6d422c4cece8981b460801e6f8656e91d94bd54cd446222ff03f91ef16e6d8a2",
+                "af05a5ff1b2023a6c79443381ad6233f4c2ec8e38b1dc88928c0573aa209a0bd",
+                "bd257f42f2eff340c5dfa36c2ecba6519955cfbba9273687265598eabbad8938"
+              ],
+              "record_hash": "5e82ef04642eeb549c9e3245132346b80bbe20df21f459c84f8d7488af09c095",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "BFJdHigCJe9SQhET8F7KifdGf-NYcPp3Si1laq8YBwNU6jfKXEMcaelAMKcSrpOVkM0GuWHCBbNUnKgSiltjDA"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "231f915ca580c4a89ebfc54abb37171ef706331c85b061824b146df027db9589",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": "5e82ef04642eeb549c9e3245132346b80bbe20df21f459c84f8d7488af09c095",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 9,
+              "time": "2026-11-13T10:00:08.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "cdeae7872efb6467a32d90d1b98cf59e4d6fe93179e6af8304ccd732fdcce252",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 7,
+                "v": 1
+              },
+              "batch_hash": "dfb89c1a7c8172eb36667dfe418a8588f3eb4c8aef4ccb506377e186314dbcbf",
+              "batch_sig": "4NWGfIHugYR5Azhj6B2EgKaKI21iwj54Ys6PGquCnkMHhWHqnpnjyfI5u2Yu-Fz7IOqobfEvxWtIO2Pn47cuBg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "f840773dc417ae4ecc16bf69158b10fbedcb20fdf03f49b2c2cff4f4a37426b4",
+                "seq": 10,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "3Rm_U72bwY89dgv7gh77iwR-FYmHhNe-CmM3sZX5NfVkrN8-59mTnSD_uPXDLTaoujsoTpag6kotorSsHeILCg",
+              "index": 5,
+              "proof": [
+                "97e361ffcc7cf7152cd683a75ca91d28854bffed70e450462c5f4866be967352",
+                "af05a5ff1b2023a6c79443381ad6233f4c2ec8e38b1dc88928c0573aa209a0bd",
+                "bd257f42f2eff340c5dfa36c2ecba6519955cfbba9273687265598eabbad8938"
+              ],
+              "record_hash": "199389dad5f86c16f8b1875cd92afca60251622c3df2096934ba65090c98c2bd",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "1X4Y1lIGnO7rcYmjerCL_8hCCcVaS-vng87yBzYgGoQvQgravR2mFWHSbKctLIAo7q3CIinY_6VkpaSXkp33Bg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "2c0730a90d0643f8d5b609ab26d83a9d2bf0691607c2398a26faab5840f64b90",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "199389dad5f86c16f8b1875cd92afca60251622c3df2096934ba65090c98c2bd",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "199389dad5f86c16f8b1875cd92afca60251622c3df2096934ba65090c98c2bd",
+              "seq": 10,
+              "time": "2026-11-13T10:00:09.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "72fc1357d1d99b2cf8f42ba08ad451cca62c70ea6eb9c2260298355e335f3301",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "cdeae7872efb6467a32d90d1b98cf59e4d6fe93179e6af8304ccd732fdcce252",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 7,
+                "v": 1
+              },
+              "batch_hash": "dfb89c1a7c8172eb36667dfe418a8588f3eb4c8aef4ccb506377e186314dbcbf",
+              "batch_sig": "4NWGfIHugYR5Azhj6B2EgKaKI21iwj54Ys6PGquCnkMHhWHqnpnjyfI5u2Yu-Fz7IOqobfEvxWtIO2Pn47cuBg",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "f840773dc417ae4ecc16bf69158b10fbedcb20fdf03f49b2c2cff4f4a37426b4",
+                "seq": 10,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "3Rm_U72bwY89dgv7gh77iwR-FYmHhNe-CmM3sZX5NfVkrN8-59mTnSD_uPXDLTaoujsoTpag6kotorSsHeILCg",
+              "index": 6,
+              "proof": [
+                "c81558086d206f86873a50b7ef90142b1c14355bd43de94a111122e92bfe022c",
+                "bd257f42f2eff340c5dfa36c2ecba6519955cfbba9273687265598eabbad8938"
+              ],
+              "record_hash": "f840773dc417ae4ecc16bf69158b10fbedcb20fdf03f49b2c2cff4f4a37426b4",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "Ho1wq8mKX23ygwfduaYoMmMNvw2cfpoKy0hMPsE9-NCTKZVaVYAAx3nA7Rq314Mjfml9_T6pG6sQsvkKFr04Cg"
+          }
+        ],
+        "service_keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ]
+      }
+    },
+    {
+      "expect": {
+        "checks": {
+          "anchor": "pass",
+          "batch_chain": "pass",
+          "batch_sig": "pass",
+          "chain": "pass",
+          "content": "not_checked",
+          "drand": "pass",
+          "head_sig": "pass",
+          "merkle": "pass",
+          "ots": "pending",
+          "record_hash": "pass",
+          "record_sig": "pass",
+          "schema": "pass"
+        },
+        "coverage": {
+          "agent-a": {
+            "declared": [],
+            "declared_at_seq": null,
+            "undeclared_recorded": []
+          }
+        },
+        "coverage_lines": [
+          "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+        ],
+        "result": "PASS",
+        "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+        "telemetry": {
+          "agent-a": {
+            "sampled": false,
+            "tools": [
+              {
+                "decision": "before",
+                "name": "approve_payout"
+              }
+            ]
+          }
+        },
+        "telemetry_lines": [
+          "agent-a: 1 tool is recorded from telemetry spans: approve_payout (decision written before the tool ran)"
+        ]
+      },
+      "name": "a telemetry note for one tool, decision written before the tool ran; a decision named like a telemetry note is not one",
+      "pack": {
+        "agent_keys": [
+          {
+            "agent": "agent-a",
+            "key_id": "56475aa75463474c",
+            "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+            "valid_from": "2026-11-13T09:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "anchors": [
+          {
+            "anchor": {
+              "bitcoin_block": null,
+              "created": "2026-11-13T11:00:00.000Z",
+              "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEIOy5hPJBq0nDPLUry3CaY44UnXhzZyFz82bWR6CZVK6XwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "prev": null,
+              "root": "9ec42c8481e0fa9b7395c4134e0d8c04c7e480b4fee2ab3c8cc85679036b69c8",
+              "seq": 1,
+              "size": 2,
+              "status": "pending",
+              "v": 1
+            },
+            "anchor_sig": "uBBwkYjzg-Fa2eXT_Fj_ePkjB3hpG7vnnuy17qHMP2jyXZfKDBWU7bYfa9V-0Xtvzn76XLx08Ss2eoA46QplAg",
+            "paths": {
+              "7a117f5d9f1e3f7d80cba0f115c0edda712077e058a69b21293454f4a2b83a8a": {
+                "index": 1,
+                "path": [
+                  "a75709cf6fcad581350fc493cc8967bea5315980e68fe278b75e99b76f6848b4"
+                ]
+              },
+              "adf559ffa92c07d9060f115ce7a2594dd46e1898e49cb5b2d22edc7f52c35012": {
+                "index": 0,
+                "path": [
+                  "32bfe5bb7567a6457b96de268021e8244d120c0ca4b4e8bce06096ba4e40f1e4"
+                ]
+              }
+            }
+          }
+        ],
+        "env": "live",
+        "export_sig": "IuCOy9aoFO3QtBbqsQa8fQH0Vd1dpJrTeqleSNmoz4-A6_r_EiMx4H5XErTJii7L7T4WCyOHVRjzXCwdD2TwBw",
+        "filter": {
+          "agents": null,
+          "from": null,
+          "to": null
+        },
+        "format": "signafaide-pack/1",
+        "generated": "2026-11-13T12:00:00.000Z",
+        "heads": [
+          {
+            "head": {
+              "agent": "agent-a",
+              "env": "live",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "record_hash": "d69725b25b80c201535b8cdd76eb0bf6a4c78f65b695fb7b08fc8f650ccab446",
+              "seq": 4,
+              "server_time": "2026-11-13T10:05:00.000Z"
+            },
+            "head_sig": "vim-tyUTnBQsSeCIClMAaTQptmNCiRf61dw4nEz2HePc62W5ExHDY4ySuVQgtbCQjSIbOrdI3vj6Ewj_t5XeBw"
+          }
+        ],
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "records": [
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "813bef6682bcf3f934e60b18a6ceae8feeaad912e794c76759ae005ba52bee16",
+              "env": "live",
+              "kind": "note",
+              "name": "signafaide.telemetry/start/approve_payout",
+              "prev": null,
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 1,
+              "time": "2026-11-13T10:00:00.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "da947a29703ffe5f4f5632624cf799adf60f05aeb4bf5fc2946a30ef1b619010",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "adf559ffa92c07d9060f115ce7a2594dd46e1898e49cb5b2d22edc7f52c35012",
+              "batch_sig": "kRfdyyaifVue_JA_8GZFjZ5gxivrRy4GdkdbQdV5uSvRwB-8qh2ilQ3NGm4Qn3fKnGsHFwuMwdFEkD3YKgoQCA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "22f101fadb43aae2e41f71cc7317b2ef1e319d294c546f094cf01af7f2f4ce33",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "qxjbN1giOybC_kw4bVW2Tu9S0UqAAXBqQ6BNrghb3u65xKkYsKPxZU-fUFVuRmnOZ3LwpzyRsWzFPI6RDvdiBQ",
+              "index": 0,
+              "proof": [
+                "2b7f3e730c8db4e1bd4538201fb43a9bcdd881505534dab15fbe842f2154e5a2",
+                "86ae227c26191d465e4471e1649a674953ea2544f0888c5749ab65d6c0130d33"
+              ],
+              "record_hash": "b2fe726988ff74f3a8b9f6d3616040a2db22cfa689399fda10aa243a32b242e7",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "pwqk5zuiS2Bk0WjadGW-jEnJT6dKHMmArTK1JclObduVpUdIfYqtxtBSGvF3UToeWs5CqqPih-2QxXdQXqugAg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "c42ff260d17cca27cad6ca6020ee175daaf5c6d0bbfe50425591bfdafa8a1bbf",
+              "env": "live",
+              "kind": "decision",
+              "name": "approve_payout",
+              "prev": "b2fe726988ff74f3a8b9f6d3616040a2db22cfa689399fda10aa243a32b242e7",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 2,
+              "time": "2026-11-13T10:00:01.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "da947a29703ffe5f4f5632624cf799adf60f05aeb4bf5fc2946a30ef1b619010",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "adf559ffa92c07d9060f115ce7a2594dd46e1898e49cb5b2d22edc7f52c35012",
+              "batch_sig": "kRfdyyaifVue_JA_8GZFjZ5gxivrRy4GdkdbQdV5uSvRwB-8qh2ilQ3NGm4Qn3fKnGsHFwuMwdFEkD3YKgoQCA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "22f101fadb43aae2e41f71cc7317b2ef1e319d294c546f094cf01af7f2f4ce33",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "qxjbN1giOybC_kw4bVW2Tu9S0UqAAXBqQ6BNrghb3u65xKkYsKPxZU-fUFVuRmnOZ3LwpzyRsWzFPI6RDvdiBQ",
+              "index": 1,
+              "proof": [
+                "674787fa0fcd4b44b3273d2a6e439b7b72e0a7129346c7b266410073ab570644",
+                "86ae227c26191d465e4471e1649a674953ea2544f0888c5749ab65d6c0130d33"
+              ],
+              "record_hash": "c06dcdcfcb07a1b30e9a139f81e3e5d535c9d4a0ea413c16b66a45daef6ca326",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "dkZk_OOZbC9g9jkdXR7LfN2MIaER5sLLwDny4hv-IwUwaVpL8un-vQCu79DuLZea1USaTYhTZL2VQsTxYLI4Bw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "d7a6fb27e8009bd083a47a44f6c417ceb3252353885f0e47209c7e5bdf822eab",
+              "env": "live",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "c06dcdcfcb07a1b30e9a139f81e3e5d535c9d4a0ea413c16b66a45daef6ca326",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": "c06dcdcfcb07a1b30e9a139f81e3e5d535c9d4a0ea413c16b66a45daef6ca326",
+              "seq": 3,
+              "time": "2026-11-13T10:00:02.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": {
+                  "chain": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+                  "randomness": "0dba9ac8c51621da50f905462352e44bd7c200b8de4c8f02cbae7e52bbc2b144",
+                  "round": 33920212,
+                  "signature": "b09e838e2d800efdb10a24554d8223c2c5103c5f6a7c87e6b37734487b1d1fd3191f99e64d2d0dc4fc00867118df261b"
+                },
+                "env": "live",
+                "prev": null,
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "da947a29703ffe5f4f5632624cf799adf60f05aeb4bf5fc2946a30ef1b619010",
+                "seq": 1,
+                "server_time": "2026-11-13T10:00:01.250Z",
+                "size": 3,
+                "v": 1
+              },
+              "batch_hash": "adf559ffa92c07d9060f115ce7a2594dd46e1898e49cb5b2d22edc7f52c35012",
+              "batch_sig": "kRfdyyaifVue_JA_8GZFjZ5gxivrRy4GdkdbQdV5uSvRwB-8qh2ilQ3NGm4Qn3fKnGsHFwuMwdFEkD3YKgoQCA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "22f101fadb43aae2e41f71cc7317b2ef1e319d294c546f094cf01af7f2f4ce33",
+                "seq": 3,
+                "server_time": "2026-11-13T10:00:01.250Z"
+              },
+              "head_sig": "qxjbN1giOybC_kw4bVW2Tu9S0UqAAXBqQ6BNrghb3u65xKkYsKPxZU-fUFVuRmnOZ3LwpzyRsWzFPI6RDvdiBQ",
+              "index": 2,
+              "proof": [
+                "1ce5964a8c2c9e64eb4156c455af6300a2dcec5f8165ab5cce42c8fa442586ae"
+              ],
+              "record_hash": "22f101fadb43aae2e41f71cc7317b2ef1e319d294c546f094cf01af7f2f4ce33",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "Is3reJdXbYoO9yyf9E2MjWvNOZg9obCJyrmMRrhvHoz2V7MwIRt5WmgceZV2btpvQWEo7o2eEwTA3oAWj3jgCw"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "699cf9cd50d676bb6f481bf8a20339929588c2e848cb869684024d6df087645f",
+              "env": "live",
+              "kind": "decision",
+              "name": "signafaide.telemetry_sampled",
+              "prev": "22f101fadb43aae2e41f71cc7317b2ef1e319d294c546f094cf01af7f2f4ce33",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 4,
+              "time": "2026-11-13T10:00:03.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "adf559ffa92c07d9060f115ce7a2594dd46e1898e49cb5b2d22edc7f52c35012",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "31d47898c89e7fd3f98ddc7dec931e58e0ff503d0cfe1d0629874b917f2e3372",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 1,
+                "v": 1
+              },
+              "batch_hash": "7a117f5d9f1e3f7d80cba0f115c0edda712077e058a69b21293454f4a2b83a8a",
+              "batch_sig": "lmLdWsnp4qAqK6JtR4OlGp1x-3l7kTJnD48BhT3xYv8u6S19QDGnh5MIXmckGKe4mxEKNHQJ2duMeZFoZZ-WCQ",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "d69725b25b80c201535b8cdd76eb0bf6a4c78f65b695fb7b08fc8f650ccab446",
+                "seq": 4,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "vim-tyUTnBQsSeCIClMAaTQptmNCiRf61dw4nEz2HePc62W5ExHDY4ySuVQgtbCQjSIbOrdI3vj6Ewj_t5XeBw",
+              "index": 0,
+              "proof": [],
+              "record_hash": "d69725b25b80c201535b8cdd76eb0bf6a4c78f65b695fb7b08fc8f650ccab446",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "w95H_axPTIeoo9GERHT_pIE2nHh7WdxbnvzIHI3zcS1R_uKRnMMws_t7AWeO0XCN9UYnLdVLu63ngfYyM0QZDg"
           }
         ],
         "service_keys": [

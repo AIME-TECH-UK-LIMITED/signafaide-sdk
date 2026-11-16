@@ -92,6 +92,7 @@ export async function statusLines(rec: Recorder): Promise<string[]> {
     lines.push(`chain ${shown}: key ${c.key_id}, ${plural(c.records, "record")}, ${last}${other}${c.blocked ? "; BLOCKED" : ""}`);
     if (c.blocked) blocked.push(`BLOCKED ${c.chain}: ${c.blocked.reason}; ${plural(c.blocked.records, "record")} cannot ship. Next: ${c.blocked.next}`);
   }
+  for (const c of s.chains) for (const line of c.telemetry) lines.push(`note: ${line}`);
   if (s.chains.some((c) => c.agent === rec.defaultAgent)) {
     lines.push(`note: agent "${rec.defaultAgent}" is named after the project folder; give agents explicit names in production (record(fn, { agent: "claims-bot" }))`);
   }

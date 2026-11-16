@@ -223,6 +223,12 @@ fn variants_pass_with_their_values() {
         for line in r.coverage_lines() {
             assert!(r.to_text().contains(&format!("coverage: {line}\n")), "{}\n{}", t["name"], r.to_text());
         }
+        // Telemetry notes (§2.7, §7): likewise.
+        assert_eq!(serde_json::to_value(&r.telemetry).unwrap(), t["expect"]["telemetry"], "{}", t["name"]);
+        assert_eq!(json!(r.telemetry_lines()), t["expect"]["telemetry_lines"], "{}", t["name"]);
+        for line in r.telemetry_lines() {
+            assert!(r.to_text().contains(&format!("telemetry: {line}\n")), "{}\n{}", t["name"], r.to_text());
+        }
     }
     // The instance-start note (§8) names the chain and the seq it continues after.
     let notes: Vec<&str> = variants.iter().filter_map(|t| t["expect"]["chain_note"].as_str()).collect();
@@ -235,6 +241,31 @@ fn variants_pass_with_their_values() {
             format!("{INSTANCE_NOTE}: agent-a after seq 2").as_str(),
         ]
     );
+}
+
+/// Telemetry notes (§2.7, §7), written out here independently of the generator.
+#[test]
+fn telemetry_vectors() {
+    let v = vectors();
+    let variants = v["variants"].as_array().unwrap();
+    let find = |name: &str| variants.iter().find(|t| t["name"] == name).unwrap_or_else(|| panic!("no variant {name}"));
+    let all = find("telemetry notes: tools recorded from sampled telemetry spans, decisions written before, after and both");
+    assert_eq!(all["expect"]["telemetry"], json!({"agent-a": {"tools": [{"name": "approve_payout", "decision": "both"}, {"name": "send_email", "decision": "after"}], "sampled": true}}));
+    assert_eq!(
+        all["expect"]["telemetry_lines"],
+        json!([
+            "agent-a: 2 tools are recorded from telemetry spans: approve_payout (decisions written before and after the tool ran), send_email (decision written after the tool ran)",
+            "agent-a: records come from sampled telemetry: some tool calls may not be recorded",
+        ])
+    );
+    let before = find("a telemetry note for one tool, decision written before the tool ran; a decision named like a telemetry note is not one");
+    assert_eq!(before["expect"]["telemetry"], json!({"agent-a": {"tools": [{"name": "approve_payout", "decision": "before"}], "sampled": false}}));
+    assert_eq!(before["expect"]["telemetry_lines"], json!(["agent-a: 1 tool is recorded from telemetry spans: approve_payout (decision written before the tool ran)"]));
+    // Every other variant, and the valid pack, holds no telemetry note: nothing is reported.
+    assert_eq!(variants.iter().filter(|t| t["expect"]["telemetry"] != json!({})).count(), 2);
+    assert_eq!(v["pack"]["expect"]["telemetry"], json!({}));
+    assert_eq!(v["pack"]["expect"]["telemetry_lines"], json!([]));
+    assert!(variants.iter().all(|t| t["expect"]["telemetry_lines"].is_array()));
 }
 
 /// Tool declarations (§2.6) and coverage (§7), written out here independently of the generator.

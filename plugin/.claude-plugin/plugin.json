@@ -1,7 +1,7 @@
 {
   "name": "signafaide",
   "displayName": "signafAIde",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Audit evidence for AI agent tool calls: each one signed, co-signed by an independent witness and publicly timestamped, so an auditor can verify it offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2. An MCP server to set it up and verify it, and a skill that says when to use it.",
   "author": { "name": "AIMETECH", "url": "https://signafaide.co.uk" },
   "license": "Apache-2.0",

@@ -796,6 +796,20 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         coverage_contents(&[(N, "signafaide.tools"), (N, "signafaide.tool/approve_payout"), (D, "approve_payout"), (D, "reject_refund")]),
     )
     .pack;
+    // Telemetry notes (§2.7): tools recorded from telemetry spans, and sampled telemetry.
+    let telemetry_notes = cover(&[
+        (N, "signafaide.telemetry_sampled"),
+        (N, "signafaide.telemetry/start/approve_payout"),
+        (D, "approve_payout"),
+        (O, "approve_payout"),
+        (N, "signafaide.telemetry/end/send_email"),
+        (D, "send_email"),
+        (O, "send_email"),
+        (N, "signafaide.telemetry/end/approve_payout"),
+        (D, "approve_payout"),
+        (O, "approve_payout"),
+    ]);
+    let telemetry_before = cover(&[(N, "signafaide.telemetry/start/approve_payout"), (D, "approve_payout"), (O, "approve_payout"), (D, "signafaide.telemetry_sampled")]);
     let two_agent_keys = || Inputs {
         agent_keys: Some(json!(AgentKeysDocument {
             format: AGENT_KEYS_FORMAT.into(),
@@ -848,6 +862,8 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         ("a tool name too long for a declaration is cut and matched to its decision", long_names, none()),
         ("a tool declaration exported from after its header: the tool note left is ignored", cut_declaration, none()),
         ("two agents: one declared its tools, the other did not", two_declared, two_agent_keys()),
+        ("telemetry notes: tools recorded from sampled telemetry spans, decisions written before, after and both", telemetry_notes, none()),
+        ("a telemetry note for one tool, decision written before the tool ran; a decision named like a telemetry note is not one", telemetry_before, none()),
     ]
 }
 
@@ -903,7 +919,8 @@ fn expected(report: &verify::Report) -> Value {
     for c in &report.checks {
         checks.insert(c.id.into(), json!(c.value.clone().unwrap_or_else(|| serde_json::to_value(c.status).unwrap().as_str().unwrap().to_string())));
     }
-    json!({"result": report.result, "result_line": report.result_line(), "checks": checks, "coverage": report.coverage, "coverage_lines": report.coverage_lines()})
+    json!({"result": report.result, "result_line": report.result_line(), "checks": checks, "coverage": report.coverage, "coverage_lines": report.coverage_lines(),
+           "telemetry": report.telemetry, "telemetry_lines": report.telemetry_lines()})
 }
 
 fn jcs_cases() -> Vec<Value> {
@@ -1208,6 +1225,6 @@ pub fn generate() -> Value {
     });
     // Added here, not inside the macro above, which is at its expansion limit.
     out["tool_names"] = json!(tool_name_cases());
-    out["tool_names_note"] = json!("Tool declarations (spec 2.6). declared_name is the tool's name as a declaration holds it: the name itself up to 101 characters (Unicode code points), else its first 92 characters, a tilde and the first 8 hex characters of sha256(UTF-8 tool name). recorded_note and unrecorded_note are the envelope names of the two notes that declare the tool. A variant's expect.coverage is the report's coverage object and expect.coverage_lines its coverage lines, in order.");
+    out["tool_names_note"] = json!("Tool declarations (spec 2.6). declared_name is the tool's name as a declaration holds it: the name itself up to 101 characters (Unicode code points), else its first 92 characters, a tilde and the first 8 hex characters of sha256(UTF-8 tool name). recorded_note and unrecorded_note are the envelope names of the two notes that declare the tool. A variant's expect.coverage is the report's coverage object and expect.coverage_lines its coverage lines, in order. Telemetry notes (spec 2.7): a variant's expect.telemetry is the report's telemetry object (agents with a telemetry note only) and expect.telemetry_lines its telemetry lines, in order.");
     out
 }

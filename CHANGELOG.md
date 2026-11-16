@@ -9,6 +9,21 @@ The record format changed between v0.1.1 and v0.1.2 (salted content hashes) and 
 (packs name their project), before any public release. Records and packs written by a version
 verify with that version and later ones unless an entry below says otherwise.
 
+## v0.3.4 (2026-11-16)
+
+An OpenTelemetry span processor in both SDKs: an agent that is already traced gets signed records with no tool wrapping. No change to the record envelope or to any check; the spec gains three reserved note names (§2.7), and every verifier reports them as notes.
+
+- New `SignafaideSpanProcessor`: `from signafaide.otel import SignafaideSpanProcessor` in Python (the `signafaide[otel]` extra), `import { SignafaideSpanProcessor } from "signafaide/otel"` in TypeScript (`@opentelemetry/api` is an optional peer dependency). It is added to the application's own tracer provider in one line, runs in the application's process and exports nothing. The rest of each package loads and works without OpenTelemetry installed.
+- It records spans that are tool calls by the OpenTelemetry GenAI conventions (`gen_ai.operation.name` = `execute_tool`), OpenInference (`openinference.span.kind` = `TOOL`) or OpenLLMetry (`traceloop.span.kind` = `tool`): a `decision` with the tool's name and the arguments the span holds, and an `outcome` with its result, or an error when the span's status is an error.
+- Before or after: a span that says at its start that it is a tool call gets its decision then, before the tool runs (Pydantic AI and the Vercel AI SDK's `@ai-sdk/otel` do this). A span that says so only at its end gets its decision and outcome then, after the tool ran (the LangChain instrumentations of OpenInference and OpenLLMetry do this).
+- Every record made this way says so in signed data. In its content: `meta.telemetry` with the source, the convention, the trace and span ids and `decision_written` (`before` or `after`). In the chain, for hash-only verifiers: a note `signafaide.telemetry/start/<tool>` or `signafaide.telemetry/end/<tool>` written in one run with the first decision it holds for, and again whenever that changes for the tool.
+- Sampling: when the tracer provider's sampler is not always-on, a `signafaide.telemetry_sampled` note is written once per process. In TypeScript the sampler is read from the registered global tracer provider or from the processor's `sampler` option; with neither, no note is written.
+- `signafaide verify` (local state and packs, Python, TypeScript and the Rust `signafaide-verify`) prints `telemetry:` lines per agent, for example `support-bot: 2 tools are recorded from telemetry spans: lookup_order (decision written before the tool ran), refund (decision written after the tool ran)` and `support-bot: records come from sampled telemetry: some tool calls may not be recorded`; `--json` has them as `telemetry`. `signafaide status` shows the same lines as notes. They never fail a pack and change no check. `spec/vectors.json` has two variants for them, and every variant carries `expect.telemetry` and `expect.telemetry_lines`.
+- One record per call: a tool that is also wrapped with the SDK (`record`, `wrap_tools`, the LangChain middleware) gives one decision and one outcome, and a tool an MCP gateway on the same machine records for the same agent is left to the gateway. A strict wrapper still waits for its receipt.
+- The processor never raises into the application and never waits for the network: when a record cannot be written the tool still runs and one warning is logged. Strict mode stays a feature of the SDK's wrappers and the gateway.
+- The chain is named by the processor's `agent`, else the tracer resource's `service.name`, else the project folder. Tools seen in spans are declared as recorded, as `wrap_tools` declares the tools it wraps. Requests carry `adapter=otel` in the `X-Signafaide-Client` header (not with `SIGNAFAIDE_TELEMETRY=0`).
+- Version 0.3.4 everywhere the release check looks; `opentelemetry` joins the package keywords.
+
 ## v0.3.3 (2026-11-16)
 
 The MCP server gains two tools and clearer boundaries between the others. No change to records, packs, the verifiers or the protocol.

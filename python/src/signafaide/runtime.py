@@ -16,7 +16,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 from datetime import datetime, timedelta, timezone
 
 from ._plural import plural
-from .coverage import TOOLS, declared_name, tool_note_name
+from .coverage import TOOLS, declared_name, telemetry as tool_telemetry, telemetry_lines, tool_note_name
 from .crypto import SigningKey, b64url, hash_json
 from .http import DEFAULT_URL, Client, SignafaideError
 from .records import (API_KEY_RE, AGENT_RE, INSTANCE_STOP, MAX_CLOCK_SKEW_MS, instance_stop_content, is_stop_note, agent_name, clamp_time, make_draft, make_record, now, parse_time, record_hash,
@@ -33,6 +33,18 @@ KEY_MAX_AGE = timedelta(days=7) - timedelta(hours=1)
 # Set while a compare runs a candidate function: any record written in that context is refused,
 # so a candidate can never add to a chain (and a recorded tool it calls never runs).
 NO_WRITES: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("signafaide_no_writes", default=None)
+
+# Set while a tool wrapped with the SDK runs: the tool's name. The telemetry plug-in
+# (signafaide.otel) leaves a span of that tool begun inside the call alone, so one tool call is
+# recorded once (the wrapper's records stand, the span's are not written).
+RECORDING: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("signafaide_recording", default=None)
+
+#: Set by the telemetry plug-in. ``adopt(name)`` returns ``(recorder, decision)`` when the plug-in
+#: has already written the decision of the tool span that is running now, so a wrapper inside that
+#: span writes no second one; ``claim(name)`` tells it that a wrapper records the tool whose span
+#: is running now. Neither ever raises.
+telemetry_adopt: Optional[Callable[[str], Optional[tuple]]] = None
+telemetry_claim: Optional[Callable[[str], None]] = None
 
 
 def recording_disabled() -> bool:
@@ -1058,6 +1070,23 @@ class Recorder:
 
     # --- status -------------------------------------------------------------
 
+    def telemetry_notes(self, chain: str) -> List[str]:
+        """What the chain's telemetry notes say (§2.7), in the verifier's words: the tools
+        recorded from telemetry spans, and that the telemetry is sampled. Only the lines that
+        name such a note are parsed, so a long chain is read quickly. Never raises."""
+        found = []
+        for path in [*self.state.segments(chain), self.state.chain_path(chain)]:
+            try:
+                with open(path, "rb") as f:
+                    for line in f:
+                        if b'"signafaide.telemetry' in line:
+                            e = json.loads(line)["envelope"]
+                            found.append((e["seq"], e["kind"], e["name"]))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        t = tool_telemetry(found)
+        return telemetry_lines(chain, t) if t else []
+
     def status(self) -> dict:
         heads = self.state.chain_heads()
         bucket = self.state.bucket(self.api_key)
@@ -1078,6 +1107,7 @@ class Recorder:
                     "receipt_seq": h.get("seq"),
                     "receipt_time": h.get("server_time"),
                     "blocked": blocked.get(c),
+                    "telemetry": self.telemetry_notes(c),
                 }
             )
         return {

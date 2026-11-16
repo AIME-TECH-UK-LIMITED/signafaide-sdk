@@ -13,7 +13,7 @@ import { parseJson } from "./jcs.js";
 import { base64Decode, blockAttestations, otsStatus } from "./ots.js";
 import { AGENT_RE, CLEAN_RESTART_NOTE, INSTANCE_NOTE, INSTANCE_START, INSTANCE_STOP, isStopNote, MAX_CLOCK_SKEW_MS, draftErrors, keyEntryErrors, manifestErrors, receiptErrors, recordErrors, validProjectId, validTime, type AgentKeyEntry } from "./records.js";
 import { plural } from "./plural.js";
-import { coverage, coverageLines, type Coverage } from "./coverage.js";
+import { coverage, coverageLines, telemetry, telemetryLines, type Coverage, type Telemetry } from "./coverage.js";
 import { checkHeader, type BlockRoots } from "./timestamps.js";
 
 export const CHECKS = [
@@ -204,6 +204,10 @@ export class Report {
   /** Tool coverage per agent (§7; per chain for local state): the agent's current tool
    * declaration and the recorded tools it does not list. A note, never a failure. */
   coverage: Record<string, Coverage> = {};
+  /** Telemetry notes per agent (§7; per chain for local state), for agents that have any: the
+   * tools recorded from telemetry spans, when their decisions were written, and whether the
+   * telemetry is sampled. A note, never a failure. */
+  telemetry: Record<string, Telemetry> = {};
 
   constructor(
     readonly checks: Check[],
@@ -251,6 +255,11 @@ export class Report {
     return Object.entries(this.coverage).flatMap(([agent, c]) => coverageLines(agent, c));
   }
 
+  /** The telemetry notes in words (§7), agent by agent. */
+  telemetryLines(): string[] {
+    return Object.entries(this.telemetry).flatMap(([agent, t]) => telemetryLines(agent, t));
+  }
+
   lines(): string[] {
     const out = [...this.notes];
     if (this.project && this.env) {
@@ -269,6 +278,7 @@ export class Report {
     }
     if (this.checks.some((c) => c.status === "pending")) out.push(PENDING_MEANS);
     out.push(...this.coverageLines().map((l) => `coverage: ${l}`));
+    out.push(...this.telemetryLines().map((l) => `telemetry: ${l}`));
     out.push(...this.after);
     out.push(...this.blocked.map((b) => `BLOCKED ${b}`));
     out.push(this.resultLine);
@@ -294,6 +304,7 @@ export class Report {
       notes: this.notes,
       checks: this.checks,
       coverage: this.coverage,
+      telemetry: this.telemetry,
       ...(this.after.length ? { not_yet: this.after } : {}),
       ...(this.blocked.length ? { blocked: this.blocked } : {}),
     };
@@ -474,6 +485,7 @@ export function verifyPack(pack: any, serviceKeys: KeyDoc[] | null, opts: PackOp
   });
   report.projectName = typeof pack.project_name === "string" ? pack.project_name : null;
   report.coverage = v.coverage;
+  report.telemetry = v.telemetry;
   return report;
 }
 
@@ -506,6 +518,7 @@ export function verifyLocalState(local: LocalInput, serviceKeys: KeyDoc[], drand
   const report = new Report(checks, null, null, local.records.length, [], [], { service_keys: !serviceKeysPlainHttp, agent_keys: true });
   report.nothingCosigned = v.nothingCosigned;
   report.coverage = v.coverage;
+  report.telemetry = v.telemetry;
   return report;
 }
 
@@ -642,6 +655,8 @@ class Verifier {
   nothingCosigned = false;
   /** Tool coverage per chain (§7), filled by `run`. */
   coverage: Record<string, Coverage> = {};
+  /** Telemetry notes per chain (§7), filled by `run`. */
+  telemetry: Record<string, Telemetry> = {};
   /** Local state: chain id -> the witness's signed head a chain continues after (§8). */
   localBases: Record<string, { head: any; head_sig: string; stop?: any }> = {};
 
@@ -875,6 +890,8 @@ class Verifier {
       const chain = chains.get(agent)!;
       const seqs = [...chain.keys()].sort((x, y) => x - y);
       this.coverage[agent] = coverage(seqs.map((seq) => ({ seq, kind: chain.get(seq)!.r.envelope.kind, name: chain.get(seq)!.r.envelope.name })));
+      const t = telemetry(seqs.map((seq) => chain.get(seq)!.r.envelope));
+      if (t) this.telemetry[agent] = t;
     }
     return chains;
   }

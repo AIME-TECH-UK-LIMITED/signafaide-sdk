@@ -154,6 +154,125 @@ pub fn coverage_lines(agent: &str, c: &Coverage) -> Vec<String> {
     out
 }
 
+// --- telemetry notes (§2.7) ----------------------------------------------------------
+
+/// `signafaide.telemetry/start/<tool name>`: the decisions of this tool that follow were derived
+/// from telemetry spans and written when the span started, before the tool ran.
+pub const TELEMETRY_START_PREFIX: &str = "signafaide.telemetry/start/";
+/// `signafaide.telemetry/end/<tool name>`: the decisions of this tool that follow were derived
+/// from telemetry spans and written when the span ended, after the tool ran.
+pub const TELEMETRY_END_PREFIX: &str = "signafaide.telemetry/end/";
+/// The records of this agent come from sampled telemetry: some tool calls may not be recorded.
+pub const TELEMETRY_SAMPLED: &str = "signafaide.telemetry_sampled";
+/// What a verifier says for an agent whose chain holds a `signafaide.telemetry_sampled` note.
+pub const SAMPLED_LINE: &str = "records come from sampled telemetry: some tool calls may not be recorded";
+
+/// When the decisions of a tool recorded from telemetry spans were written.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DecisionWritten {
+    /// At span start, before the tool ran.
+    Before,
+    /// At span end, after the tool ran.
+    After,
+    /// The records hold notes of both kinds for the tool.
+    Both,
+}
+
+impl DecisionWritten {
+    fn words(self) -> &'static str {
+        match self {
+            DecisionWritten::Before => "decision written before the tool ran",
+            DecisionWritten::After => "decision written after the tool ran",
+            DecisionWritten::Both => "decisions written before and after the tool ran",
+        }
+    }
+}
+
+/// What a record says about telemetry, from its kind and name alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TelemetryNote<'a> {
+    /// `signafaide.telemetry_sampled`.
+    Sampled,
+    /// The tool is recorded from telemetry spans; `decision` is `Before` or `After`.
+    Tool { name: &'a str, decision: DecisionWritten },
+}
+
+/// The envelope name of the note that says how `tool` is recorded from telemetry (§2.7).
+pub fn telemetry_note_name(tool: &str, at_start: bool) -> String {
+    format!("{}{}", if at_start { TELEMETRY_START_PREFIX } else { TELEMETRY_END_PREFIX }, declared_name(tool))
+}
+
+/// Read a record as a telemetry note, or `None` when it is not one. Only a `note` can be one,
+/// and a tool note with an empty tool name is not one.
+pub fn telemetry_note(kind: Kind, name: &str) -> Option<TelemetryNote<'_>> {
+    if kind != Kind::Note {
+        return None;
+    }
+    if name == TELEMETRY_SAMPLED {
+        return Some(TelemetryNote::Sampled);
+    }
+    let (rest, decision) = match (name.strip_prefix(TELEMETRY_START_PREFIX), name.strip_prefix(TELEMETRY_END_PREFIX)) {
+        (Some(rest), _) => (rest, DecisionWritten::Before),
+        (None, Some(rest)) => (rest, DecisionWritten::After),
+        (None, None) => return None,
+    };
+    (!rest.is_empty()).then_some(TelemetryNote::Tool { name: rest, decision })
+}
+
+/// One tool recorded from telemetry spans.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct TelemetryTool {
+    pub name: String,
+    pub decision: DecisionWritten,
+}
+
+/// What one agent's records say about telemetry (§7).
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct Telemetry {
+    /// The tools recorded from telemetry spans, in name order.
+    pub tools: Vec<TelemetryTool>,
+    /// The records hold a `signafaide.telemetry_sampled` note.
+    pub sampled: bool,
+}
+
+/// What one agent's records, given as (kind, name), say about telemetry, or `None` when they
+/// hold no telemetry note. A tool with notes of both kinds is `Both`.
+pub fn telemetry<'a>(records: impl IntoIterator<Item = (Kind, &'a str)>) -> Option<Telemetry> {
+    let mut tools: BTreeMap<&str, DecisionWritten> = BTreeMap::new();
+    let mut sampled = false;
+    for (kind, name) in records {
+        match telemetry_note(kind, name) {
+            Some(TelemetryNote::Sampled) => sampled = true,
+            Some(TelemetryNote::Tool { name, decision }) => {
+                let held = tools.entry(name).or_insert(decision);
+                if *held != decision {
+                    *held = DecisionWritten::Both;
+                }
+            }
+            None => {}
+        }
+    }
+    if tools.is_empty() && !sampled {
+        return None;
+    }
+    Some(Telemetry { tools: tools.into_iter().map(|(name, decision)| TelemetryTool { name: name.to_string(), decision }).collect(), sampled })
+}
+
+/// The telemetry notes of `agent` in words (§7): the tools recorded from telemetry spans and
+/// when their decisions were written, then whether the telemetry is sampled.
+pub fn telemetry_lines(agent: &str, t: &Telemetry) -> Vec<String> {
+    let mut out = Vec::new();
+    if !t.tools.is_empty() {
+        let names: Vec<String> = t.tools.iter().map(|x| format!("{} ({})", x.name, x.decision.words())).collect();
+        out.push(format!("{agent}: {} recorded from telemetry spans: {}", count_is(t.tools.len(), "tool", "tools"), names.join(", ")));
+    }
+    if t.sampled {
+        out.push(format!("{agent}: {SAMPLED_LINE}"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +320,29 @@ mod tests {
         assert_eq!(coverage_lines("bot", &one), vec!["bot: 1 declared tool is not recorded: z"]);
         let empty = coverage([(1, Kind::Note, TOOLS)]);
         assert_eq!(coverage_lines("bot", &empty), vec!["bot: the declared tool list is empty"]);
+    }
+
+    #[test]
+    fn telemetry_notes() {
+        assert_eq!(telemetry([(Kind::Decision, "a"), (Kind::Note, "signafaide.tools"), (Kind::Decision, TELEMETRY_SAMPLED)]), None);
+        assert_eq!(telemetry_note(Kind::Note, "signafaide.telemetry/start/"), None);
+        assert_eq!(telemetry_note_name(&"x".repeat(102), true).chars().count(), 128);
+        let t = telemetry([
+            (Kind::Note, "signafaide.telemetry/start/b"),
+            (Kind::Note, TELEMETRY_SAMPLED),
+            (Kind::Note, "signafaide.telemetry/end/a"),
+            (Kind::Note, "signafaide.telemetry/end/b"),
+        ])
+        .unwrap();
+        assert_eq!(serde_json::to_value(&t).unwrap(), serde_json::json!({"tools": [{"name": "a", "decision": "after"}, {"name": "b", "decision": "both"}], "sampled": true}));
+        assert_eq!(
+            telemetry_lines("bot", &t),
+            vec![
+                "bot: 2 tools are recorded from telemetry spans: a (decision written after the tool ran), b (decisions written before and after the tool ran)",
+                "bot: records come from sampled telemetry: some tool calls may not be recorded",
+            ]
+        );
+        let one = telemetry([(Kind::Note, "signafaide.telemetry/start/a")]).unwrap();
+        assert_eq!(telemetry_lines("bot", &one), vec!["bot: 1 tool is recorded from telemetry spans: a (decision written before the tool ran)"]);
     }
 }
