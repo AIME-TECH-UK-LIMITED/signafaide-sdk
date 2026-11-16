@@ -144,8 +144,8 @@ describe("#46: the release check", () => {
   // The files the check reads, copied into a scratch git repository so tags can be made freely.
   const FILES = [
     "scripts/release-check.mjs", "CHANGELOG.md", "js/package.json", "js/mcp/package.json", "js/src/version.ts", "js/src/http.ts",
-    "python/pyproject.toml", "python/src/signafaide/_version.py", "python/src/signafaide/http.py",
-    "plugin/.claude-plugin/plugin.json", "core/Cargo.toml", "verifier/Cargo.toml", "verifier/src/main.rs",
+    "python/pyproject.toml", "python/src/signafaide/_version.py", "python/src/signafaide/http.py", "plugin/.claude-plugin/plugin.json",
+    "core/Cargo.toml", "verifier/Cargo.toml", "verifier/src/main.rs",
     "gemini-extension.json", ".cursor-plugin/plugin.json", "mcp.json", "README.md",
   ];
   const sdk = path.join(__dirname, "../..");
@@ -177,6 +177,8 @@ describe("#46: the release check", () => {
       // Bumped everywhere, but nothing written up.
       const bump = (f: string) => fs.writeFileSync(path.join(dir, f), fs.readFileSync(path.join(dir, f), "utf8").split(VERSION).join("9.9.9"));
       FILES.filter((f) => !/CHANGELOG|release-check|http\.|main\.rs/.test(f)).forEach(bump);
+      const plugin = path.join(dir, "plugin/.claude-plugin/plugin.json");
+      fs.writeFileSync(plugin, fs.readFileSync(plugin, "utf8").replace(/"version": "[^"]+"/, '"version": "9.9.9"'));
       out = run(dir);
       expect(out).toContain("ok    every version is 9.9.9");
       expect(out).toContain(`ok    9.9.9 is above the last tag v${VERSION}`);

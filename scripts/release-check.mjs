@@ -63,7 +63,6 @@ const versions = {
   "python/src/signafaide/_version.py": read("python/src/signafaide/_version.py").match(/"([^"]+)"/)?.[1],
   "core/Cargo.toml": read("core/Cargo.toml").match(/^version = "([^"]+)"/m)?.[1],
   "verifier/Cargo.toml": read("verifier/Cargo.toml").match(/^version = "([^"]+)"/m)?.[1],
-  "plugin/.claude-plugin/plugin.json": JSON.parse(read("plugin/.claude-plugin/plugin.json")).version,
   "gemini-extension.json": JSON.parse(read("gemini-extension.json")).version,
   "gemini-extension.json (server)": read("gemini-extension.json").match(/signafaide-mcp@([0-9][^"]*)/)?.[1],
   ".cursor-plugin/plugin.json": JSON.parse(read(".cursor-plugin/plugin.json")).version,
@@ -71,9 +70,16 @@ const versions = {
   ...Object.fromEntries([...read("README.md").matchAll(/signafaide-mcp@([0-9]+\.[0-9]+\.[0-9]+)/g)].map((m, i) => [`README.md (mention ${i + 1})`, m[1]])),
 };
 const v = versions["js/package.json"];
+// The Claude Code plugin pins no package (its MCP server is the hosted one), so it has its own
+// version, raised for each change to the plugin. It must never fall behind the packages.
+const pluginVersion = JSON.parse(read("plugin/.claude-plugin/plugin.json")).version;
 const off = Object.entries(versions).filter(([, x]) => x !== v);
 if (off.length) fail(`versions disagree with js/package.json (${v}): ${off.map(([f, x]) => `${f} ${x}`).join(", ")}`);
 else ok(`every version is ${v}`);
+const parts = (x) => (x ?? "").split(".").map(Number);
+const [pp, vp] = [parts(pluginVersion), parts(v)];
+if (pp.length !== 3 || pp.some(isNaN) || (pp[0] - vp[0] || pp[1] - vp[1] || pp[2] - vp[2]) < 0) fail(`plugin/.claude-plugin/plugin.json is ${pluginVersion}, not MAJOR.MINOR.PATCH at or above js/package.json (${v})`);
+else ok(`the Claude Code plugin is ${pluginVersion}`);
 
 // 3. the release is new (a version bump since the last tag) and has a changelog entry
 const semver = (x) => (/^(\d+)\.(\d+)\.(\d+)$/.exec(x ?? "") ?? []).slice(1).map(Number);
