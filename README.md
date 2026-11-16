@@ -17,12 +17,10 @@ signafAIde records the decisions AI agents make. Each record is signed with the 
 | [`python/`](python/README.md) | the Python SDK and CLI (`signafaide` on PyPI) |
 | [`python-langchain/`](python-langchain/README.md) | `langchain-signafaide`: a LangChain agent middleware that records every tool call the agent makes |
 | [`js/`](js/README.md) | the TypeScript SDK, CLI and `agent setup` for coding agents (`signafaide` on npm), and the MCP server (`signafaide-mcp`, in `js/mcp`) |
-| [`scripts/release-check.mjs`](scripts/release-check.mjs) | run before a release: the default witness is the hosted service, every version agrees and was bumped since the last tag, `CHANGELOG.md` has its entry, the verifier binary is built from this source, and the npm and PyPI names are claimed |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.3.2`) |
 | [`verifier/`](verifier) | `signafaide-verify`, the standalone Rust verifier of a pack (also builds to WebAssembly) |
 | [`core/`](core) | the Rust protocol core shared by the verifier and the service |
 | [`plugin/`](plugin/README.md) | the Claude Code plugin: the MCP server and the skill |
-| `gemini-extension.json`, `.cursor-plugin/`, `mcp.json`, `glama.json` | listing files for the Gemini CLI gallery, the Cursor marketplace and Glama |
 
 ## Quick start
 
