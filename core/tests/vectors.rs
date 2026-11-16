@@ -250,7 +250,7 @@ fn telemetry_vectors() {
     let variants = v["variants"].as_array().unwrap();
     let find = |name: &str| variants.iter().find(|t| t["name"] == name).unwrap_or_else(|| panic!("no variant {name}"));
     let all = find("telemetry notes: tools recorded from sampled telemetry spans, decisions written before, after and both");
-    assert_eq!(all["expect"]["telemetry"], json!({"agent-a": {"tools": [{"name": "approve_payout", "decision": "both"}, {"name": "send_email", "decision": "after"}], "sampled": true}}));
+    assert_eq!(all["expect"]["telemetry"], json!({"agent-a": {"tools": [{"name": "approve_payout", "decision": "both"}, {"name": "send_email", "decision": "after"}], "sampled": true, "parent_sampled": false}}));
     assert_eq!(
         all["expect"]["telemetry_lines"],
         json!([
@@ -258,9 +258,15 @@ fn telemetry_vectors() {
             "agent-a: records come from sampled telemetry: some tool calls may not be recorded",
         ])
     );
-    let before = find("a telemetry note for one tool, decision written before the tool ran; a decision named like a telemetry note is not one");
-    assert_eq!(before["expect"]["telemetry"], json!({"agent-a": {"tools": [{"name": "approve_payout", "decision": "before"}], "sampled": false}}));
-    assert_eq!(before["expect"]["telemetry_lines"], json!(["agent-a: 1 tool is recorded from telemetry spans: approve_payout (decision written before the tool ran)"]));
+    let before = find("telemetry notes: sampling that follows the caller, one tool with its decision written before the tool ran; a decision named like a telemetry note is not one");
+    assert_eq!(before["expect"]["telemetry"], json!({"agent-a": {"tools": [{"name": "approve_payout", "decision": "before"}], "sampled": false, "parent_sampled": true}}));
+    assert_eq!(
+        before["expect"]["telemetry_lines"],
+        json!([
+            "agent-a: 1 tool is recorded from telemetry spans: approve_payout (decision written before the tool ran)",
+            "agent-a: telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded",
+        ])
+    );
     // Every other variant, and the valid pack, holds no telemetry note: nothing is reported.
     assert_eq!(variants.iter().filter(|t| t["expect"]["telemetry"] != json!({})).count(), 2);
     assert_eq!(v["pack"]["expect"]["telemetry"], json!({}));

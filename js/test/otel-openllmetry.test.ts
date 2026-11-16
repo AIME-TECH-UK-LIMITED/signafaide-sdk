@@ -25,7 +25,9 @@ describe("signafaide/otel with OpenLLMetry's LangChain instrumentation", () => {
     }
     expect(seen.calls).toEqual([]);
     const recs = toolRecords();
-    expect(recs.map((r) => r.envelope.kind)).toEqual(["decision", "outcome"]);
+    // The instrumentation names the span after the tool's class (DynamicStructuredTool); the
+    // tool's own name is in the LangChain tool message the span carries as its result.
+    expect(recs.map((r) => `${r.envelope.kind} ${r.envelope.name}`)).toEqual(["decision lookup_order", "outcome lookup_order"]);
     expect(marker()).toMatchObject({ convention: "gen_ai", decision_written: "after" });
     expect((await verify()).ok).toBe(true);
   });

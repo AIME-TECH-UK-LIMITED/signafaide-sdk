@@ -809,7 +809,13 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         (D, "approve_payout"),
         (O, "approve_payout"),
     ]);
-    let telemetry_before = cover(&[(N, "signafaide.telemetry/start/approve_payout"), (D, "approve_payout"), (O, "approve_payout"), (D, "signafaide.telemetry_sampled")]);
+    let telemetry_before = cover(&[
+        (N, "signafaide.telemetry_parent_sampled"),
+        (N, "signafaide.telemetry/start/approve_payout"),
+        (D, "approve_payout"),
+        (O, "approve_payout"),
+        (D, "signafaide.telemetry_sampled"),
+    ]);
     let two_agent_keys = || Inputs {
         agent_keys: Some(json!(AgentKeysDocument {
             format: AGENT_KEYS_FORMAT.into(),
@@ -863,7 +869,7 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         ("a tool declaration exported from after its header: the tool note left is ignored", cut_declaration, none()),
         ("two agents: one declared its tools, the other did not", two_declared, two_agent_keys()),
         ("telemetry notes: tools recorded from sampled telemetry spans, decisions written before, after and both", telemetry_notes, none()),
-        ("a telemetry note for one tool, decision written before the tool ran; a decision named like a telemetry note is not one", telemetry_before, none()),
+        ("telemetry notes: sampling that follows the caller, one tool with its decision written before the tool ran; a decision named like a telemetry note is not one", telemetry_before, none()),
     ]
 }
 

@@ -26115,6 +26115,7 @@
         "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
         "telemetry": {
           "agent-a": {
+            "parent_sampled": false,
             "sampled": true,
             "tools": [
               {
@@ -26740,6 +26741,7 @@
         "result_line": "PASS: 10 of 12 checks passed, 1 pending (public timestamp), 1 not checked (content hashes); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
         "telemetry": {
           "agent-a": {
+            "parent_sampled": true,
             "sampled": false,
             "tools": [
               {
@@ -26750,10 +26752,11 @@
           }
         },
         "telemetry_lines": [
-          "agent-a: 1 tool is recorded from telemetry spans: approve_payout (decision written before the tool ran)"
+          "agent-a: 1 tool is recorded from telemetry spans: approve_payout (decision written before the tool ran)",
+          "agent-a: telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded"
         ]
       },
-      "name": "a telemetry note for one tool, decision written before the tool ran; a decision named like a telemetry note is not one",
+      "name": "telemetry notes: sampling that follows the caller, one tool with its decision written before the tool ran; a decision named like a telemetry note is not one",
       "pack": {
         "agent_keys": [
           {
@@ -26770,33 +26773,33 @@
               "bitcoin_block": null,
               "created": "2026-11-13T11:00:00.000Z",
               "keys_hash": "193e3353c2bcb0bff0086febef4660ecfc715d3b75c041c0e616b807e2db1553",
-              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEIOy5hPJBq0nDPLUry3CaY44UnXhzZyFz82bWR6CZVK6XwEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
+              "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEIZvmKIkiABR8ZYDmyzC6TNGshC1lt4GatstlfwPdR/g3wEKChoqOkpaanqKmqq6ytrq8IAIPf4w0u+QyOIiFodHRwczovL2EucG9vbC5vcGVudGltZXN0YW1wcy5vcmc=",
               "prev": null,
-              "root": "9ec42c8481e0fa9b7395c4134e0d8c04c7e480b4fee2ab3c8cc85679036b69c8",
+              "root": "0c872de0f5e8a5e5e737122971dcb62d6e6ca18d4d72cbe8f5c20402f4b678b7",
               "seq": 1,
               "size": 2,
               "status": "pending",
               "v": 1
             },
-            "anchor_sig": "uBBwkYjzg-Fa2eXT_Fj_ePkjB3hpG7vnnuy17qHMP2jyXZfKDBWU7bYfa9V-0Xtvzn76XLx08Ss2eoA46QplAg",
+            "anchor_sig": "8LmRxQGfMD-I57Ljb5WPo3SgrSNFXSLZfgLeTrtGscaA116PUObPPWPT9Kqys-idiQt4Zl8JCmwRrdBYbBqtBg",
             "paths": {
-              "7a117f5d9f1e3f7d80cba0f115c0edda712077e058a69b21293454f4a2b83a8a": {
+              "741d780b470449faa2427e99e27a99610d789d6049aa9aab36275f7f1536e6f8": {
                 "index": 1,
                 "path": [
-                  "a75709cf6fcad581350fc493cc8967bea5315980e68fe278b75e99b76f6848b4"
+                  "6653e0cc3809e5551a433ff0b2d5597bc4756175a53e5fcdfdc4d28f365bd44e"
                 ]
               },
-              "adf559ffa92c07d9060f115ce7a2594dd46e1898e49cb5b2d22edc7f52c35012": {
+              "a698717b1be5fd74294495d8b3dd47e96e5d2868e2f3c4c6d13c803ef588f2fa": {
                 "index": 0,
                 "path": [
-                  "32bfe5bb7567a6457b96de268021e8244d120c0ca4b4e8bce06096ba4e40f1e4"
+                  "4bb5cbdc04313b0a7df08df26daf059ee61b44b0e3ad3a55042053dc99356f7c"
                 ]
               }
             }
           }
         ],
         "env": "live",
-        "export_sig": "IuCOy9aoFO3QtBbqsQa8fQH0Vd1dpJrTeqleSNmoz4-A6_r_EiMx4H5XErTJii7L7T4WCyOHVRjzXCwdD2TwBw",
+        "export_sig": "z32XaC_0-iUMGDFYAEqXsrr58qrf9Y9Q3a0PM3lLSYus293nCa7JDUv19lhNWpaOc2h9DowoubDO8ybIUMZeCw",
         "filter": {
           "agents": null,
           "from": null,
@@ -26810,11 +26813,11 @@
               "agent": "agent-a",
               "env": "live",
               "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-              "record_hash": "d69725b25b80c201535b8cdd76eb0bf6a4c78f65b695fb7b08fc8f650ccab446",
-              "seq": 4,
+              "record_hash": "5b36907cee750964a5e7f74bd33cf86f0b04e13536c3029680b61f8cdbb9fa34",
+              "seq": 5,
               "server_time": "2026-11-13T10:05:00.000Z"
             },
-            "head_sig": "vim-tyUTnBQsSeCIClMAaTQptmNCiRf61dw4nEz2HePc62W5ExHDY4ySuVQgtbCQjSIbOrdI3vj6Ewj_t5XeBw"
+            "head_sig": "tCgaF-t5OcDQNILRaK5E4y4BqD0GGzanRYRlBsY-iC8KGGDPaSn9VX9OizeP4XgBKav_iDV2kXsPiYsSF-8PCQ"
           }
         ],
         "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
@@ -26825,7 +26828,7 @@
               "content_hash": "813bef6682bcf3f934e60b18a6ceae8feeaad912e794c76759ae005ba52bee16",
               "env": "live",
               "kind": "note",
-              "name": "signafaide.telemetry/start/approve_payout",
+              "name": "signafaide.telemetry_parent_sampled",
               "prev": null,
               "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
               "ref": null,
@@ -26845,41 +26848,41 @@
                 "env": "live",
                 "prev": null,
                 "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-                "root": "da947a29703ffe5f4f5632624cf799adf60f05aeb4bf5fc2946a30ef1b619010",
+                "root": "87e55b5bb96b43e6659413bdc9504b50c46b76e3d296b08ef1300b59fee14d70",
                 "seq": 1,
                 "server_time": "2026-11-13T10:00:01.250Z",
                 "size": 3,
                 "v": 1
               },
-              "batch_hash": "adf559ffa92c07d9060f115ce7a2594dd46e1898e49cb5b2d22edc7f52c35012",
-              "batch_sig": "kRfdyyaifVue_JA_8GZFjZ5gxivrRy4GdkdbQdV5uSvRwB-8qh2ilQ3NGm4Qn3fKnGsHFwuMwdFEkD3YKgoQCA",
+              "batch_hash": "a698717b1be5fd74294495d8b3dd47e96e5d2868e2f3c4c6d13c803ef588f2fa",
+              "batch_sig": "xb1RPQrlOHnIlu7Y6fcYYbryvPTGC9cWU_TaQaVNI9FV21UvyboRrx5vZnxjKutnOY3H9243mBdaXGLwqSWuAg",
               "head": {
                 "agent": "agent-a",
                 "env": "live",
                 "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-                "record_hash": "22f101fadb43aae2e41f71cc7317b2ef1e319d294c546f094cf01af7f2f4ce33",
+                "record_hash": "c6cecda52160e5663e6089230a0128b5948fe03c435312b53a4bf44fbb8435c8",
                 "seq": 3,
                 "server_time": "2026-11-13T10:00:01.250Z"
               },
-              "head_sig": "qxjbN1giOybC_kw4bVW2Tu9S0UqAAXBqQ6BNrghb3u65xKkYsKPxZU-fUFVuRmnOZ3LwpzyRsWzFPI6RDvdiBQ",
+              "head_sig": "8HpyWC7eOxmkNBMiczN4CoaQaKzrG_RSXh7ZbW8ny81JaOGbqhDKxaaVUdAeK_Lxsjx6gurfNzMMCGsb6e_dBQ",
               "index": 0,
               "proof": [
-                "2b7f3e730c8db4e1bd4538201fb43a9bcdd881505534dab15fbe842f2154e5a2",
-                "86ae227c26191d465e4471e1649a674953ea2544f0888c5749ab65d6c0130d33"
+                "4a27c472ab1f1e5f4565e5788685622954b3324c2e78820573c741f8f6c90ac3",
+                "648084b1a5a5820ce75483b6b2f8c6f5214e03a02f2fa6b36621671888767074"
               ],
-              "record_hash": "b2fe726988ff74f3a8b9f6d3616040a2db22cfa689399fda10aa243a32b242e7",
+              "record_hash": "bb66f4c8823fa59fe515b1032126c2c1d2c2e9406492d783a864de8579609a76",
               "service_key_id": "24f6ed6acbfe1009"
             },
-            "sig": "pwqk5zuiS2Bk0WjadGW-jEnJT6dKHMmArTK1JclObduVpUdIfYqtxtBSGvF3UToeWs5CqqPih-2QxXdQXqugAg"
+            "sig": "A_9OrHfSfzCuK5W8cLzakdoceWeyXO0yWN40jlCd9_CzX_xov5cQ-4evG6foCGKHYHmSY1ecP6d643b-VsC-CA"
           },
           {
             "envelope": {
               "agent": "agent-a",
               "content_hash": "c42ff260d17cca27cad6ca6020ee175daaf5c6d0bbfe50425591bfdafa8a1bbf",
               "env": "live",
-              "kind": "decision",
-              "name": "approve_payout",
-              "prev": "b2fe726988ff74f3a8b9f6d3616040a2db22cfa689399fda10aa243a32b242e7",
+              "kind": "note",
+              "name": "signafaide.telemetry/start/approve_payout",
+              "prev": "bb66f4c8823fa59fe515b1032126c2c1d2c2e9406492d783a864de8579609a76",
               "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
               "ref": null,
               "seq": 2,
@@ -26898,43 +26901,43 @@
                 "env": "live",
                 "prev": null,
                 "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-                "root": "da947a29703ffe5f4f5632624cf799adf60f05aeb4bf5fc2946a30ef1b619010",
+                "root": "87e55b5bb96b43e6659413bdc9504b50c46b76e3d296b08ef1300b59fee14d70",
                 "seq": 1,
                 "server_time": "2026-11-13T10:00:01.250Z",
                 "size": 3,
                 "v": 1
               },
-              "batch_hash": "adf559ffa92c07d9060f115ce7a2594dd46e1898e49cb5b2d22edc7f52c35012",
-              "batch_sig": "kRfdyyaifVue_JA_8GZFjZ5gxivrRy4GdkdbQdV5uSvRwB-8qh2ilQ3NGm4Qn3fKnGsHFwuMwdFEkD3YKgoQCA",
+              "batch_hash": "a698717b1be5fd74294495d8b3dd47e96e5d2868e2f3c4c6d13c803ef588f2fa",
+              "batch_sig": "xb1RPQrlOHnIlu7Y6fcYYbryvPTGC9cWU_TaQaVNI9FV21UvyboRrx5vZnxjKutnOY3H9243mBdaXGLwqSWuAg",
               "head": {
                 "agent": "agent-a",
                 "env": "live",
                 "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-                "record_hash": "22f101fadb43aae2e41f71cc7317b2ef1e319d294c546f094cf01af7f2f4ce33",
+                "record_hash": "c6cecda52160e5663e6089230a0128b5948fe03c435312b53a4bf44fbb8435c8",
                 "seq": 3,
                 "server_time": "2026-11-13T10:00:01.250Z"
               },
-              "head_sig": "qxjbN1giOybC_kw4bVW2Tu9S0UqAAXBqQ6BNrghb3u65xKkYsKPxZU-fUFVuRmnOZ3LwpzyRsWzFPI6RDvdiBQ",
+              "head_sig": "8HpyWC7eOxmkNBMiczN4CoaQaKzrG_RSXh7ZbW8ny81JaOGbqhDKxaaVUdAeK_Lxsjx6gurfNzMMCGsb6e_dBQ",
               "index": 1,
               "proof": [
-                "674787fa0fcd4b44b3273d2a6e439b7b72e0a7129346c7b266410073ab570644",
-                "86ae227c26191d465e4471e1649a674953ea2544f0888c5749ab65d6c0130d33"
+                "1fac97d4897385d8c91f8fdf91134ad002b881a15f99fb170789c420928c0bc1",
+                "648084b1a5a5820ce75483b6b2f8c6f5214e03a02f2fa6b36621671888767074"
               ],
-              "record_hash": "c06dcdcfcb07a1b30e9a139f81e3e5d535c9d4a0ea413c16b66a45daef6ca326",
+              "record_hash": "33d773bfe4bb7f86cb560ae79cf24d7205498ff37b3ffa2eadb61302eaa3e9b3",
               "service_key_id": "24f6ed6acbfe1009"
             },
-            "sig": "dkZk_OOZbC9g9jkdXR7LfN2MIaER5sLLwDny4hv-IwUwaVpL8un-vQCu79DuLZea1USaTYhTZL2VQsTxYLI4Bw"
+            "sig": "J-cwFTUgm9tBcLT12xKUtJlZ8aeIdfTDvkBsdRdMCJX39egZn-qC5MSz5Aq--Cp9_n52i6toOK9_jRpnYn7yCA"
           },
           {
             "envelope": {
               "agent": "agent-a",
-              "content_hash": "d7a6fb27e8009bd083a47a44f6c417ceb3252353885f0e47209c7e5bdf822eab",
+              "content_hash": "a225d1cac4ec87b7fe0b3ca762749b59518e3fc1ae311092657dd7d90015e29e",
               "env": "live",
-              "kind": "outcome",
+              "kind": "decision",
               "name": "approve_payout",
-              "prev": "c06dcdcfcb07a1b30e9a139f81e3e5d535c9d4a0ea413c16b66a45daef6ca326",
+              "prev": "33d773bfe4bb7f86cb560ae79cf24d7205498ff37b3ffa2eadb61302eaa3e9b3",
               "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-              "ref": "c06dcdcfcb07a1b30e9a139f81e3e5d535c9d4a0ea413c16b66a45daef6ca326",
+              "ref": null,
               "seq": 3,
               "time": "2026-11-13T10:00:02.000Z",
               "v": 1
@@ -26951,42 +26954,42 @@
                 "env": "live",
                 "prev": null,
                 "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-                "root": "da947a29703ffe5f4f5632624cf799adf60f05aeb4bf5fc2946a30ef1b619010",
+                "root": "87e55b5bb96b43e6659413bdc9504b50c46b76e3d296b08ef1300b59fee14d70",
                 "seq": 1,
                 "server_time": "2026-11-13T10:00:01.250Z",
                 "size": 3,
                 "v": 1
               },
-              "batch_hash": "adf559ffa92c07d9060f115ce7a2594dd46e1898e49cb5b2d22edc7f52c35012",
-              "batch_sig": "kRfdyyaifVue_JA_8GZFjZ5gxivrRy4GdkdbQdV5uSvRwB-8qh2ilQ3NGm4Qn3fKnGsHFwuMwdFEkD3YKgoQCA",
+              "batch_hash": "a698717b1be5fd74294495d8b3dd47e96e5d2868e2f3c4c6d13c803ef588f2fa",
+              "batch_sig": "xb1RPQrlOHnIlu7Y6fcYYbryvPTGC9cWU_TaQaVNI9FV21UvyboRrx5vZnxjKutnOY3H9243mBdaXGLwqSWuAg",
               "head": {
                 "agent": "agent-a",
                 "env": "live",
                 "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-                "record_hash": "22f101fadb43aae2e41f71cc7317b2ef1e319d294c546f094cf01af7f2f4ce33",
+                "record_hash": "c6cecda52160e5663e6089230a0128b5948fe03c435312b53a4bf44fbb8435c8",
                 "seq": 3,
                 "server_time": "2026-11-13T10:00:01.250Z"
               },
-              "head_sig": "qxjbN1giOybC_kw4bVW2Tu9S0UqAAXBqQ6BNrghb3u65xKkYsKPxZU-fUFVuRmnOZ3LwpzyRsWzFPI6RDvdiBQ",
+              "head_sig": "8HpyWC7eOxmkNBMiczN4CoaQaKzrG_RSXh7ZbW8ny81JaOGbqhDKxaaVUdAeK_Lxsjx6gurfNzMMCGsb6e_dBQ",
               "index": 2,
               "proof": [
-                "1ce5964a8c2c9e64eb4156c455af6300a2dcec5f8165ab5cce42c8fa442586ae"
+                "a1e5202f62b87f33a5ae1433fa455c7bf9fad1f97a9e1fd622addbf3de361642"
               ],
-              "record_hash": "22f101fadb43aae2e41f71cc7317b2ef1e319d294c546f094cf01af7f2f4ce33",
+              "record_hash": "c6cecda52160e5663e6089230a0128b5948fe03c435312b53a4bf44fbb8435c8",
               "service_key_id": "24f6ed6acbfe1009"
             },
-            "sig": "Is3reJdXbYoO9yyf9E2MjWvNOZg9obCJyrmMRrhvHoz2V7MwIRt5WmgceZV2btpvQWEo7o2eEwTA3oAWj3jgCw"
+            "sig": "zP_O5HgWQ-lubFi86wnTHzvYULm0RpQx9uZLNVp9eRh1THwkuTVzv-_FuhPiIl8ZyPZmPVRxJ9F5Oq-GKaPnAg"
           },
           {
             "envelope": {
               "agent": "agent-a",
-              "content_hash": "699cf9cd50d676bb6f481bf8a20339929588c2e848cb869684024d6df087645f",
+              "content_hash": "93b1e6961ef214795a23045b4e185e1f2822898f91994dbd401ce990d81b4504",
               "env": "live",
-              "kind": "decision",
-              "name": "signafaide.telemetry_sampled",
-              "prev": "22f101fadb43aae2e41f71cc7317b2ef1e319d294c546f094cf01af7f2f4ce33",
+              "kind": "outcome",
+              "name": "approve_payout",
+              "prev": "c6cecda52160e5663e6089230a0128b5948fe03c435312b53a4bf44fbb8435c8",
               "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-              "ref": null,
+              "ref": "c6cecda52160e5663e6089230a0128b5948fe03c435312b53a4bf44fbb8435c8",
               "seq": 4,
               "time": "2026-11-13T10:00:03.000Z",
               "v": 1
@@ -26996,31 +26999,80 @@
               "batch": {
                 "drand": null,
                 "env": "live",
-                "prev": "adf559ffa92c07d9060f115ce7a2594dd46e1898e49cb5b2d22edc7f52c35012",
+                "prev": "a698717b1be5fd74294495d8b3dd47e96e5d2868e2f3c4c6d13c803ef588f2fa",
                 "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-                "root": "31d47898c89e7fd3f98ddc7dec931e58e0ff503d0cfe1d0629874b917f2e3372",
+                "root": "7ee0a2f20d7ccd0ebdad354ee228cd3d43738f025b5398725ef98c2d0eb7205d",
                 "seq": 2,
                 "server_time": "2026-11-13T10:05:00.000Z",
-                "size": 1,
+                "size": 2,
                 "v": 1
               },
-              "batch_hash": "7a117f5d9f1e3f7d80cba0f115c0edda712077e058a69b21293454f4a2b83a8a",
-              "batch_sig": "lmLdWsnp4qAqK6JtR4OlGp1x-3l7kTJnD48BhT3xYv8u6S19QDGnh5MIXmckGKe4mxEKNHQJ2duMeZFoZZ-WCQ",
+              "batch_hash": "741d780b470449faa2427e99e27a99610d789d6049aa9aab36275f7f1536e6f8",
+              "batch_sig": "KdT3bxvFoRTPTy1okE2yxkwFzeKmw1gyhDl1lPXtvK12pfY-fIgFtftE4Ln3Ua6I0PfCmqEmpJWs1zNfsvAVBA",
               "head": {
                 "agent": "agent-a",
                 "env": "live",
                 "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
-                "record_hash": "d69725b25b80c201535b8cdd76eb0bf6a4c78f65b695fb7b08fc8f650ccab446",
-                "seq": 4,
+                "record_hash": "5b36907cee750964a5e7f74bd33cf86f0b04e13536c3029680b61f8cdbb9fa34",
+                "seq": 5,
                 "server_time": "2026-11-13T10:05:00.000Z"
               },
-              "head_sig": "vim-tyUTnBQsSeCIClMAaTQptmNCiRf61dw4nEz2HePc62W5ExHDY4ySuVQgtbCQjSIbOrdI3vj6Ewj_t5XeBw",
+              "head_sig": "tCgaF-t5OcDQNILRaK5E4y4BqD0GGzanRYRlBsY-iC8KGGDPaSn9VX9OizeP4XgBKav_iDV2kXsPiYsSF-8PCQ",
               "index": 0,
-              "proof": [],
-              "record_hash": "d69725b25b80c201535b8cdd76eb0bf6a4c78f65b695fb7b08fc8f650ccab446",
+              "proof": [
+                "568ae60b504a9f7bc645c2f5b3b9ecb7f97a542671a8bbb79fd6632bc80b37d4"
+              ],
+              "record_hash": "2e8e6bfc72f7448be71f65caf5eaac1841ef48cb95b18577686e21fa2e0b2f0c",
               "service_key_id": "24f6ed6acbfe1009"
             },
-            "sig": "w95H_axPTIeoo9GERHT_pIE2nHh7WdxbnvzIHI3zcS1R_uKRnMMws_t7AWeO0XCN9UYnLdVLu63ngfYyM0QZDg"
+            "sig": "Pe4U4zn5csWDVVhMsEZldbN3i8pdk-KuIJtYWZVOG19WELe5KhCmP6gi8I1TeipGVaVCtihOnxLrTJETP7UqCg"
+          },
+          {
+            "envelope": {
+              "agent": "agent-a",
+              "content_hash": "fa3b18370e8c4163ffbe453990ffa19129bc016db40171b0f610ae47d722f7ea",
+              "env": "live",
+              "kind": "decision",
+              "name": "signafaide.telemetry_sampled",
+              "prev": "2e8e6bfc72f7448be71f65caf5eaac1841ef48cb95b18577686e21fa2e0b2f0c",
+              "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+              "ref": null,
+              "seq": 5,
+              "time": "2026-11-13T10:00:04.000Z",
+              "v": 1
+            },
+            "key_id": "56475aa75463474c",
+            "receipt": {
+              "batch": {
+                "drand": null,
+                "env": "live",
+                "prev": "a698717b1be5fd74294495d8b3dd47e96e5d2868e2f3c4c6d13c803ef588f2fa",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "root": "7ee0a2f20d7ccd0ebdad354ee228cd3d43738f025b5398725ef98c2d0eb7205d",
+                "seq": 2,
+                "server_time": "2026-11-13T10:05:00.000Z",
+                "size": 2,
+                "v": 1
+              },
+              "batch_hash": "741d780b470449faa2427e99e27a99610d789d6049aa9aab36275f7f1536e6f8",
+              "batch_sig": "KdT3bxvFoRTPTy1okE2yxkwFzeKmw1gyhDl1lPXtvK12pfY-fIgFtftE4Ln3Ua6I0PfCmqEmpJWs1zNfsvAVBA",
+              "head": {
+                "agent": "agent-a",
+                "env": "live",
+                "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+                "record_hash": "5b36907cee750964a5e7f74bd33cf86f0b04e13536c3029680b61f8cdbb9fa34",
+                "seq": 5,
+                "server_time": "2026-11-13T10:05:00.000Z"
+              },
+              "head_sig": "tCgaF-t5OcDQNILRaK5E4y4BqD0GGzanRYRlBsY-iC8KGGDPaSn9VX9OizeP4XgBKav_iDV2kXsPiYsSF-8PCQ",
+              "index": 1,
+              "proof": [
+                "51e55d9aecf14fc1cdcb8be134015d2f4cb39f37d388f3b634f6e7526fd0783b"
+              ],
+              "record_hash": "5b36907cee750964a5e7f74bd33cf86f0b04e13536c3029680b61f8cdbb9fa34",
+              "service_key_id": "24f6ed6acbfe1009"
+            },
+            "sig": "L6NfHKqTGH2TGyVqq45cpbzRqefx8FuOzvDZtKS_J8POhzIj14pu6ayAF5w8jpoYRGd8dqput0qyi2DWznsGAg"
           }
         ],
         "service_keys": [

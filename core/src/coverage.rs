@@ -164,8 +164,13 @@ pub const TELEMETRY_START_PREFIX: &str = "signafaide.telemetry/start/";
 pub const TELEMETRY_END_PREFIX: &str = "signafaide.telemetry/end/";
 /// The records of this agent come from sampled telemetry: some tool calls may not be recorded.
 pub const TELEMETRY_SAMPLED: &str = "signafaide.telemetry_sampled";
+/// The telemetry sampler follows the caller's decision and keeps every trace this program
+/// starts: only a tool call inside a trace that arrives marked as not sampled is not recorded.
+pub const TELEMETRY_PARENT_SAMPLED: &str = "signafaide.telemetry_parent_sampled";
 /// What a verifier says for an agent whose chain holds a `signafaide.telemetry_sampled` note.
 pub const SAMPLED_LINE: &str = "records come from sampled telemetry: some tool calls may not be recorded";
+/// What a verifier says for an agent whose chain holds a `signafaide.telemetry_parent_sampled` note.
+pub const PARENT_SAMPLED_LINE: &str = "telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded";
 
 /// When the decisions of a tool recorded from telemetry spans were written.
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,6 +199,8 @@ impl DecisionWritten {
 pub enum TelemetryNote<'a> {
     /// `signafaide.telemetry_sampled`.
     Sampled,
+    /// `signafaide.telemetry_parent_sampled`.
+    ParentSampled,
     /// The tool is recorded from telemetry spans; `decision` is `Before` or `After`.
     Tool { name: &'a str, decision: DecisionWritten },
 }
@@ -211,6 +218,9 @@ pub fn telemetry_note(kind: Kind, name: &str) -> Option<TelemetryNote<'_>> {
     }
     if name == TELEMETRY_SAMPLED {
         return Some(TelemetryNote::Sampled);
+    }
+    if name == TELEMETRY_PARENT_SAMPLED {
+        return Some(TelemetryNote::ParentSampled);
     }
     let (rest, decision) = match (name.strip_prefix(TELEMETRY_START_PREFIX), name.strip_prefix(TELEMETRY_END_PREFIX)) {
         (Some(rest), _) => (rest, DecisionWritten::Before),
@@ -234,6 +244,8 @@ pub struct Telemetry {
     pub tools: Vec<TelemetryTool>,
     /// The records hold a `signafaide.telemetry_sampled` note.
     pub sampled: bool,
+    /// The records hold a `signafaide.telemetry_parent_sampled` note.
+    pub parent_sampled: bool,
 }
 
 /// What one agent's records, given as (kind, name), say about telemetry, or `None` when they
@@ -241,9 +253,11 @@ pub struct Telemetry {
 pub fn telemetry<'a>(records: impl IntoIterator<Item = (Kind, &'a str)>) -> Option<Telemetry> {
     let mut tools: BTreeMap<&str, DecisionWritten> = BTreeMap::new();
     let mut sampled = false;
+    let mut parent_sampled = false;
     for (kind, name) in records {
         match telemetry_note(kind, name) {
             Some(TelemetryNote::Sampled) => sampled = true,
+            Some(TelemetryNote::ParentSampled) => parent_sampled = true,
             Some(TelemetryNote::Tool { name, decision }) => {
                 let held = tools.entry(name).or_insert(decision);
                 if *held != decision {
@@ -253,14 +267,14 @@ pub fn telemetry<'a>(records: impl IntoIterator<Item = (Kind, &'a str)>) -> Opti
             None => {}
         }
     }
-    if tools.is_empty() && !sampled {
+    if tools.is_empty() && !sampled && !parent_sampled {
         return None;
     }
-    Some(Telemetry { tools: tools.into_iter().map(|(name, decision)| TelemetryTool { name: name.to_string(), decision }).collect(), sampled })
+    Some(Telemetry { tools: tools.into_iter().map(|(name, decision)| TelemetryTool { name: name.to_string(), decision }).collect(), sampled, parent_sampled })
 }
 
 /// The telemetry notes of `agent` in words (§7): the tools recorded from telemetry spans and
-/// when their decisions were written, then whether the telemetry is sampled.
+/// when their decisions were written, then what the telemetry's sampling leaves out.
 pub fn telemetry_lines(agent: &str, t: &Telemetry) -> Vec<String> {
     let mut out = Vec::new();
     if !t.tools.is_empty() {
@@ -269,6 +283,9 @@ pub fn telemetry_lines(agent: &str, t: &Telemetry) -> Vec<String> {
     }
     if t.sampled {
         out.push(format!("{agent}: {SAMPLED_LINE}"));
+    }
+    if t.parent_sampled {
+        out.push(format!("{agent}: {PARENT_SAMPLED_LINE}"));
     }
     out
 }
@@ -334,7 +351,7 @@ mod tests {
             (Kind::Note, "signafaide.telemetry/end/b"),
         ])
         .unwrap();
-        assert_eq!(serde_json::to_value(&t).unwrap(), serde_json::json!({"tools": [{"name": "a", "decision": "after"}, {"name": "b", "decision": "both"}], "sampled": true}));
+        assert_eq!(serde_json::to_value(&t).unwrap(), serde_json::json!({"tools": [{"name": "a", "decision": "after"}, {"name": "b", "decision": "both"}], "sampled": true, "parent_sampled": false}));
         assert_eq!(
             telemetry_lines("bot", &t),
             vec![
@@ -342,7 +359,14 @@ mod tests {
                 "bot: records come from sampled telemetry: some tool calls may not be recorded",
             ]
         );
-        let one = telemetry([(Kind::Note, "signafaide.telemetry/start/a")]).unwrap();
-        assert_eq!(telemetry_lines("bot", &one), vec!["bot: 1 tool is recorded from telemetry spans: a (decision written before the tool ran)"]);
+        let one = telemetry([(Kind::Note, "signafaide.telemetry/start/a"), (Kind::Note, TELEMETRY_PARENT_SAMPLED)]).unwrap();
+        assert!(one.parent_sampled && !one.sampled);
+        assert_eq!(
+            telemetry_lines("bot", &one),
+            vec![
+                "bot: 1 tool is recorded from telemetry spans: a (decision written before the tool ran)",
+                "bot: telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded",
+            ]
+        );
     }
 }

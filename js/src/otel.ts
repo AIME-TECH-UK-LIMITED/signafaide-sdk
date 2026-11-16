@@ -22,7 +22,7 @@
 
 import * as fs from "node:fs";
 import { trace } from "@opentelemetry/api";
-import { TELEMETRY_SAMPLED, declaredName, telemetryNoteName } from "./coverage.js";
+import { declaredName, samplingNote, telemetryNoteName } from "./coverage.js";
 import { declareBeforeCall, rememberTool, toJsonable } from "./record.js";
 import { AGENT_RE, agentName, recordHash, type Kind, type SignedRecord } from "./records.js";
 import { getRecorder, recording, recordingDisabled, telemetryHooks, type Recorder } from "./runtime.js";
@@ -56,7 +56,9 @@ export interface SignafaideSpanProcessorOptions {
   /** The sampler of the tracer provider this processor is added to. A span does not name its
    * sampler, so the processor looks for it on the registered global tracer provider; give it
    * here for a provider that is not registered globally. When the sampler is not always-on, a
-   * signed note says once that the records come from sampled telemetry. */
+   * signed note says once what its sampling leaves out: for a parent-based sampler with an
+   * always-on root, calls inside traces that arrive marked as not sampled; for any other, some
+   * tool calls. */
   sampler?: { toString(): string };
 }
 
@@ -100,7 +102,26 @@ export function toolCall(spanName: string, attributes: Attributes | undefined | 
     const k = keys.find((x) => a[x] !== undefined && a[x] !== null);
     if (k) call[field] = a[k];
   }
+  // A LangChain tool's result names the tool that ran; an instrumentation may name the span after
+  // the tool's class instead.
+  call.tool = toolMessageName(call.output) || tool;
   return call;
+}
+
+/** The tool a serialised LangChain `ToolMessage` names (its `name` field), when the span's result
+ * is one, alone or under `output`; else "". */
+function toolMessageName(output: unknown): string {
+  if (typeof output !== "string" || !output.includes("ToolMessage")) return "";
+  let v: any;
+  try {
+    v = JSON.parse(output);
+  } catch {
+    return "";
+  }
+  for (const m of [v, v?.output]) {
+    if (m && typeof m === "object" && m.lc === 1 && Array.isArray(m.id) && m.id.at(-1) === "ToolMessage" && m.kwargs && typeof m.kwargs === "object") return text(m.kwargs.name);
+  }
+  return "";
 }
 
 /** A span attribute as record content: JSON text is parsed, anything else is kept as it is. */
@@ -355,7 +376,7 @@ export class SignafaideSpanProcessor {
   }
 
   /** Write the decision of a tool call, behind the notes that say where it comes from (§2.7):
-   * that the telemetry is sampled, once per agent, and whether this tool's decisions are written
+   * what the telemetry's sampling leaves out, once per agent, and whether this tool's decisions are written
    * at span start or span end, once per tool and again when that changes. The notes and the
    * decision are one run, so nothing lies between them. */
   private decide(rec: Recorder, agent: string, span: TelemetrySpan, call: ToolCall, atStart: boolean): SignedRecord {
@@ -367,7 +388,8 @@ export class SignafaideSpanProcessor {
     this.samplingNoted.set(rec, sampled);
     if (!sampled.has(agent)) {
       const sampler = this.samplerText();
-      if (sampler !== null && sampler !== "AlwaysOnSampler") items.push({ kind: "note", name: TELEMETRY_SAMPLED, content: { source: "opentelemetry", sampler } });
+      const note = sampler === null ? null : samplingNote(sampler);
+      if (note) items.push({ kind: "note", name: note, content: { source: "opentelemetry", sampler } });
     }
     const when = atStart ? "start" : "end";
     const key = `${agent} ${tool}`;

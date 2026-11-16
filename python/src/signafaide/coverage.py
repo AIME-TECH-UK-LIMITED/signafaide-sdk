@@ -117,8 +117,29 @@ TELEMETRY_START_PREFIX = "signafaide.telemetry/start/"
 TELEMETRY_END_PREFIX = "signafaide.telemetry/end/"
 #: The records of this agent come from sampled telemetry: some tool calls may not be recorded.
 TELEMETRY_SAMPLED = "signafaide.telemetry_sampled"
+#: The telemetry sampler follows the caller's decision and keeps every trace this program starts:
+#: only a tool call inside a trace that arrives marked as not sampled is not recorded.
+TELEMETRY_PARENT_SAMPLED = "signafaide.telemetry_parent_sampled"
 #: What a verifier says for an agent whose chain holds a ``signafaide.telemetry_sampled`` note.
 SAMPLED_LINE = "records come from sampled telemetry: some tool calls may not be recorded"
+#: What a verifier says for an agent whose chain holds a ``signafaide.telemetry_parent_sampled`` note.
+PARENT_SAMPLED_LINE = "telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded"
+_SAMPLER_PARTS = ("root", "remoteParentSampled", "localParentSampled")
+
+
+def sampling_note(sampler: str) -> Optional[str]:
+    """The note a sampler calls for, from its own description (``get_description()`` in Python,
+    ``toString()`` in TypeScript): None for plain always-on, ``signafaide.telemetry_parent_sampled``
+    for a parent-based sampler whose root is always-on and that keeps the spans of sampled
+    parents (OpenTelemetry's default), and ``signafaide.telemetry_sampled`` for every other one,
+    which can drop traces this program starts."""
+    if sampler == "AlwaysOnSampler":
+        return None
+    if sampler.startswith("ParentBased{"):
+        parts = dict(p.strip().replace("=", ":", 1).split(":", 1) for p in sampler[len("ParentBased{"):].rstrip("}").split(",") if ":" in p or "=" in p)
+        if all(parts.get(k) == "AlwaysOnSampler" for k in _SAMPLER_PARTS):
+            return TELEMETRY_PARENT_SAMPLED
+    return TELEMETRY_SAMPLED
 _DECISION_WORDS = {
     "before": "decision written before the tool ran",
     "after": "decision written after the tool ran",
@@ -133,11 +154,14 @@ def telemetry_note_name(tool: str, at_start: bool) -> str:
 
 def telemetry_note(kind: Any, name: Any) -> Union[None, str, Tuple[str, str]]:
     """What a record says about telemetry, from its kind and name alone: ``"sampled"``,
-    ``(tool name, "before" | "after")``, or None when it is not a telemetry note."""
+    ``"parent_sampled"``, ``(tool name, "before" | "after")``, or None when it is not a telemetry
+    note."""
     if kind != "note" or not isinstance(name, str):
         return None
     if name == TELEMETRY_SAMPLED:
         return "sampled"
+    if name == TELEMETRY_PARENT_SAMPLED:
+        return "parent_sampled"
     for prefix, when in ((TELEMETRY_START_PREFIX, "before"), (TELEMETRY_END_PREFIX, "after")):
         if name.startswith(prefix):
             rest = name[len(prefix):]
@@ -147,28 +171,33 @@ def telemetry_note(kind: Any, name: Any) -> Union[None, str, Tuple[str, str]]:
 
 def telemetry(records: Iterable[Tuple[int, Any, Any]]) -> Optional[dict]:
     """What one agent's records, given as (seq, kind, name), say about telemetry (§7):
-    ``{"tools": [{"name", "decision": "before" | "after" | "both"}], "sampled": bool}``, tools in
-    code point order, or None when the records hold no telemetry note."""
+    ``{"tools": [{"name", "decision": "before" | "after" | "both"}], "sampled": bool,
+    "parent_sampled": bool}``, tools in code point order, or None when the records hold no
+    telemetry note."""
     tools: Dict[str, str] = {}
-    sampled = False
+    sampled = parent_sampled = False
     for _seq, kind, name in records:
         t = telemetry_note(kind, name)
         if t == "sampled":
             sampled = True
+        elif t == "parent_sampled":
+            parent_sampled = True
         elif t is not None:
             tools[t[0]] = t[1] if tools.get(t[0], t[1]) == t[1] else "both"
-    if not tools and not sampled:
+    if not tools and not sampled and not parent_sampled:
         return None
-    return {"tools": [{"name": n, "decision": tools[n]} for n in sorted(tools)], "sampled": sampled}
+    return {"tools": [{"name": n, "decision": tools[n]} for n in sorted(tools)], "sampled": sampled, "parent_sampled": parent_sampled}
 
 
 def telemetry_lines(agent: str, t: dict) -> List[str]:
     """The telemetry notes of *agent* in words (§7): the tools recorded from telemetry spans and
-    when their decisions were written, then whether the telemetry is sampled."""
+    when their decisions were written, then what the telemetry's sampling leaves out."""
     out = []
     if t["tools"]:
         names = ", ".join(f"{x['name']} ({_DECISION_WORDS[x['decision']]})" for x in t["tools"])
         out.append(f"{agent}: {_count_is(len(t['tools']), 'tool')} recorded from telemetry spans: {names}")
     if t["sampled"]:
         out.append(f"{agent}: {SAMPLED_LINE}")
+    if t["parent_sampled"]:
+        out.append(f"{agent}: {PARENT_SAMPLED_LINE}")
     return out

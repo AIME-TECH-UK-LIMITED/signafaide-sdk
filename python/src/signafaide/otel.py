@@ -38,7 +38,7 @@ except ImportError as e:  # pragma: no cover - exercised by test_otel.py in a su
 
 from . import decorator, runtime, telemetry
 from ._version import __version__
-from .coverage import TELEMETRY_SAMPLED, declared_name, telemetry_note_name
+from .coverage import declared_name, sampling_note, telemetry_note_name
 from .decorator import to_jsonable
 from .records import AGENT_RE, agent_name, record_hash
 
@@ -86,6 +86,9 @@ def tool_call(span_name: str, attributes: Optional[Mapping[str, Any]]) -> Option
             if a.get(k) is not None:
                 call[field] = a[k]
                 break
+    # A LangChain tool's result names the tool that ran; an instrumentation may name the span
+    # after the tool's class instead.
+    call["tool"] = _tool_message_name(call.get("output")) or tool
     return call
 
 
@@ -105,11 +108,19 @@ def _time(ns: Optional[int]) -> Optional[str]:
     return datetime.fromtimestamp(ns // 1_000_000 / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{ns // 1_000_000 % 1000:03d}Z"
 
 
-def _always_on(sampler: Any) -> bool:
+def _tool_message_name(output: Any) -> str:
+    """The tool a serialised LangChain ``ToolMessage`` names (its ``name`` field), when the
+    span's result is one, alone or under ``output``; else ""."""
+    if not (isinstance(output, str) and "ToolMessage" in output):
+        return ""
     try:
-        return sampler.get_description() == "AlwaysOnSampler"
-    except Exception:
-        return False
+        v = json.loads(output)
+    except ValueError:
+        return ""
+    for m in (v, v.get("output") if isinstance(v, dict) else None):
+        if isinstance(m, dict) and m.get("lc") == 1 and isinstance(m.get("id"), list) and m["id"][-1:] == ["ToolMessage"] and isinstance(m.get("kwargs"), dict):
+            return _text(m["kwargs"].get("name"))
+    return ""
 
 
 class SignafaideSpanProcessor(SpanProcessor):
@@ -296,7 +307,7 @@ class SignafaideSpanProcessor(SpanProcessor):
 
     def _decide(self, rec: runtime.Recorder, agent: str, span: Any, call: dict, *, at_start: bool) -> dict:
         """Write the decision of a tool call, behind the notes that say where it comes from
-        (§2.7): that the telemetry is sampled, once per agent, and whether this tool's decisions
+        (§2.7): what the telemetry's sampling leaves out, once per agent, and whether this tool's decisions
         are written at span start or span end, once per tool and again when that changes. The
         notes and the decision are one run, so nothing lies between them."""
         tool = call["tool"]
@@ -308,8 +319,11 @@ class SignafaideSpanProcessor(SpanProcessor):
         sampled = self._sampling_noted.setdefault(rec, set())
         noted = self._noted.setdefault(rec, {})
         sampler = getattr(span, "_sampler", None)
-        if agent not in sampled and sampler is not None and not _always_on(sampler):
-            items.append(("note", TELEMETRY_SAMPLED, {"source": "opentelemetry", "sampler": _text(sampler.get_description())}, None))
+        if agent not in sampled and sampler is not None:
+            described = _text(sampler.get_description())
+            note = sampling_note(described)
+            if note:
+                items.append(("note", note, {"source": "opentelemetry", "sampler": described}, None))
         when = "start" if at_start else "end"
         if noted.get((agent, tool)) != when:
             items.append(("note", telemetry_note_name(tool, at_start), {"source": "opentelemetry", "tool": tool, "decision_written": "before" if at_start else "after"}, None))

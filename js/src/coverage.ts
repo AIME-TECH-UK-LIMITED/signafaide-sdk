@@ -126,8 +126,33 @@ export const TELEMETRY_START_PREFIX = "signafaide.telemetry/start/";
 export const TELEMETRY_END_PREFIX = "signafaide.telemetry/end/";
 /** The records of this agent come from sampled telemetry: some tool calls may not be recorded. */
 export const TELEMETRY_SAMPLED = "signafaide.telemetry_sampled";
+/** The telemetry sampler follows the caller's decision and keeps every trace this program
+ * starts: only a tool call inside a trace that arrives marked as not sampled is not recorded. */
+export const TELEMETRY_PARENT_SAMPLED = "signafaide.telemetry_parent_sampled";
 /** What a verifier says for an agent whose chain holds a `signafaide.telemetry_sampled` note. */
 export const SAMPLED_LINE = "records come from sampled telemetry: some tool calls may not be recorded";
+/** What a verifier says for an agent whose chain holds a `signafaide.telemetry_parent_sampled` note. */
+export const PARENT_SAMPLED_LINE = "telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded";
+
+/** The note a sampler calls for, from its own description (`toString()` in TypeScript,
+ * `get_description()` in Python): null for plain always-on, `signafaide.telemetry_parent_sampled`
+ * for a parent-based sampler whose root is always-on and that keeps the spans of sampled parents
+ * (OpenTelemetry's default), and `signafaide.telemetry_sampled` for every other one, which can
+ * drop traces this program starts. */
+export function samplingNote(sampler: string): string | null {
+  if (sampler === "AlwaysOnSampler") return null;
+  if (sampler.startsWith("ParentBased{")) {
+    const parts = new Map(
+      sampler
+        .slice("ParentBased{".length)
+        .replace(/\}$/, "")
+        .split(",")
+        .map((p) => p.trim().split(/[:=]/, 2) as [string, string]),
+    );
+    if (["root", "remoteParentSampled", "localParentSampled"].every((k) => parts.get(k) === "AlwaysOnSampler")) return TELEMETRY_PARENT_SAMPLED;
+  }
+  return TELEMETRY_SAMPLED;
+}
 
 export type DecisionWritten = "before" | "after" | "both";
 const DECISION_WORDS: Record<DecisionWritten, string> = {
@@ -142,6 +167,8 @@ export interface Telemetry {
   tools: { name: string; decision: DecisionWritten }[];
   /** The chain holds a `signafaide.telemetry_sampled` note. */
   sampled: boolean;
+  /** The chain holds a `signafaide.telemetry_parent_sampled` note. */
+  parent_sampled: boolean;
 }
 
 /** The envelope name of the note that says how `tool` is recorded from telemetry. */
@@ -149,11 +176,13 @@ export function telemetryNoteName(tool: string, atStart: boolean): string {
   return (atStart ? TELEMETRY_START_PREFIX : TELEMETRY_END_PREFIX) + declaredName(tool);
 }
 
-/** What a record says about telemetry, from its kind and name alone: `"sampled"`, a tool and
- * when its decisions are written, or null when it is not a telemetry note. */
-export function telemetryNote(kind: unknown, name: unknown): "sampled" | { name: string; decision: "before" | "after" } | null {
+/** What a record says about telemetry, from its kind and name alone: `"sampled"`,
+ * `"parent_sampled"`, a tool and when its decisions are written, or null when it is not a
+ * telemetry note. */
+export function telemetryNote(kind: unknown, name: unknown): "sampled" | "parent_sampled" | { name: string; decision: "before" | "after" } | null {
   if (kind !== "note" || typeof name !== "string") return null;
   if (name === TELEMETRY_SAMPLED) return "sampled";
+  if (name === TELEMETRY_PARENT_SAMPLED) return "parent_sampled";
   const start = name.startsWith(TELEMETRY_START_PREFIX);
   if (!start && !name.startsWith(TELEMETRY_END_PREFIX)) return null;
   const rest = name.slice((start ? TELEMETRY_START_PREFIX : TELEMETRY_END_PREFIX).length);
@@ -164,20 +193,23 @@ export function telemetryNote(kind: unknown, name: unknown): "sampled" | { name:
 export function telemetry(records: Iterable<{ kind: unknown; name: unknown }>): Telemetry | null {
   const tools = new Map<string, DecisionWritten>();
   let sampled = false;
+  let parentSampled = false;
   for (const { kind, name } of records) {
     const t = telemetryNote(kind, name);
     if (t === "sampled") sampled = true;
+    else if (t === "parent_sampled") parentSampled = true;
     else if (t) tools.set(t.name, (tools.get(t.name) ?? t.decision) === t.decision ? t.decision : "both");
   }
-  if (!tools.size && !sampled) return null;
-  return { tools: [...tools.keys()].sort(byCodePoint).map((name) => ({ name, decision: tools.get(name)! })), sampled };
+  if (!tools.size && !sampled && !parentSampled) return null;
+  return { tools: [...tools.keys()].sort(byCodePoint).map((name) => ({ name, decision: tools.get(name)! })), sampled, parent_sampled: parentSampled };
 }
 
 /** The telemetry notes of `agent` in words (§7): the tools recorded from telemetry spans and
- * when their decisions were written, then whether the telemetry is sampled. */
+ * when their decisions were written, then what the telemetry's sampling leaves out. */
 export function telemetryLines(agent: string, t: Telemetry): string[] {
   const out: string[] = [];
   if (t.tools.length) out.push(`${agent}: ${countIs(t.tools.length, "tool")} recorded from telemetry spans: ${t.tools.map((x) => `${x.name} (${DECISION_WORDS[x.decision]})`).join(", ")}`);
   if (t.sampled) out.push(`${agent}: ${SAMPLED_LINE}`);
+  if (t.parent_sampled) out.push(`${agent}: ${PARENT_SAMPLED_LINE}`);
   return out;
 }

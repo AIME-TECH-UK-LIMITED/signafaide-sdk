@@ -159,7 +159,7 @@ def test_a_tool_recorded_both_ways_gets_a_note_each_time_it_changes(local_record
         elif r["envelope"]["kind"] == "decision":
             assert r["content"]["meta"]["telemetry"]["decision_written"] == last
     got = telemetry_of((r["envelope"]["seq"], r["envelope"]["kind"], r["envelope"]["name"]) for r in recs)
-    assert got == {"tools": [{"name": "lookup_order", "decision": "both"}], "sampled": False}
+    assert got == {"tools": [{"name": "lookup_order", "decision": "both"}], "sampled": False, "parent_sampled": False}
     assert telemetry_lines("support-bot", got) == ["support-bot: 1 tool is recorded from telemetry spans: lookup_order (decisions written before and after the tool ran)"]
 
 
@@ -187,11 +187,11 @@ def test_markers_are_signed_and_every_verifier_output_carries_them(local_recorde
     report = signafaide.verify()
     assert report.ok and report.check("content").status == "pass" and report.check("record_sig").status == "pass"
     (chain,) = local_recorder.state.chains()
-    assert report.telemetry == {chain: {"tools": [{"name": "lookup_order", "decision": "before"}, {"name": "refund", "decision": "after"}], "sampled": True}}
+    assert report.telemetry == {chain: {"tools": [{"name": "lookup_order", "decision": "before"}, {"name": "refund", "decision": "after"}], "sampled": False, "parent_sampled": True}}
     assert report.to_dict()["telemetry"] == report.telemetry
     lines = str(report).splitlines()
     assert f"telemetry: {chain}: 2 tools are recorded from telemetry spans: lookup_order (decision written before the tool ran), refund (decision written after the tool ran)" in lines
-    assert f"telemetry: {chain}: records come from sampled telemetry: some tool calls may not be recorded" in lines
+    assert f"telemetry: {chain}: telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded" in lines
     assert f"coverage: {chain}: all 2 declared tools are recorded" in lines
     # The marker in the content is under the signature: changing it fails the content hash.
     path = local_recorder.state.chain_path(chain)
@@ -216,34 +216,85 @@ def run_cli(capsys, *args):
     return code, capsys.readouterr().out
 
 
-@pytest.mark.parametrize("sampler", [ParentBased(ALWAYS_ON), TraceIdRatioBased(1.0)])
-def test_a_sampler_that_is_not_always_on_is_noted_once(local_recorder, capsys, sampler):
-    t = tracer(sampler=sampler)
+SAMPLED_LINE = "records come from sampled telemetry: some tool calls may not be recorded"
+PARENT_SAMPLED_LINE = "telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded"
+
+
+class CustomSampler(TraceIdRatioBased):
+    """A sampler of the application's own: what it drops is not known."""
+
+    def get_description(self):
+        return "MySampler"
+
+
+@pytest.mark.parametrize("sampler,name,line,key", [
+    # Samplers that can drop traces this program starts.
+    (TraceIdRatioBased(1.0), "signafaide.telemetry_sampled", SAMPLED_LINE, "sampled"),
+    (ParentBased(TraceIdRatioBased(1.0)), "signafaide.telemetry_sampled", SAMPLED_LINE, "sampled"),
+    (ParentBased(ALWAYS_ON, local_parent_sampled=TraceIdRatioBased(1.0)), "signafaide.telemetry_sampled", SAMPLED_LINE, "sampled"),
+    (CustomSampler(1.0), "signafaide.telemetry_sampled", SAMPLED_LINE, "sampled"),
+    # OpenTelemetry's default: every trace this program starts is kept; the caller decides for its own.
+    (ParentBased(ALWAYS_ON), "signafaide.telemetry_parent_sampled", PARENT_SAMPLED_LINE, "parent_sampled"),
+    (None, "signafaide.telemetry_parent_sampled", PARENT_SAMPLED_LINE, "parent_sampled"),
+])
+def test_a_sampler_that_is_not_always_on_is_noted_once(local_recorder, capsys, sampler, name, line, key):
+    if sampler is None:  # the provider's own default
+        provider = TracerProvider(resource=Resource.create({"service.name": "support-bot"}))
+        provider.add_span_processor(SignafaideSpanProcessor())
+        t, sampler = provider.get_tracer("tests"), provider.sampler
+    else:
+        t = tracer(sampler=sampler)
     for _ in range(3):
         with t.start_as_current_span("x", attributes=GEN_AI):
             pass
     recs = records(local_recorder, "support-bot")
-    sampled = [r for r in recs if r["envelope"]["name"] == "signafaide.telemetry_sampled"]
-    assert len(sampled) == 1 and sampled[0]["envelope"]["kind"] == "note"
-    assert sampled[0]["content"] == {"source": "opentelemetry", "sampler": sampler.get_description()}
-    assert sampled[0]["envelope"]["seq"] < next(r for r in recs if r["envelope"]["kind"] == "decision")["envelope"]["seq"]
+    other = ({"signafaide.telemetry_sampled", "signafaide.telemetry_parent_sampled"} - {name}).pop()
+    assert other not in notes(recs)
+    noted = [r for r in recs if r["envelope"]["name"] == name]
+    assert len(noted) == 1 and noted[0]["envelope"]["kind"] == "note"
+    assert noted[0]["content"] == {"source": "opentelemetry", "sampler": sampler.get_description()}
+    assert noted[0]["envelope"]["seq"] < next(r for r in recs if r["envelope"]["kind"] == "decision")["envelope"]["seq"]
     (chain,) = local_recorder.state.chains()
-    line = f"{chain}: records come from sampled telemetry: some tool calls may not be recorded"
     code, out = run_cli(capsys, "verify")
-    assert code == 0 and f"telemetry: {line}" in out.splitlines() and out.strip().splitlines()[-1].startswith("PASS")
+    assert code == 0 and [x for x in out.splitlines() if "sampled telemetry" in x or "telemetry sampling" in x] == [f"telemetry: {chain}: {line}"] and out.strip().splitlines()[-1].startswith("PASS")
     code, out = run_cli(capsys, "status")
-    assert code == 0 and f"note: {line}" in out.splitlines()
+    assert code == 0 and [x for x in out.splitlines() if "sampled telemetry" in x or "telemetry sampling" in x] == [f"note: {chain}: {line}"]
     assert f"note: {chain}: 1 tool is recorded from telemetry spans: lookup_order (decision written before the tool ran)" in out.splitlines()
     code, out = run_cli(capsys, "verify", "--json")
-    assert json.loads(out)["telemetry"][chain]["sampled"] is True
+    got = json.loads(out)["telemetry"][chain]
+    assert got[key] is True and got["sampled" if key == "parent_sampled" else "parent_sampled"] is False
+
+
+def test_sampling_note_reads_a_sampler_description_of_either_sdk():
+    from signafaide.coverage import sampling_note
+
+    assert sampling_note("AlwaysOnSampler") is None
+    assert sampling_note(ParentBased(ALWAYS_ON).get_description()) == "signafaide.telemetry_parent_sampled"
+    assert sampling_note("ParentBased{root=AlwaysOnSampler, remoteParentSampled=AlwaysOnSampler, remoteParentNotSampled=AlwaysOffSampler, localParentSampled=AlwaysOnSampler, localParentNotSampled=AlwaysOffSampler}") == "signafaide.telemetry_parent_sampled"
+    for other in ("AlwaysOffSampler", "TraceIdRatioBased{0.1}", "ParentBased{root=TraceIdRatioBased{0.1}, remoteParentSampled=AlwaysOnSampler, localParentSampled=AlwaysOnSampler}",
+                  "ParentBased{root:AlwaysOnSampler,remoteParentSampled:AlwaysOffSampler,localParentSampled:AlwaysOnSampler}", "ParentBased{root:AlwaysOnSampler}", "MySampler", ""):
+        assert sampling_note(other) == "signafaide.telemetry_sampled", other
+
+
+def test_a_langchain_tool_message_in_the_result_names_the_tool():
+    message = {"lc": 1, "type": "constructor", "id": ["langchain_core", "messages", "ToolMessage"], "kwargs": {"content": "ok", "name": "lookup_order"}}
+    base = {"gen_ai.operation.name": "execute_tool", "traceloop.entity.name": "DynamicStructuredTool"}
+    assert tool_call("execute_tool DynamicStructuredTool", base)["tool"] == "DynamicStructuredTool"
+    assert tool_call("x", {**base, "traceloop.entity.output": json.dumps(message)})["tool"] == "lookup_order"
+    assert tool_call("x", {**base, "gen_ai.tool.call.result": json.dumps({"output": message})})["tool"] == "lookup_order"
+    # Anything else in a result is content, never a name.
+    for result in ('the ToolMessage said {"name": "refund"}', json.dumps({"name": "refund", "id": ["ToolMessage"]}), json.dumps({**message, "id": ["langchain_core", "messages", "AIMessage"]}), json.dumps({**message, "kwargs": {"name": 5}})):
+        assert tool_call("x", {**base, "traceloop.entity.output": result})["tool"] == "DynamicStructuredTool", result
 
 
 def test_an_always_on_sampler_is_not_noted(local_recorder, capsys):
     t = tracer(sampler=ALWAYS_ON)
     with t.start_as_current_span("x", attributes=GEN_AI):
         pass
-    assert "signafaide.telemetry_sampled" not in notes(records(local_recorder, "support-bot"))
-    assert "sampled telemetry" not in run_cli(capsys, "verify")[1] and "sampled telemetry" not in run_cli(capsys, "status")[1]
+    assert not [n for n in notes(records(local_recorder, "support-bot")) if "sampled" in n]
+    for command in ("verify", "status"):
+        out = run_cli(capsys, command)[1]
+        assert "sampled telemetry" not in out and "telemetry sampling" not in out
 
 
 def test_a_span_the_sampler_drops_is_not_recorded(local_recorder):
@@ -513,7 +564,7 @@ def test_verify_passes_locally_then_co_signed_then_as_a_pack(recorder, service, 
     lines = out.splitlines()
     assert code == 0 and any(line.startswith("PASS") for line in lines)
     assert "telemetry: support-bot: 2 tools are recorded from telemetry spans: lookup_order (decision written before the tool ran), refund (decision written after the tool ran)" in lines
-    assert "telemetry: support-bot: records come from sampled telemetry: some tool calls may not be recorded" in lines
+    assert "telemetry: support-bot: telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded" in lines
     code, out = run_cli(capsys, "verify", str(pack), "--json")
     assert code == 0 and json.loads(out)["telemetry"] == {
-        "support-bot": {"tools": [{"name": "lookup_order", "decision": "before"}, {"name": "refund", "decision": "after"}], "sampled": True}}
+        "support-bot": {"tools": [{"name": "lookup_order", "decision": "before"}, {"name": "refund", "decision": "after"}], "sampled": False, "parent_sampled": True}}

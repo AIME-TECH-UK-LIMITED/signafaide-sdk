@@ -11,7 +11,7 @@ import { AlwaysOffSampler, AlwaysOnSampler, BasicTracerProvider, InMemorySpanExp
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { main } from "../src/cli.js";
-import { telemetry, telemetryLines, telemetryNote, telemetryNoteName } from "../src/coverage.js";
+import { samplingNote, telemetry, telemetryLines, telemetryNote, telemetryNoteName } from "../src/coverage.js";
 import { declareTools, verify, wrapTool } from "../src/index.js";
 import { SignafaideSpanProcessor, toolCall, type SignafaideSpanProcessorOptions } from "../src/otel.js";
 import { recordHash, type SignedRecord } from "../src/records.js";
@@ -181,11 +181,11 @@ describe("signafaide/otel, local only", () => {
     let last: string | undefined;
     for (const r of recs) {
       const n = telemetryNote(r.envelope.kind, r.envelope.name);
-      if (n && n !== "sampled") last = n.decision;
+      if (n && typeof n !== "string") last = n.decision;
       else if (r.envelope.kind === "decision") expect(content(r).meta.telemetry.decision_written).toBe(last);
     }
     const got = telemetry(recs.map((r) => r.envelope))!;
-    expect(got).toEqual({ tools: [{ name: "lookup_order", decision: "both" }], sampled: false });
+    expect(got).toEqual({ tools: [{ name: "lookup_order", decision: "both" }], sampled: false, parent_sampled: false });
     expect(telemetryLines("support-bot", got)).toEqual(["support-bot: 1 tool is recorded from telemetry spans: lookup_order (decisions written before and after the tool ran)"]);
   });
 
@@ -214,11 +214,11 @@ describe("signafaide/otel, local only", () => {
     expect(report.check("content").status).toBe("pass");
     expect(report.check("record_sig").status).toBe("pass");
     const [chain] = getRecorder().state.chains();
-    expect(report.telemetry).toEqual({ [chain]: { tools: [{ name: "lookup_order", decision: "before" }, { name: "refund", decision: "after" }], sampled: true } });
+    expect(report.telemetry).toEqual({ [chain]: { tools: [{ name: "lookup_order", decision: "before" }, { name: "refund", decision: "after" }], sampled: false, parent_sampled: true } });
     expect(JSON.parse(JSON.stringify(report.toJSON())).telemetry).toEqual(report.telemetry);
     const lines = String(report).split("\n");
     expect(lines).toContain(`telemetry: ${chain}: 2 tools are recorded from telemetry spans: lookup_order (decision written before the tool ran), refund (decision written after the tool ran)`);
-    expect(lines).toContain(`telemetry: ${chain}: records come from sampled telemetry: some tool calls may not be recorded`);
+    expect(lines).toContain(`telemetry: ${chain}: telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded`);
     expect(lines).toContain(`coverage: ${chain}: all 2 declared tools are recorded`);
     // The marker in the content is under the signature: changing it fails the content hash.
     const file = getRecorder().state.chainPath(chain);
@@ -240,46 +240,101 @@ describe("signafaide/otel, local only", () => {
 
   // --- sampling -----------------------------------------------------------------------------
 
-  for (const [what, sampler] of [["parent-based", new ParentBasedSampler({ root: new AlwaysOnSampler() })], ["ratio", new TraceIdRatioBasedSampler(1)]] as const) {
+  const SAMPLED_LINE = "records come from sampled telemetry: some tool calls may not be recorded";
+  const PARENT_SAMPLED_LINE = "telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded";
+  /** A sampler of the application's own: what it drops is not known. */
+  class CustomSampler extends TraceIdRatioBasedSampler {
+    override toString() {
+      return "MySampler";
+    }
+  }
+  const SAMPLERS: [string, Sampler | undefined, string, string, "sampled" | "parent_sampled"][] = [
+    // Samplers that can drop traces this program starts.
+    ["ratio", new TraceIdRatioBasedSampler(1), "signafaide.telemetry_sampled", SAMPLED_LINE, "sampled"],
+    ["parent-based with a ratio root", new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(1) }), "signafaide.telemetry_sampled", SAMPLED_LINE, "sampled"],
+    ["parent-based that samples under sampled local parents", new ParentBasedSampler({ root: new AlwaysOnSampler(), localParentSampled: new TraceIdRatioBasedSampler(1) }), "signafaide.telemetry_sampled", SAMPLED_LINE, "sampled"],
+    ["custom", new CustomSampler(1), "signafaide.telemetry_sampled", SAMPLED_LINE, "sampled"],
+    // OpenTelemetry's default: every trace this program starts is kept; the caller decides for its own.
+    ["parent-based with an always-on root", new ParentBasedSampler({ root: new AlwaysOnSampler() }), "signafaide.telemetry_parent_sampled", PARENT_SAMPLED_LINE, "parent_sampled"],
+    ["the provider's default", undefined, "signafaide.telemetry_parent_sampled", PARENT_SAMPLED_LINE, "parent_sampled"],
+  ];
+  for (const [what, sampler, name, line, key] of SAMPLERS) {
     it(`a sampler that is not always-on is noted once (${what})`, async () => {
-      const t = tracer({ sampler });
+      let t: Tracer;
+      if (sampler) t = tracer({ sampler });
+      else {
+        const provider = new NodeTracerProvider({ resource: resourceFromAttributes({ "service.name": "support-bot" }), spanProcessors: [new SignafaideSpanProcessor()] });
+        provider.register();
+        t = provider.getTracer("tests");
+      }
       for (let i = 0; i < 3; i++) t.startSpan("x", { attributes: GEN_AI }).end();
       const recs = records("support-bot");
-      const sampled = recs.filter((r) => r.envelope.name === "signafaide.telemetry_sampled");
-      expect(sampled).toHaveLength(1);
-      expect(sampled[0].envelope.kind).toBe("note");
-      expect(sampled[0].content).toEqual({ source: "opentelemetry", sampler: sampler.toString() });
-      expect(sampled[0].envelope.seq).toBeLessThan(recs.find((r) => r.envelope.kind === "decision")!.envelope.seq);
+      expect(notes(recs)).not.toContain(name === "signafaide.telemetry_sampled" ? "signafaide.telemetry_parent_sampled" : "signafaide.telemetry_sampled");
+      const noted = recs.filter((r) => r.envelope.name === name);
+      expect(noted).toHaveLength(1);
+      expect(noted[0].envelope.kind).toBe("note");
+      expect(noted[0].content).toEqual({ source: "opentelemetry", sampler: (sampler ?? new ParentBasedSampler({ root: new AlwaysOnSampler() })).toString() });
+      expect(noted[0].envelope.seq).toBeLessThan(recs.find((r) => r.envelope.kind === "decision")!.envelope.seq);
       const [chain] = getRecorder().state.chains();
-      const line = `${chain}: records come from sampled telemetry: some tool calls may not be recorded`;
+      const about = (out: string) => out.split("\n").filter((x) => x.includes("sampled telemetry") || x.includes("telemetry sampling"));
       let [code, out] = await cli("verify");
       expect(code).toBe(0);
-      expect(out.split("\n")).toContain(`telemetry: ${line}`);
+      expect(about(out)).toEqual([`telemetry: ${chain}: ${line}`]);
       expect(out.trim().split("\n").at(-1)).toMatch(/^PASS/);
       [code, out] = await cli("status");
       expect(code).toBe(0);
-      expect(out.split("\n")).toContain(`note: ${line}`);
+      expect(about(out)).toEqual([`note: ${chain}: ${line}`]);
       expect(out.split("\n")).toContain(`note: ${chain}: 1 tool is recorded from telemetry spans: lookup_order (decision written before the tool ran)`);
       [code, out] = await cli("verify", "--json");
-      expect(JSON.parse(out).telemetry[chain].sampled).toBe(true);
+      const got = JSON.parse(out).telemetry[chain];
+      expect(got[key]).toBe(true);
+      expect(got[key === "sampled" ? "parent_sampled" : "sampled"]).toBe(false);
     });
   }
 
+  it("samplingNote reads a sampler description of either SDK", () => {
+    expect(samplingNote("AlwaysOnSampler")).toBeNull();
+    expect(samplingNote(new ParentBasedSampler({ root: new AlwaysOnSampler() }).toString())).toBe("signafaide.telemetry_parent_sampled");
+    expect(samplingNote("ParentBased{root:AlwaysOnSampler,remoteParentSampled:AlwaysOnSampler,remoteParentNotSampled:AlwaysOffSampler,localParentSampled:AlwaysOnSampler,localParentNotSampled:AlwaysOffSampler}")).toBe("signafaide.telemetry_parent_sampled");
+    for (const other of ["AlwaysOffSampler", "TraceIdRatioBased{0.1}", "ParentBased{root=TraceIdRatioBased{0.1}, remoteParentSampled=AlwaysOnSampler, localParentSampled=AlwaysOnSampler}", "ParentBased{root:AlwaysOnSampler,remoteParentSampled:AlwaysOffSampler,localParentSampled:AlwaysOnSampler}", "ParentBased{root:AlwaysOnSampler}", "MySampler", ""]) {
+      expect(samplingNote(other), other).toBe("signafaide.telemetry_sampled");
+    }
+  });
+
+  it("a LangChain tool message in the result names the tool", () => {
+    const message = { lc: 1, type: "constructor", id: ["langchain_core", "messages", "ToolMessage"], kwargs: { content: "ok", name: "lookup_order" } };
+    const base = { "gen_ai.operation.name": "execute_tool", "traceloop.entity.name": "DynamicStructuredTool" };
+    expect(toolCall("execute_tool DynamicStructuredTool", base)?.tool).toBe("DynamicStructuredTool");
+    expect(toolCall("x", { ...base, "traceloop.entity.output": JSON.stringify(message) })?.tool).toBe("lookup_order");
+    expect(toolCall("x", { ...base, "gen_ai.tool.call.result": JSON.stringify({ output: message }) })?.tool).toBe("lookup_order");
+    // Anything else in a result is content, never a name.
+    for (const result of ['the ToolMessage said {"name": "refund"}', JSON.stringify({ name: "refund", id: ["ToolMessage"] }), JSON.stringify({ ...message, id: ["langchain_core", "messages", "AIMessage"] }), JSON.stringify({ ...message, kwargs: { name: 5 } })]) {
+      expect(toolCall("x", { ...base, "traceloop.entity.output": result })?.tool, result).toBe("DynamicStructuredTool");
+    }
+  });
+
   it("an always-on sampler is not noted", async () => {
     tracer({ sampler: new AlwaysOnSampler() }).startSpan("x", { attributes: GEN_AI }).end();
-    expect(notes(records("support-bot"))).not.toContain("signafaide.telemetry_sampled");
-    expect((await cli("verify"))[1]).not.toContain("sampled telemetry");
-    expect((await cli("status"))[1]).not.toContain("sampled telemetry");
+    expect(notes(records("support-bot")).filter((n) => n.includes("sampled"))).toEqual([]);
+    for (const command of ["verify", "status"]) {
+      const out = (await cli(command))[1];
+      expect(out).not.toContain("sampled telemetry");
+      expect(out).not.toContain("telemetry sampling");
+    }
   });
 
   it("a provider that is not the registered one: the sampler is taken from the option, else it is not known and no note is written", () => {
-    const sampler = new TraceIdRatioBasedSampler(1);
+    let sampler: Sampler = new TraceIdRatioBasedSampler(1);
     const provider = (processor: SignafaideSpanProcessor) => new BasicTracerProvider({ sampler, resource: resourceFromAttributes({ "service.name": "support-bot" }), spanProcessors: [processor] });
     provider(new SignafaideSpanProcessor()).getTracer("tests").startSpan("x", { attributes: GEN_AI }).end();
-    expect(notes(records("support-bot"))).not.toContain("signafaide.telemetry_sampled");
+    expect(notes(records("support-bot")).filter((n) => n.includes("sampled"))).toEqual([]);
     provider(new SignafaideSpanProcessor({ sampler })).getTracer("tests").startSpan("x", { attributes: GEN_AI }).end();
     const sampled = records("support-bot").filter((r) => r.envelope.name === "signafaide.telemetry_sampled");
     expect(sampled.map((r) => r.content)).toEqual([{ source: "opentelemetry", sampler: "TraceIdRatioBased{1}" }]);
+    // The option covers the parent-based case too (a new process: another agent's chain here).
+    sampler = new ParentBasedSampler({ root: new AlwaysOnSampler() });
+    provider(new SignafaideSpanProcessor({ sampler, agent: "second-bot" })).getTracer("tests").startSpan("x", { attributes: GEN_AI }).end();
+    expect(notes(records("second-bot")).filter((n) => n.includes("sampled"))).toEqual(["signafaide.telemetry_parent_sampled"]);
   });
 
   it("a span the sampler drops is not recorded", () => {
@@ -544,10 +599,10 @@ describe("signafaide/otel, after the opt-in", () => {
     expect(code).toBe(0);
     expect(lines.some((l) => l.startsWith("PASS"))).toBe(true);
     expect(lines).toContain("telemetry: support-bot: 2 tools are recorded from telemetry spans: lookup_order (decision written before the tool ran), refund (decision written after the tool ran)");
-    expect(lines).toContain("telemetry: support-bot: records come from sampled telemetry: some tool calls may not be recorded");
+    expect(lines).toContain("telemetry: support-bot: telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded");
     [code, out] = await cli("verify", pack, "--json");
     expect(code).toBe(0);
-    expect(JSON.parse(out).telemetry).toEqual({ "support-bot": { tools: [{ name: "lookup_order", decision: "before" }, { name: "refund", decision: "after" }], sampled: true } });
+    expect(JSON.parse(out).telemetry).toEqual({ "support-bot": { tools: [{ name: "lookup_order", decision: "before" }, { name: "refund", decision: "after" }], sampled: false, parent_sampled: true } });
   });
 });
 

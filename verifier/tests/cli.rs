@@ -144,7 +144,7 @@ fn tool_coverage_is_reported_in_text_and_json() {
         }
     }
     assert!(declared >= 5, "the tool-declaration variants ran: {declared}");
-    assert_eq!(telemetry, 3, "the telemetry-note variants ran");
+    assert_eq!(telemetry, 4, "the telemetry-note variants ran");
 }
 
 #[test]
