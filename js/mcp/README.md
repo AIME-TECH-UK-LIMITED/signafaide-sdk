@@ -7,7 +7,7 @@ The signafAIde MCP server for coding agents, over stdio. It is a separate packag
 the SDK's version:
 
 ```json
-{"command": "npx", "args": ["-y", "signafaide-mcp@0.3.4"]}
+{"command": "npx", "args": ["-y", "signafaide-mcp@0.3.5"]}
 ```
 
 ## Tools

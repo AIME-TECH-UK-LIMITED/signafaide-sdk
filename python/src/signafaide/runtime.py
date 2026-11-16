@@ -39,12 +39,15 @@ NO_WRITES: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("signa
 # recorded once (the wrapper's records stand, the span's are not written).
 RECORDING: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("signafaide_recording", default=None)
 
-#: Set by the telemetry plug-in. ``adopt(name)`` returns ``(recorder, decision)`` when the plug-in
-#: has already written the decision of the tool span that is running now, so a wrapper inside that
-#: span writes no second one; ``claim(name)`` tells it that a wrapper records the tool whose span
-#: is running now. Neither ever raises.
-telemetry_adopt: Optional[Callable[[str], Optional[tuple]]] = None
-telemetry_claim: Optional[Callable[[str], None]] = None
+#: Set by the telemetry plug-in. ``adopt(name, call_id)`` returns ``(recorder, decision)`` when
+#: the plug-in has already written the decision of a span of that tool that is running now, so a
+#: wrapper inside that span writes no second one. ``claim(name, call_id)`` tells it that a wrapper
+#: has written the decision of a call of the tool, and returns what ``done`` takes when the call
+#: has ended, so the call's own span is not recorded again whenever it arrives. *call_id* is the
+#: model's tool call id when the wrapper knows it. None of them ever raises.
+telemetry_adopt: Optional[Callable[[str, Optional[str]], Optional[tuple]]] = None
+telemetry_claim: Optional[Callable[[str, Optional[str]], object]] = None
+telemetry_done: Optional[Callable[[object], None]] = None
 
 
 def recording_disabled() -> bool:

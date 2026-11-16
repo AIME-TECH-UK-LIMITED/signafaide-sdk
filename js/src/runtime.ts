@@ -50,11 +50,17 @@ export const noWrites = new AsyncLocalStorage<string>();
  * recorded once (the wrapper's records stand, the span's are not written). */
 export const recording = new AsyncLocalStorage<string>();
 
-/** Set by the telemetry plug-in. `adopt(name)` returns the recorder and the decision when the
- * plug-in has already written the decision of the tool span that is running now, so a wrapper
- * inside that span writes no second one; `claim(name)` tells it that a wrapper records the tool
- * whose span is running now. Neither ever throws. */
-export const telemetryHooks: { adopt?: (name: string) => [Recorder, SignedRecord] | null; claim?: (name: string) => void } = {};
+/** Set by the telemetry plug-in. `adopt(name, callId)` returns the recorder and the decision when
+ * the plug-in has already written the decision of a span of that tool that is running now, so a
+ * wrapper inside that span writes no second one. `claim(name, callId)` tells it that a wrapper
+ * has written the decision of a call of the tool, and returns what `done` takes when the call has
+ * ended, so the call's own span is not recorded again whenever it arrives. `callId` is the
+ * model's tool call id when the wrapper knows it. None of them ever throws. */
+export const telemetryHooks: {
+  adopt?: (name: string, callId?: string) => [Recorder, SignedRecord] | null;
+  claim?: (name: string, callId?: string) => unknown;
+  done?: (claim: unknown) => void;
+} = {};
 
 /** `SIGNAFAIDE_DISABLED=1`: `record()` and `wrapTools()` call the function and write nothing. */
 export function recordingDisabled(env: NodeJS.ProcessEnv = process.env): boolean {

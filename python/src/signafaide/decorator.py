@@ -193,28 +193,34 @@ class _Spec:
             rec.warn_strict_refused(self.name, e)
             raise NotRecorded(f"{e.message} (strict mode: {self.name} did not run)", code=e.code, status=e.status, docs=e.docs, body=e.body) from None
 
-    def _begin(self, args: Any) -> Optional[tuple]:
+    def _begin(self, args: Any, call_id: Optional[str]) -> Optional[tuple]:
         """The decision of this call, or None when the telemetry plug-in has already written it for
         the tool span that is running now (it then writes the outcome too): one call, one decision."""
         adopt = runtime.telemetry_adopt
-        held = adopt(self.name) if adopt else None
+        held = adopt(self.name, call_id) if adopt else None
         if held is not None:
-            return None if not self.strict else (held[0], held[1], True)
+            return None if not self.strict else (held[0], held[1], True, None)
         rec, d = self.decide(args)
         claim = runtime.telemetry_claim
-        if claim:
-            claim(self.name)
-        return rec, d, False
+        return rec, d, False, claim(self.name, call_id) if claim else None
 
-    def call(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None) -> Any:
+    @staticmethod
+    def _ended(claimed: Any) -> None:
+        done = runtime.telemetry_done
+        if claimed is not None and done:
+            done(claimed)
+
+    def call(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None, *, call_id: Optional[str] = None) -> Any:
         """Run *fn* between a decision and an outcome. *output* picks the value the outcome
-        records from what *fn* returned (the tool's own return value, for adapters)."""
+        records from what *fn* returned (the tool's own return value, for adapters). *call_id* is
+        the model's tool call id, when the adapter has it: the telemetry plug-in matches the
+        call's span by it."""
         if runtime.recording_disabled():
             return fn()
-        begun = self._begin(args)
+        begun = self._begin(args, call_id)
         if begun is None:
             return fn()
-        rec, d, adopted = begun
+        rec, d, adopted, claimed = begun
         if self.strict:
             self.strict_check(rec, d)
         if adopted:
@@ -227,16 +233,17 @@ class _Spec:
             raise
         finally:
             runtime.RECORDING.reset(token)
+            self._ended(claimed)
         self.outcome(rec, d, {"output": to_jsonable(output(out) if output else out)})
         return out
 
-    async def acall(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None) -> Any:
+    async def acall(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None, *, call_id: Optional[str] = None) -> Any:
         if runtime.recording_disabled():
             return await fn()
-        begun = self._begin(args)
+        begun = self._begin(args, call_id)
         if begun is None:
             return await fn()
-        rec, d, adopted = begun
+        rec, d, adopted, claimed = begun
         if self.strict:
             await asyncio.get_running_loop().run_in_executor(None, self.strict_check, rec, d)
         if adopted:
@@ -249,6 +256,7 @@ class _Spec:
             raise
         finally:
             runtime.RECORDING.reset(token)
+            self._ended(claimed)
         self.outcome(rec, d, {"output": to_jsonable(output(out) if output else out)})
         return out
 
@@ -397,6 +405,11 @@ def _wrap_langchain(tool: Any, spec: _Spec) -> Any:
     def lc_input(tool_input: Any) -> Any:
         return {k: v for k, v in tool_input.items() if k not in _LC_EXTRA} if isinstance(tool_input, dict) else tool_input
 
+    def lc_call_id(kwargs: dict) -> Optional[str]:
+        """The model's tool call id: LangChain passes it to ``run`` when the tool is called with a tool call."""
+        v = kwargs.get("tool_call_id")
+        return v if isinstance(v, str) and v else None
+
     def tool_value(out: Any) -> Any:
         box = returned.get()
         if isinstance(box, list) and box:
@@ -407,12 +420,12 @@ def _wrap_langchain(tool: Any, spec: _Spec) -> Any:
     @functools.wraps(run)
     def run_recorded(tool_input: Any, *args: Any, **kwargs: Any) -> Any:
         returned.set([])
-        return spec.call(lc_input(tool_input), lambda: run(tool_input, *args, **kwargs), tool_value)
+        return spec.call(lc_input(tool_input), lambda: run(tool_input, *args, **kwargs), tool_value, call_id=lc_call_id(kwargs))
 
     @functools.wraps(arun)
     async def arun_recorded(tool_input: Any, *args: Any, **kwargs: Any) -> Any:
         returned.set([])
-        return await spec.acall(lc_input(tool_input), lambda: arun(tool_input, *args, **kwargs), tool_value)
+        return await spec.acall(lc_input(tool_input), lambda: arun(tool_input, *args, **kwargs), tool_value, call_id=lc_call_id(kwargs))
 
     object.__setattr__(new, "run", run_recorded)
     object.__setattr__(new, "arun", arun_recorded)

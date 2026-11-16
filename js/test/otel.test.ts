@@ -9,7 +9,9 @@ import { SpanStatusCode, context, propagation, trace, type Tracer } from "@opent
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { AlwaysOffSampler, AlwaysOnSampler, BasicTracerProvider, InMemorySpanExporter, ParentBasedSampler, SimpleSpanProcessor, TraceIdRatioBasedSampler, type Sampler } from "@opentelemetry/sdk-trace-base";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { tool as langchainTool } from "@langchain/core/tools";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { main } from "../src/cli.js";
 import { samplingNote, telemetry, telemetryLines, telemetryNote, telemetryNoteName } from "../src/coverage.js";
 import { declareTools, verify, wrapTool } from "../src/index.js";
@@ -400,6 +402,97 @@ describe("signafaide/otel, local only", () => {
       expect(calls(records("support-bot"))).toHaveLength(4);
     });
   }
+
+  /** A span built after its call has ended, as a tracing tool that exports finished runs builds
+   * it: it carries the call's own start and end times. */
+  const now = () => performance.timeOrigin + performance.now();
+  function lateSpan(t: Tracer, attributes: Record<string, string>, start: number, end: number, atStart: boolean): void {
+    const span = t.startSpan("x", atStart ? { startTime: start, attributes } : { startTime: start });
+    span.setAttributes(attributes);
+    span.end(end);
+  }
+  const { "gen_ai.tool.call.id": _id, ...GEN_AI_NO_ID } = GEN_AI;
+
+  for (const atStart of [true, false]) {
+    const said = atStart ? "said at start" : "said at end";
+
+    it(`a span built after a wrapped call has ended is not recorded again (${said})`, () => {
+      const t = tracer();
+      let ran = 0;
+      const wrapped = wrapTool((order: string) => ((ran = now()), lookupOrder(order)), { name: "lookup_order", agent: "support-bot" });
+      wrapped("A1");
+      // The call has ended, and only now does its span arrive, dated as the call was.
+      lateSpan(t, GEN_AI_NO_ID, ran, now(), atStart);
+      const recs = records("support-bot");
+      expect(calls(recs)).toEqual(["decision lookup_order", "outcome lookup_order"]);
+      expect(notes(recs).filter((n) => n.startsWith("signafaide.telemetry/"))).toEqual([]);
+      // One wrapper call answers for one span: a second span of those times is another call's.
+      lateSpan(t, GEN_AI_NO_ID, ran, now(), atStart);
+      expect(calls(records("support-bot"))).toHaveLength(4);
+    });
+
+    it(`a late span of another call of the same tool is recorded (${said})`, () => {
+      const t = tracer();
+      wrapTool(lookupOrder, { name: "lookup_order", agent: "support-bot" })("A1");
+      // Same tool name, but the span's own times lie outside the wrapped call: not that call.
+      const before = now() - 10_000;
+      lateSpan(t, GEN_AI_NO_ID, before, before + 1, atStart);
+      const recs = records("support-bot");
+      expect(calls(recs)).toEqual(["decision lookup_order", "outcome lookup_order", "decision lookup_order", "outcome lookup_order"]);
+      expect(content(recs.at(-2)!).meta.telemetry.decision_written).toBe(atStart ? "before" : "after");
+    });
+
+    it(`a late span is matched by its tool call id when the wrapper has one (${said})`, async () => {
+      const t = tracer();
+      const lookup = langchainTool(async ({ order }: { order: string }) => `${order}: shipped`, { name: "lookup_order", description: "Look an order up.", schema: z.object({ order: z.string() }) });
+      const wrapped = wrapTool(lookup, { agent: "support-bot" });
+      const started = now();
+      await wrapped.invoke({ type: "tool_call", id: "call_1", name: "lookup_order", args: { order: "A1" } });
+      // Another call of the tool, by its id, although its times overlap the wrapped call: recorded.
+      lateSpan(t, { ...GEN_AI, "gen_ai.tool.call.id": "call_2" }, started, now(), atStart);
+      expect(calls(records("support-bot"))).toHaveLength(4);
+      // The wrapped call's own span, by its id, whatever its times say: not recorded again.
+      const longAgo = started - 3_600_000;
+      lateSpan(t, GEN_AI, longAgo, longAgo + 1, atStart);
+      expect(calls(records("support-bot"))).toHaveLength(4);
+      // The id answered for one span only.
+      lateSpan(t, GEN_AI, longAgo, longAgo + 1, atStart);
+      expect(calls(records("support-bot"))).toHaveLength(6);
+    });
+
+    for (const [what, sampler, name] of [
+      ["parent-based", new ParentBasedSampler({ root: new AlwaysOnSampler() }), "signafaide.telemetry_parent_sampled"],
+      ["ratio", new TraceIdRatioBasedSampler(1), "signafaide.telemetry_sampled"],
+      ["always-on", new AlwaysOnSampler(), null],
+    ] as const) {
+      it(`the sampling note is written whether the decision is written at span start or end (${what}, ${said})`, () => {
+        const t = tracer({ sampler });
+        for (let i = 0; i < 2; i++) {
+          const span = t.startSpan("x", atStart ? { attributes: GEN_AI } : {});
+          span.setAttributes(GEN_AI);
+          span.end();
+        }
+        const recs = records("support-bot");
+        expect(notes(recs).filter((n) => n.includes("sampled"))).toEqual(name ? [name] : []);
+        expect(notes(recs)).toContain(`signafaide.telemetry/${atStart ? "start" : "end"}/lookup_order`);
+      });
+    }
+  }
+
+  it("LangSmith's attribute names for arguments and result", () => {
+    const attributes = { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "refund", "gen_ai.prompt": '{"order":"A1","amount":5}' };
+    expect(toolCall("refund", { ...attributes, "gen_ai.completion": '{"output":"refunded"}' })).toMatchObject({ input: '{"order":"A1","amount":5}', output: '{"output":"refunded"}' });
+    // The convention's own names come first when a span has both.
+    expect(toolCall("refund", { ...attributes, "gen_ai.tool.call.arguments": '{"order":"B2"}' })?.input).toBe('{"order":"B2"}');
+    // They are read on tool-call spans only.
+    expect(toolCall("chat", { "gen_ai.operation.name": "chat", "gen_ai.prompt": "hello" })).toBeNull();
+    const span = tracer().startSpan("refund");
+    span.setAttributes({ ...attributes, "gen_ai.completion": '{"output":"refunded"}' });
+    span.end();
+    const [decision, outcome] = records("support-bot").filter((r) => r.envelope.kind !== "note");
+    expect(content(decision).input).toEqual({ order: "A1", amount: 5 });
+    expect(content(outcome).output).toEqual({ output: "refunded" });
+  });
 
   it("a different tool called inside a wrapped tool is still recorded", () => {
     const t = tracer();

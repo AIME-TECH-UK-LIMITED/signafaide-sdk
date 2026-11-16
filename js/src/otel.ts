@@ -41,6 +41,7 @@ export interface TelemetrySpan {
   readonly status?: { code: number; message?: string };
   readonly events?: readonly { name: string; attributes?: Attributes }[];
   readonly startTime?: readonly [number, number];
+  readonly endTime?: readonly [number, number];
 }
 
 export interface SignafaideSpanProcessorOptions {
@@ -74,8 +75,10 @@ export interface ToolCall {
 /** The most spans kept in mind at once (open tool calls, spans begun inside a wrapped tool). A
  * span that never ends leaves its entry here; the oldest go first. */
 const MAX_OPEN = 10_000;
-const INPUT_KEYS = ["gen_ai.tool.call.arguments", "input.value", "traceloop.entity.input"];
-const OUTPUT_KEYS = ["gen_ai.tool.call.result", "output.value", "traceloop.entity.output"];
+// gen_ai.prompt and gen_ai.completion: where LangSmith's OpenTelemetry spans carry a run's inputs
+// and outputs. They are read only on a span that is a tool call.
+const INPUT_KEYS = ["gen_ai.tool.call.arguments", "input.value", "traceloop.entity.input", "gen_ai.prompt"];
+const OUTPUT_KEYS = ["gen_ai.tool.call.result", "output.value", "traceloop.entity.output", "gen_ai.completion"];
 const ID_KEYS = ["gen_ai.tool.call.id", "tool_call.id"];
 const NAME_KEYS = { gen_ai: "gen_ai.tool.name", openinference: "tool.name", traceloop: "traceloop.entity.name" } as const;
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -146,6 +149,7 @@ interface Held {
   rec: Recorder;
   decision: SignedRecord;
   tool: string;
+  id?: string;
   input: boolean;
   adopted?: boolean;
 }
@@ -162,16 +166,56 @@ function each(fn: (p: SignafaideSpanProcessor) => void): void {
 
 /** Counts span starts and wrapper calls, so their order is known without a clock. */
 let tick = 0;
-/** Tool calls a wrapper of the SDK recorded, not yet matched to a span. */
-const claims: { tool: string; at: number }[] = [];
+/** A tool call a wrapper of the SDK recorded, not yet matched to a span. `id`: the model's tool
+ * call id, when the wrapper knows it; `begin` and `end`: the clock when the wrapper wrote its
+ * decision and when the call ended, in ms (`end` undefined while it runs). */
+interface Claim {
+  tool: string;
+  id?: string;
+  tick: number;
+  begin: number;
+  end?: number;
+}
+const claims: Claim[] = [];
+/** The clock span times are read on, in ms with fractions, so a call and its span compare exactly. */
+const clock = (): number => performance.timeOrigin + performance.now();
+const ms = (t: readonly [number, number] | undefined): number | undefined => (Array.isArray(t) && t[0] ? t[0] * 1000 + t[1] / 1e6 : undefined);
+/** The model's tool call id a span carries, as text. */
+const callId = (call: ToolCall): string | undefined => (typeof call.id === "string" && call.id ? call.id : undefined);
 
-/** Whether a wrapper recorded a call of `tool` after the tick `began` (a span's start), and
- * forget that call: one wrapper call answers for one span. */
-function claimed(tool: string, began: number): boolean {
-  const i = claims.findIndex((c) => c.tool === tool && c.at > began);
-  if (i < 0) return false;
-  claims.splice(i, 1);
-  return true;
+/**
+ * Whether a wrapper recorded the call a span of `tool` belongs to, and forget that call: one
+ * wrapper call answers for one span. A call and a span never match when both name a tool call id
+ * and the ids differ. Otherwise they match, newest call first, when
+ *
+ * - both name the same tool call id; or
+ * - `running`: the call is still running (the span began inside it); or
+ * - `began`: the wrapper wrote its decision after the tick at which the span began, so inside the
+ *   span (the span is ending now); or
+ * - `at`: the call has ended and the time `at` (the span's own start) lies inside it, for a span
+ *   built after its call; or
+ * - `start` and `end`: the span's own start and end times overlap the call's, likewise.
+ */
+function claimed(tool: string, by: { id?: string; running?: boolean; began?: number; at?: number; start?: number; end?: number }): boolean {
+  const now = clock();
+  for (let i = claims.length - 1; i >= 0; i--) {
+    const c = claims[i];
+    if (c.tool !== tool) continue;
+    if (by.id && c.id) {
+      if (c.id !== by.id) continue;
+    } else if (by.running) {
+      if (c.end !== undefined) continue;
+    } else if (by.began !== undefined && c.tick > by.began) {
+      // inside the span
+    } else if (by.at !== undefined) {
+      if (c.end === undefined || !(c.begin <= by.at && by.at <= c.end)) continue;
+    } else if (by.start !== undefined && by.end !== undefined) {
+      if (!(by.start <= (c.end ?? now) && c.begin <= by.end)) continue;
+    } else continue;
+    claims.splice(i, 1);
+    return true;
+  }
+  return false;
 }
 
 /** Write signafAIde records for the tool-call spans of a tracer provider. */
@@ -208,6 +252,7 @@ export class SignafaideSpanProcessor {
     processors.add(new WeakRef(this));
     telemetryHooks.adopt = adopt;
     telemetryHooks.claim = claim;
+    telemetryHooks.done = done;
   }
 
   // --- the SpanProcessor interface: none of these ever throws ---------------------------
@@ -294,8 +339,13 @@ export class SignafaideSpanProcessor {
       return;
     }
     if (wrapped === call.tool) {
-      claimed(wrapped, 0);
+      claimed(wrapped, { running: true });
       this.keep(this.skipped, spanId, true); // a wrapper of the SDK is recording this very call: its records stand
+      return;
+    }
+    // A span built after its call has ended, of a call a wrapper recorded.
+    if (claimed(call.tool, { id: callId(call), at: ms(span.startTime) })) {
+      this.keep(this.skipped, spanId, true);
       return;
     }
     const rec = getRecorder();
@@ -305,7 +355,7 @@ export class SignafaideSpanProcessor {
       return;
     }
     const decision = this.decide(rec, agent, span, call, true);
-    this.keep(this.open, spanId, { rec, decision, tool: call.tool, input: call.input !== undefined });
+    this.keep(this.open, spanId, { rec, decision, tool: call.tool, id: callId(call), input: call.input !== undefined });
   }
 
   private ended(span: TelemetrySpan): void {
@@ -313,17 +363,18 @@ export class SignafaideSpanProcessor {
     let held = this.open.get(spanId);
     const wrapped = this.inside.get(spanId);
     const skipped = this.skipped.has(spanId);
-    const began = this.began.get(spanId) ?? 0;
+    const began = this.began.get(spanId);
     for (const m of [this.open, this.inside, this.skipped, this.began]) m.delete(spanId);
     if (skipped || recordingDisabled()) return;
     const call = toolCall(span.name, span.attributes);
     if (!held) {
       if (!call) return;
       if (call.tool === wrapped) {
-        claimed(wrapped, began); // the span began inside the wrapper's call
+        if (!claimed(wrapped, { running: true })) claimed(wrapped, { began }); // the span began inside the wrapper's call
         return;
       }
-      if (claimed(call.tool, began)) return; // the wrapper ran inside the span
+      // The wrapper ran inside the span, or the span was built after the call had ended.
+      if (claimed(call.tool, { id: callId(call), began, start: ms(span.startTime), end: ms(span.endTime) })) return;
       const rec = getRecorder();
       const agent = this.agentOf(span, rec);
       if (this.byGateway(rec, agent, call.tool)) return;
@@ -416,9 +467,10 @@ export class SignafaideSpanProcessor {
   // --- one call, one decision (with the SDK's wrappers) ----------------------------------
 
   /** @internal */
-  adoptFor(name: string): [Recorder, SignedRecord] | null {
+  adoptFor(name: string, id?: string): [Recorder, SignedRecord] | null {
     for (const held of [...this.open.values()].reverse()) {
       if (held.tool !== name || held.adopted) continue;
+      if (id && held.id && held.id !== id) continue; // another call of the same tool
       held.adopted = true;
       return [held.rec, held.decision];
     }
@@ -427,22 +479,29 @@ export class SignafaideSpanProcessor {
 }
 
 /** The decision this plug-in wrote at the start of a span of the tool `name` that is still
- * running and that no wrapper has taken yet: the SDK wrapper running inside that span then
- * writes no second decision (the plug-in writes the outcome when the span ends). */
-function adopt(name: string): [Recorder, SignedRecord] | null {
+ * running and that no wrapper has taken yet (and that carries `id`, when both name a tool call
+ * id): the SDK wrapper running inside that span then writes no second decision (the plug-in
+ * writes the outcome when the span ends). */
+function adopt(name: string, id?: string): [Recorder, SignedRecord] | null {
   try {
     let got: [Recorder, SignedRecord] | null = null;
-    each((p) => (got ??= p.adoptFor(name)));
+    each((p) => (got ??= p.adoptFor(name, id)));
     return got;
   } catch {
     return null;
   }
 }
 
-/** A wrapper of the SDK has just written the decision of a call of the tool `name`. A span of
- * that tool that began before now, and says only at its end that it is a tool call, is that
- * call's own span and is not recorded again. */
-function claim(name: string): void {
-  claims.push({ tool: name, at: ++tick });
+/** A wrapper of the SDK has just written the decision of a call of the tool `name`: that call's
+ * own span is not recorded again (see `claimed`). */
+function claim(name: string, id?: string): Claim {
+  const c: Claim = { tool: name, id, tick: ++tick, begin: clock() };
+  claims.push(c);
   if (claims.length > MAX_OPEN) claims.splice(0, claims.length - MAX_OPEN);
+  return c;
+}
+
+/** The wrapper's call has ended. */
+function done(c: unknown): void {
+  if (c && typeof c === "object") (c as Claim).end = clock();
 }

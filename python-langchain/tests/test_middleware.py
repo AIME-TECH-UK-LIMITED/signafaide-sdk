@@ -111,7 +111,10 @@ def test_recording_seam_has_the_shape_this_package_uses():
     spec = inspect.signature(decorator._Spec)
     assert list(spec.parameters)[:4] == ["name", "agent", "strict", "store_content"] and "listed" in spec.parameters
     for fn in (decorator._Spec.call, decorator._Spec.acall):
-        assert list(inspect.signature(fn).parameters) == ["self", "args", "fn", "output"]
+        params = inspect.signature(fn).parameters
+        assert list(params)[:4] == ["self", "args", "fn", "output"]
+        # Anything after them is optional and by keyword, so this package's calls keep working.
+        assert all(p.kind is p.KEYWORD_ONLY and p.default is not p.empty for p in list(params.values())[4:])
 
 
 def test_handled_tool_error_stays_visible_in_the_record():
@@ -144,3 +147,28 @@ def test_middleware_and_the_opentelemetry_processor_record_a_call_once(recorder)
     recs = records(recorder, "support-bot")
     assert calls(recs) == [("decision", "get_weather"), ("outcome", "get_weather")]
     assert "telemetry" not in next(r for r in recs if r["envelope"]["kind"] == "decision")["content"]["meta"]
+
+
+def test_middleware_and_langsmith_spans_built_after_the_run_record_a_call_once(tmp_path):
+    """LangSmith's OpenTelemetry tracing builds a tool's span after the run has finished. The
+    middleware has no tool call id to give, so the span is matched to the call the middleware
+    recorded by the tool's name and the span's own start and end times."""
+    pytest.importorskip("opentelemetry.sdk.trace")
+    pytest.importorskip("langsmith")
+    import importlib.util
+    import json
+    import pathlib
+    import subprocess
+    import sys
+
+    # The traced agent is the one the SDK's own LangSmith tests run, here with the middleware.
+    spec = importlib.util.spec_from_file_location("sdk_otel_frameworks", pathlib.Path(__file__).resolve().parents[2] / "python" / "tests" / "test_otel_frameworks.py")
+    frameworks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(frameworks)
+    script = frameworks.LANGSMITH
+    (tmp_path / ".git").mkdir()
+    out = subprocess.run([sys.executable, "-c", script, "middleware"], cwd=tmp_path, capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr[-2000:]
+    got = json.loads(out.stdout.strip().splitlines()[-1])
+    assert got["inside"] == 1
+    assert [(r["kind"], r["name"]) for r in got["records"] if r["kind"] != "note"] == [("decision", "refund"), ("outcome", "refund")]

@@ -25,6 +25,7 @@ import json
 import logging
 import itertools
 import threading
+import time
 import weakref
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -50,8 +51,10 @@ log = logging.getLogger("signafaide")
 #: span that never ends leaves its entry here; the oldest go first.
 _MAX_OPEN = 10_000
 
-_INPUT_KEYS = ("gen_ai.tool.call.arguments", "input.value", "traceloop.entity.input")
-_OUTPUT_KEYS = ("gen_ai.tool.call.result", "output.value", "traceloop.entity.output")
+# gen_ai.prompt and gen_ai.completion: where LangSmith's OpenTelemetry spans carry a run's inputs
+# and outputs. They are read only on a span that is a tool call.
+_INPUT_KEYS = ("gen_ai.tool.call.arguments", "input.value", "traceloop.entity.input", "gen_ai.prompt")
+_OUTPUT_KEYS = ("gen_ai.tool.call.result", "output.value", "traceloop.entity.output", "gen_ai.completion")
 _ID_KEYS = ("gen_ai.tool.call.id", "tool_call.id")
 _NAME_KEYS = {"gen_ai": "gen_ai.tool.name", "openinference": "tool.name", "traceloop": "traceloop.entity.name"}
 
@@ -156,12 +159,15 @@ class SignafaideSpanProcessor(SpanProcessor):
         self._noted: "weakref.WeakKeyDictionary[runtime.Recorder, dict]" = weakref.WeakKeyDictionary()
         #: recorder -> the agents whose sampling was looked at.
         self._sampling_noted: "weakref.WeakKeyDictionary[runtime.Recorder, set]" = weakref.WeakKeyDictionary()
+        #: The sampler of the provider's spans: a span names it when it starts, not when it ends.
+        self._sampler: Any = None
         self._gateway: dict = {}  # agent -> (file stamp, tools a gateway on this machine records)
         self._warned = False
         telemetry.ADAPTERS.add("otel")
         _processors.add(self)
         runtime.telemetry_adopt = _adopt
         runtime.telemetry_claim = _claim
+        runtime.telemetry_done = _done
 
     # --- the SpanProcessor interface: none of these ever raises -----------------------
 
@@ -227,6 +233,9 @@ class SignafaideSpanProcessor(SpanProcessor):
         return tool in held[1]
 
     def _started(self, span: Any) -> None:
+        sampler = getattr(span, "_sampler", None)
+        if sampler is not None:
+            self._sampler = sampler
         if runtime.recording_disabled():
             return
         span_id = span.get_span_context().span_id
@@ -238,7 +247,11 @@ class SignafaideSpanProcessor(SpanProcessor):
                 self._keep(self._inside, span_id, wrapped)
             return
         if wrapped == call["tool"]:  # a wrapper of the SDK is recording this very call: its records stand
-            _claimed(wrapped, 0)
+            _claimed(wrapped, running=True)
+            self._keep(self._skipped, span_id, True)
+            return
+        # A span built after its call has ended, of a call a wrapper recorded.
+        if _claimed(call["tool"], call_id=_call_id(call), at=getattr(span, "start_time", None)):
             self._keep(self._skipped, span_id, True)
             return
         rec = runtime.get()
@@ -247,14 +260,14 @@ class SignafaideSpanProcessor(SpanProcessor):
             self._keep(self._skipped, span_id, True)
             return
         d = self._decide(rec, agent, span, call, at_start=True)
-        self._keep(self._open, span_id, {"rec": rec, "decision": d, "tool": call["tool"], "input": "input" in call})
+        self._keep(self._open, span_id, {"rec": rec, "decision": d, "tool": call["tool"], "id": _call_id(call), "input": "input" in call})
 
     def _ended(self, span: Any) -> None:
         span_id = span.get_span_context().span_id
         with self._lock:
             held = self._open.pop(span_id, None)
             wrapped = self._inside.pop(span_id, None)
-            began = self._began.pop(span_id, 0)
+            began = self._began.pop(span_id, None)
             skipped = self._skipped.pop(span_id, False)
         if skipped or runtime.recording_disabled():
             return
@@ -263,9 +276,10 @@ class SignafaideSpanProcessor(SpanProcessor):
             if call is None:
                 return
             if call["tool"] == wrapped:  # the span began inside the wrapper's call
-                _claimed(wrapped, began)
+                _claimed(wrapped, running=True) or _claimed(wrapped, began=began)
                 return
-            if _claimed(call["tool"], began):  # the wrapper ran inside the span
+            # The wrapper ran inside the span, or the span was built after the call had ended.
+            if _claimed(call["tool"], call_id=_call_id(call), began=began, start=getattr(span, "start_time", None), end=getattr(span, "end_time", None)):
                 return
             rec = runtime.get()
             agent = self._agent_of(span, rec)
@@ -318,7 +332,7 @@ class SignafaideSpanProcessor(SpanProcessor):
         items: list = []
         sampled = self._sampling_noted.setdefault(rec, set())
         noted = self._noted.setdefault(rec, {})
-        sampler = getattr(span, "_sampler", None)
+        sampler = getattr(span, "_sampler", None) or self._sampler  # a span that has ended no longer names it
         if agent not in sampled and sampler is not None:
             described = _text(sampler.get_description())
             note = sampling_note(described)
@@ -347,30 +361,43 @@ class SignafaideSpanProcessor(SpanProcessor):
 
     # --- one call, one decision (with the SDK's wrappers) --------------------------------
 
-    def _adopt(self, name: str) -> Optional[tuple]:
+    def _adopt(self, name: str, call_id: Optional[str]) -> Optional[tuple]:
         with self._lock:
             for held in reversed(self._open.values()):
-                if held["tool"] == name and not held.get("adopted"):
-                    held["adopted"] = True
-                    return held["rec"], held["decision"]
+                if held["tool"] != name or held.get("adopted"):
+                    continue
+                if call_id and held["id"] and held["id"] != call_id:
+                    continue  # another call of the same tool
+                held["adopted"] = True
+                return held["rec"], held["decision"]
         return None
+
+
+def _call_id(call: dict) -> Optional[str]:
+    """The model's tool call id a span carries, as text, or None."""
+    v = call.get("id")
+    return v if isinstance(v, str) and v else None
 
 
 _processors: "weakref.WeakSet[SignafaideSpanProcessor]" = weakref.WeakSet()
 #: Counts span starts and wrapper calls, so their order is known without a clock.
 _ticks = itertools.count(1)
-#: Tool calls a wrapper of the SDK recorded, not yet matched to a span: [tool, tick].
+#: Tool calls a wrapper of the SDK recorded, not yet matched to a span:
+#: ``{"tool", "id", "tick", "begin", "end"}`` (``id``: the tool call id or None; ``begin`` and
+#: ``end``: the clock when the wrapper wrote its decision and when the call ended, in ns, ``end``
+#: None while it runs).
 _claims: list = []
 _claims_lock = threading.Lock()
 
 
-def _adopt(name: str) -> Optional[tuple]:
+def _adopt(name: str, call_id: Optional[str] = None) -> Optional[tuple]:
     """The decision this plug-in wrote at the start of a span of the tool *name* that is still
-    running and that no wrapper has taken yet: the SDK wrapper running inside that span then
-    writes no second decision (the plug-in writes the outcome when the span ends)."""
+    running and that no wrapper has taken yet (and that carries *call_id*, when both name a tool
+    call id): the SDK wrapper running inside that span then writes no second decision (the
+    plug-in writes the outcome when the span ends)."""
     try:
         for p in list(_processors):
-            got = p._adopt(name)
+            got = p._adopt(name, call_id)
             if got is not None:
                 return got
     except Exception:  # noqa: BLE001
@@ -378,21 +405,61 @@ def _adopt(name: str) -> Optional[tuple]:
     return None
 
 
-def _claim(name: str) -> None:
-    """A wrapper of the SDK has just written the decision of a call of the tool *name*. A span
-    of that tool that began before now, and says only at its end that it is a tool call, is that
-    call's own span and is not recorded again."""
-    with _claims_lock:
-        _claims.append([name, next(_ticks)])
-        del _claims[:-_MAX_OPEN]
+def _claim(name: str, call_id: Optional[str] = None) -> Optional[dict]:
+    """A wrapper of the SDK has just written the decision of a call of the tool *name*: that
+    call's own span is not recorded again (see ``_claimed``)."""
+    try:
+        claim = {"tool": name, "id": call_id, "tick": next(_ticks), "begin": time.time_ns(), "end": None}
+        with _claims_lock:
+            _claims.append(claim)
+            del _claims[:-_MAX_OPEN]
+        return claim
+    except Exception:  # noqa: BLE001
+        return None
 
 
-def _claimed(tool: str, began: int) -> bool:
-    """Whether a wrapper recorded a call of *tool* after the tick *began* (a span's start), and
-    forget that call: one wrapper call answers for one span."""
+def _done(claim: Any) -> None:
+    """The wrapper's call has ended."""
+    if isinstance(claim, dict):
+        claim["end"] = time.time_ns()
+
+
+def _claimed(tool: str, *, call_id: Optional[str] = None, running: bool = False, began: Optional[int] = None,
+             at: Optional[int] = None, start: Optional[int] = None, end: Optional[int] = None) -> bool:
+    """Whether a wrapper recorded the call a span of *tool* belongs to, and forget that call:
+    one wrapper call answers for one span. A call and a span never match when both name a tool
+    call id and the ids differ. Otherwise they match, newest call first, when
+
+    - both name the same tool call id; or
+    - *running*: the call is still running (the span began inside it); or
+    - *began*: the wrapper wrote its decision after the tick at which the span began, so inside
+      the span (the span is ending now); or
+    - *at*: the call has ended and the time *at* (the span's own start) lies inside it, for a
+      span built after its call; or
+    - *start* and *end*: the span's own start and end times overlap the call's, likewise.
+    """
+    now = time.time_ns()
     with _claims_lock:
-        for i, (name, at) in enumerate(_claims):
-            if name == tool and at > began:
-                del _claims[i]
-                return True
+        for i in range(len(_claims) - 1, -1, -1):
+            c = _claims[i]
+            if c["tool"] != tool:
+                continue
+            if call_id and c["id"]:
+                if c["id"] != call_id:
+                    continue
+            elif running:
+                if c["end"] is not None:
+                    continue
+            elif began is not None and c["tick"] > began:
+                pass
+            elif at is not None:
+                if c["end"] is None or not c["begin"] <= at <= c["end"]:
+                    continue
+            elif start and end:
+                if not (start <= (c["end"] or now) and c["begin"] <= end):
+                    continue
+            else:
+                continue
+            del _claims[i]
+            return True
     return False

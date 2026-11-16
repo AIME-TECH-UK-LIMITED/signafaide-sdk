@@ -1,6 +1,6 @@
 {
   "name": "signafaide-mcp",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "mcpName": "uk.co.signafaide/signafaide",
   "description": "signafAIde MCP server: audit evidence for AI agent tool calls, signed, independently co-signed and verifiable offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2.",
   "license": "Apache-2.0",

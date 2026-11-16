@@ -197,16 +197,44 @@ class Spec {
     }
   }
 
-  /** Run `fn` between a decision and an outcome. Sync stays sync unless strict. */
-  call(input: unknown, fn: () => unknown): unknown {
+  /** Run `fn` between a decision and an outcome. Sync stays sync unless strict. `callId` is the
+   * model's tool call id, when the adapter has it: the telemetry plug-in matches the call's span
+   * by it. */
+  call(input: unknown, fn: () => unknown, callId?: string): unknown {
     if (recordingDisabled()) return this.opts.strict ? Promise.resolve().then(fn) : fn();
     // The telemetry plug-in has already written the decision of the tool span that is running
     // now (it then writes the outcome too): one call, one decision.
-    const held = telemetryHooks.adopt?.(this.name);
+    const held = telemetryHooks.adopt?.(this.name, callId);
     if (held) return this.opts.strict ? this.strictCheck(held[0], held[1]).then(fn) : fn();
     const [rec, d] = this.decide(input);
-    telemetryHooks.claim?.(this.name);
-    const run = () => this.run(rec, d, () => recording.run(this.name, fn));
+    const claim = telemetryHooks.claim?.(this.name, callId);
+    const ended = () => {
+      if (claim !== undefined) telemetryHooks.done?.(claim);
+    };
+    const body = () => {
+      let out: unknown;
+      try {
+        out = recording.run(this.name, fn);
+      } catch (e) {
+        ended();
+        throw e;
+      }
+      if (out && typeof (out as PromiseLike<unknown>).then === "function") {
+        return (out as Promise<unknown>).then(
+          (v) => {
+            ended();
+            return v;
+          },
+          (e) => {
+            ended();
+            throw e;
+          },
+        );
+      }
+      ended();
+      return out;
+    };
+    const run = () => this.run(rec, d, body);
     if (this.opts.strict) return this.strictCheck(rec, d).then(run);
     return run();
   }
@@ -308,7 +336,9 @@ export function wrapTool<T>(tool: T, opts: WrapOptions & { name?: string } = {})
     ADAPTERS.add("langchain");
     const proxy = Object.create(t);
     proxy._call = function (arg: unknown, runManager?: unknown, config?: unknown) {
-      return s.call(arg, () => t._call.call(proxy, arg, runManager, config));
+      // The model's tool call id: LangChain passes it in the config when the tool is called with a tool call.
+      const id = (config as { toolCall?: { id?: unknown } } | undefined)?.toolCall?.id;
+      return s.call(arg, () => t._call.call(proxy, arg, runManager, config), typeof id === "string" && id ? id : undefined);
     };
     return proxy;
   }
@@ -316,7 +346,13 @@ export function wrapTool<T>(tool: T, opts: WrapOptions & { name?: string } = {})
   if (typeof t?.execute === "function") {
     const s = spec(t.name ?? "");
     ADAPTERS.add("vercel-ai");
-    return { ...t, execute: (input: unknown, options?: unknown) => s.call(input, () => t.execute(input, options)) } as T;
+    return {
+      ...t,
+      execute: (input: unknown, options?: unknown) => {
+        const id = (options as { toolCallId?: unknown } | undefined)?.toolCallId;
+        return s.call(input, () => t.execute(input, options), typeof id === "string" && id ? id : undefined);
+      },
+    } as T;
   }
   throw new TypeError(`wrapTools cannot record ${t === null ? "null" : typeof t}: pass a function, a tool with execute(), an OpenAI Agents tool or a LangChain tool`);
 }

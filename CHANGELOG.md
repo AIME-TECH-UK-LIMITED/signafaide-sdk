@@ -9,6 +9,15 @@ The record format changed between v0.1.1 and v0.1.2 (salted content hashes) and 
 (packs name their project), before any public release. Records and packs written by a version
 verify with that version and later ones unless an entry below says otherwise.
 
+## v0.3.5 (2026-11-16)
+
+Three fixes to the OpenTelemetry span processor. No change to the record envelope, the checks or the reserved note names.
+
+- One record per call also holds for a span that arrives after its call has ended. LangSmith's OpenTelemetry tracing builds a tool's span once the run has finished; a tool that is also wrapped with the SDK, or runs through the LangChain middleware, now gives one decision and one outcome there too. The span is matched to the call the wrapper recorded by the tool call id when the span and the wrapper both have one (`wrap_tools` and `wrapTools` take it from LangChain, `wrapTools` also from the Vercel AI SDK), otherwise by the tool's name and the span's own start and end times against the time of the wrapper's call. A span and a call whose tool call ids differ are never matched, and one wrapper call answers for one span. Python and TypeScript.
+- Python: the sampling note (`signafaide.telemetry_parent_sampled` or `signafaide.telemetry_sampled`) is written when the first decision is written at span end too. It was written only when a span said at its start that it was a tool call.
+- The arguments and the result of a tool call are also read from `gen_ai.prompt` and `gen_ai.completion`, where LangSmith's spans carry them, after the three conventions' own attributes. Records made from LangSmith spans now hold the tool's input and output.
+- Version 0.3.5 everywhere the release check looks.
+
 ## v0.3.4 (2026-11-16)
 
 An OpenTelemetry span processor in both SDKs: an agent that is already traced gets signed records with no tool wrapping. No change to the record envelope or to any check; the spec gains four reserved note names (§2.7), and every verifier reports them as notes.

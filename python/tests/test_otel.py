@@ -3,6 +3,7 @@
 import json
 import logging
 import subprocess
+import time
 import sys
 
 import pytest
@@ -27,6 +28,7 @@ from signafaide.records import record_hash
 GEN_AI = {"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "lookup_order", "gen_ai.tool.call.id": "call_1", "gen_ai.tool.call.arguments": '{"order": "A1"}'}
 OPENINFERENCE = {"openinference.span.kind": "TOOL", "tool.name": "lookup_order", "input.value": '{"order": "A1"}', "input.mime_type": "application/json"}
 TRACELOOP = {"traceloop.span.kind": "tool", "traceloop.entity.name": "lookup_order", "traceloop.entity.input": '{"order": "A1"}'}
+GEN_AI_NO_ID = {k: v for k, v in GEN_AI.items() if k != "gen_ai.tool.call.id"}
 RESULT = {"gen_ai": "gen_ai.tool.call.result", "openinference": "output.value", "traceloop": "traceloop.entity.output"}
 CONVENTIONS = [("gen_ai", GEN_AI), ("openinference", OPENINFERENCE), ("traceloop", TRACELOOP)]
 
@@ -265,6 +267,34 @@ def test_a_sampler_that_is_not_always_on_is_noted_once(local_recorder, capsys, s
     assert got[key] is True and got["sampled" if key == "parent_sampled" else "parent_sampled"] is False
 
 
+@pytest.mark.parametrize("at_start", [True, False])
+@pytest.mark.parametrize("sampler,name", [(ParentBased(ALWAYS_ON), "signafaide.telemetry_parent_sampled"), (TraceIdRatioBased(1.0), "signafaide.telemetry_sampled"), (ALWAYS_ON, None)])
+def test_the_sampling_note_is_written_whether_the_decision_is_written_at_span_start_or_end(local_recorder, at_start, sampler, name):
+    t = tracer(sampler=sampler)
+    for _ in range(2):
+        with t.start_as_current_span("x", attributes=GEN_AI if at_start else None) as span:
+            span.set_attributes(GEN_AI)
+    recs = records(local_recorder, "support-bot")
+    assert [n for n in notes(recs) if "sampled" in n] == ([name] if name else [])
+    assert f"signafaide.telemetry/{'start' if at_start else 'end'}/lookup_order" in notes(recs)
+
+
+def test_langsmith_attribute_names_for_arguments_and_result(local_recorder):
+    attributes = {"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "refund", "gen_ai.prompt": '{"order":"A1","amount":5}'}
+    got = tool_call("refund", {**attributes, "gen_ai.completion": '{"output":"refunded"}'})
+    assert got["input"] == '{"order":"A1","amount":5}' and got["output"] == '{"output":"refunded"}'
+    # The convention's own names come first when a span has both.
+    both = tool_call("refund", {**attributes, "gen_ai.tool.call.arguments": '{"order":"B2"}'})
+    assert both["input"] == '{"order":"B2"}'
+    # They are read on tool-call spans only.
+    assert tool_call("chat", {"gen_ai.operation.name": "chat", "gen_ai.prompt": "hello"}) is None
+    t = tracer()
+    with t.start_as_current_span("refund") as span:
+        span.set_attributes({**attributes, "gen_ai.completion": '{"output":"refunded"}'})
+    decision, outcome = [r for r in records(local_recorder, "support-bot") if r["envelope"]["kind"] != "note"]
+    assert decision["content"]["input"] == {"order": "A1", "amount": 5} and outcome["content"]["output"] == {"output": "refunded"}
+
+
 def test_sampling_note_reads_a_sampler_description_of_either_sdk():
     from signafaide.coverage import sampling_note
 
@@ -361,6 +391,72 @@ def test_wrapped_tool_called_while_its_span_is_open_but_not_the_current_span(loc
     span.set_attributes(GEN_AI)
     span.end()
     assert len(calls(records(local_recorder, "support-bot"))) == 4
+
+
+def late_span(t, attributes, start, end, *, at_start):
+    """A span built after its call has ended, as a tracing tool that exports finished runs builds
+    it: it carries the call's own start and end times."""
+    span = t.start_span("x", start_time=start, attributes=attributes if at_start else None)
+    span.set_attributes(attributes)
+    span.end(end_time=end)
+
+
+@pytest.mark.parametrize("at_start", [True, False])
+def test_span_built_after_a_wrapped_call_has_ended_is_not_recorded_again(local_recorder, at_start):
+    t = tracer()
+    ran = []
+
+    def body(order):
+        ran.append(time.time_ns())
+        return lookup_order(order)
+
+    wrapped = signafaide.wrap_tool(body, name="lookup_order", agent="support-bot")
+    wrapped("A1")
+    # The call has ended, and only now does its span arrive, dated as the call was.
+    late_span(t, GEN_AI_NO_ID, ran[0], time.time_ns(), at_start=at_start)
+    recs = records(local_recorder, "support-bot")
+    assert calls(recs) == [("decision", "lookup_order"), ("outcome", "lookup_order")]
+    assert not [n for n in notes(recs) if n.startswith("signafaide.telemetry/")]
+    # One wrapper call answers for one span: a second span of those times is another call's.
+    late_span(t, GEN_AI_NO_ID, ran[0], time.time_ns(), at_start=at_start)
+    assert len(calls(records(local_recorder, "support-bot"))) == 4
+
+
+@pytest.mark.parametrize("at_start", [True, False])
+def test_late_span_of_another_call_of_the_same_tool_is_recorded(local_recorder, at_start):
+    t = tracer()
+    signafaide.wrap_tool(lookup_order, agent="support-bot")("A1")
+    # Same tool name, but the span's own times lie outside the wrapped call: not that call.
+    before = time.time_ns() - 10_000_000_000
+    late_span(t, GEN_AI_NO_ID, before, before + 1_000_000, at_start=at_start)
+    assert calls(records(local_recorder, "support-bot")) == [("decision", "lookup_order"), ("outcome", "lookup_order")] * 2
+    marker = records(local_recorder, "support-bot")[-2]["content"]["meta"]["telemetry"]
+    assert marker["decision_written"] == ("before" if at_start else "after")
+
+
+@pytest.mark.parametrize("at_start", [True, False])
+def test_late_span_is_matched_by_its_tool_call_id_when_the_wrapper_has_one(local_recorder, at_start):
+    from langchain_core.tools import tool
+
+    @tool
+    def lookup_order(order: str) -> str:
+        """Look an order up."""
+        return f"{order}: shipped"
+
+    t = tracer()
+    wrapped = signafaide.wrap_tool(lookup_order, agent="support-bot")
+    started = time.time_ns()
+    wrapped.invoke({"type": "tool_call", "id": "call_1", "name": "lookup_order", "args": {"order": "A1"}})
+    # Another call of the tool, by its id, although its times overlap the wrapped call: recorded.
+    late_span(t, {**GEN_AI, "gen_ai.tool.call.id": "call_2"}, started, time.time_ns(), at_start=at_start)
+    assert len(calls(records(local_recorder, "support-bot"))) == 4
+    # The wrapped call's own span, by its id, whatever its times say: not recorded again.
+    long_ago = started - 3_600_000_000_000
+    late_span(t, GEN_AI, long_ago, long_ago + 1000, at_start=at_start)
+    assert len(calls(records(local_recorder, "support-bot"))) == 4
+    # The id answered for one span only.
+    late_span(t, GEN_AI, long_ago, long_ago + 1000, at_start=at_start)
+    assert len(calls(records(local_recorder, "support-bot"))) == 6
 
 
 def test_a_different_tool_called_inside_a_wrapped_tool_is_still_recorded(local_recorder):
