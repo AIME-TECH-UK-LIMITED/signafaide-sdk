@@ -2,6 +2,9 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+// The snippets, the install and verify commands and the steps live in one data file that the
+// hosted service's remote MCP server reads too, so both give the same text.
+import guidance from "../../spec/guidance.json" with { type: "json" };
 
 export const LANGUAGES = ["python", "typescript", "javascript"] as const;
 export const FRAMEWORKS = ["plain", "langchain", "openai-agents", "vercel-ai"] as const;
@@ -125,63 +128,23 @@ export function findCandidates(root: string, language: Language): string[] {
   return out;
 }
 
-/** The canonical snippet for a language and framework. */
+/** The canonical snippet for a language and framework (a framework the language has no snippet for gets the plain one). */
 export function snippet(language: Language, framework: Framework): string {
-  if (language === "python") {
-    switch (framework) {
-      case "langchain":
-        return `import signafaide
+  const byFramework: Partial<Record<Framework, string>> = guidance.snippets[language];
+  return byFramework[framework] ?? guidance.snippets[language].plain;
+}
 
-# @tool functions or BaseTool instances; the copies record every invoke and still work with bind_tools
-tools = signafaide.wrap_tools([lookup_order, refund])
-agent = create_agent(model, tools=tools)`;
-      case "openai-agents":
-        return `import signafaide
-from agents import Agent
-
-agent = Agent(name="support", tools=signafaide.wrap_tools([lookup_order, refund]))  # @function_tool tools`;
-      default:
-        return `import signafaide
-
-@signafaide.record
-def approve_payout(claim_id: str, amount: float): ...
-
-# or wrap existing functions without touching their definitions:
-approve_payout, escalate = signafaide.wrap_tools([approve_payout, escalate])
-
-# a decision that is not a tool call:
-signafaide.note("routing", {"reason": "amount over limit"})`;
-    }
-  }
-  const ts = language === "typescript";
-  switch (framework) {
-    case "vercel-ai":
-      return `import { wrapTools } from "signafaide";
-
-const result = await generateText({ model, tools: wrapTools({ weather: tool({ inputSchema, execute }) }), prompt });`;
-    case "openai-agents":
-      return `import { wrapTools } from "signafaide";
-
-const agent = new Agent({ name: "support", tools: wrapTools([lookupOrder, refund]) }); // tool({...}) from @openai/agents`;
-    case "langchain":
-      return `import { wrapTools } from "signafaide";
-
-// tool(), DynamicStructuredTool or StructuredTool instances; the copies are still StructuredTools
-const tools = wrapTools([lookupOrder, refund]);
-const modelWithTools = model.bindTools(tools);`;
-    default:
-      return `import { note, record, wrapTools } from "signafaide";
-
-const approvePayout = record(async (claimId${ts ? ": string" : ""}, amount${ts ? ": number" : ""}) => {
-  /* ... */
-}, { name: "approve_payout" });
-
-// or wrap existing functions (object key = recorded name):
-const tools = wrapTools({ approve_payout: approvePayout, escalate });
-
-// a decision that is not a tool call:
-note("routing", { reason: "amount over limit" });`;
-  }
+/** The numbered adoption steps, from the shared template. `verifyTool`: words added after the verify command. */
+export function steps(language: Language, framework: Framework, install: string, verifyCmd: string, verifyTool = ""): string {
+  const values: Record<string, string> = {
+    install,
+    fence: guidance.fence[language],
+    snippet: snippet(language, framework),
+    declare_tools: guidance.declare_tools[language],
+    verify: verifyCmd,
+    verify_tool: verifyTool,
+  };
+  return guidance.steps.map((line) => line.replace(/\{([a-z_]+)\}/g, (whole, key: string) => values[key] ?? whole)).join("\n");
 }
 
 /** A Python project's install and verify commands. Never a bare `pip install`: most systems'
@@ -207,7 +170,5 @@ export function pythonInstall(root: string, deps: string | null, env: Record<str
   return [`python3 -m venv .venv && .venv/bin/python -m pip install signafaide${record}`, ".venv/bin/signafaide verify"];
 }
 
-export const installCommand = (language: Language): string =>
-  language === "python" ? "uv add signafaide (uv projects), poetry add signafaide (Poetry), else: python3 -m venv .venv && .venv/bin/python -m pip install signafaide" : "npm install signafaide";
-export const verifyCommand = (language: Language): string =>
-  language === "python" ? "uv run signafaide verify, poetry run signafaide verify, or .venv/bin/signafaide verify" : "npx signafaide verify";
+export const installCommand = (language: Language): string => guidance.install[language];
+export const verifyCommand = (language: Language): string => guidance.verify[language];

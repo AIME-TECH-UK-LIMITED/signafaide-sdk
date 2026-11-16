@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ERRORS } from "../src/errors.js";
 import { note, record } from "../src/index.js";
 import { createServer } from "../src/mcp.js";
-import { installCommand, pythonInstall } from "../src/project.js";
+import { FRAMEWORKS, LANGUAGES, installCommand, pythonInstall, snippet, steps } from "../src/project.js";
 import { SKILL_BODY } from "../src/skill.js";
 import { deadUrl, useProject } from "./helpers.js";
 
@@ -400,5 +400,36 @@ describe("error catalog", () => {
     const codes = [...table.matchAll(/^\| `([a-z_]+)` \| (\d+) \|/gm)].map((m) => [m[1], Number(m[2])]);
     expect(codes.length).toBe(11);
     for (const [code, status] of codes) expect(ERRORS.find((e) => e.code === code)?.status).toBe(status);
+  });
+});
+
+describe("shared guidance file", () => {
+  // spec/guidance.json is read by this SDK and by the hosted service's remote MCP server.
+  const guidance = JSON.parse(fs.readFileSync(path.join(__dirname, "../../spec/guidance.json"), "utf8"));
+
+  it("lists the languages and frameworks the tools accept, with a snippet for each", () => {
+    expect(guidance.languages).toEqual([...LANGUAGES]);
+    expect(guidance.frameworks).toEqual([...FRAMEWORKS]);
+    for (const l of LANGUAGES) {
+      expect(typeof guidance.install[l]).toBe("string");
+      expect(typeof guidance.verify[l]).toBe("string");
+      expect(typeof guidance.snippets[l].plain).toBe("string");
+      for (const f of Object.keys(guidance.snippets[l])) expect(FRAMEWORKS).toContain(f);
+      for (const f of FRAMEWORKS) expect(snippet(l, f)).toBe(guidance.snippets[l][f] ?? guidance.snippets[l].plain);
+    }
+  });
+
+  it("fills every placeholder of the steps", () => {
+    for (const l of LANGUAGES)
+      for (const f of FRAMEWORKS) {
+        const out = steps(l, f, guidance.install[l], guidance.verify[l]);
+        expect(out).not.toMatch(/\{(install|fence|snippet|declare_tools|verify|verify_tool)\}/);
+        expect(out).toContain(`1. Install: ${guidance.install[l]}`);
+        expect(out).toContain(`then: ${guidance.verify[l]}. Its last line must start with PASS.`);
+      }
+  });
+
+  it("has no dash used as punctuation", () => {
+    expect(JSON.stringify(guidance)).not.toMatch(/[\u2013\u2014]/);
   });
 });

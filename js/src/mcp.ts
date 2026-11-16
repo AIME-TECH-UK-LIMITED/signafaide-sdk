@@ -12,7 +12,7 @@ import { claimLines, sandboxGone, sandboxView } from "./claim.js";
 import { explainError } from "./errors.js";
 import { verify } from "./index.js";
 import { plural } from "./plural.js";
-import { FRAMEWORKS, LANGUAGES, detectProject, installCommand, snippet, verifyCommand, type Framework, type Language } from "./project.js";
+import { FRAMEWORKS, LANGUAGES, detectProject, installCommand, steps as quickstartSteps, verifyCommand, type Framework, type Language } from "./project.js";
 import { configure, envOf, legalLinks, termsNotice, type Recorder } from "./runtime.js";
 import { KeysRequired, ANCHOR_WINDOW_MS } from "./verifier.js";
 import { replay, type Entry } from "./replay.js";
@@ -91,19 +91,9 @@ function sandboxPreview(rec: Recorder): string[] {
   ];
 }
 
-function steps(language: Language, framework: Framework, install: string, verifyCmd: string): string {
-  return [
-    `1. Install: ${install}`,
-    `2. Wrap the functions that act (pay, send, approve, delete, change). Each call then writes a signed decision record before it runs and an outcome record after:`,
-    "",
-    "```" + (language === "python" ? "python" : "ts"),
-    snippet(language, framework),
-    "```",
-    "",
-    `3. Record what you did not wrap. For each MCP server the agent uses, start it through the gateway in the agent's MCP configuration: {"command": "npx", "args": ["-y", "signafaide", "gateway", "--agent", "<agent name>", "--", <the server's command and arguments>]}. Then give the full list of the tools your code hands the agent, once at start-up: ${language === "python" ? 'signafaide.declare_tools(["tool_a", "tool_b"], agent="<agent name>")' : 'declareTools(["tool_a", "tool_b"], { agent: "<agent name>" })'}; a tool you did not wrap is declared as not recorded, and verify names it. The gateway records only the calls that go through it, so make it the only route to those tools.`,
-    `4. Run the agent once so a wrapped function is called, then: ${verifyCmd} (or the signafaide_verify tool). Its last line must start with PASS.`,
-  ].join("\n");
-}
+/** The adoption steps; the verify step names this server's own verify tool as well. */
+const steps = (language: Language, framework: Framework, install: string, verifyCmd: string): string =>
+  quickstartSteps(language, framework, install, verifyCmd, " (or the signafaide_verify tool)");
 
 /** Tool annotations (MCP hints). `service`: the tool may contact the signafAIde service. */
 const readOnly = (service: boolean) => ({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: service });
