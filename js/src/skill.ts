@@ -11,8 +11,30 @@ export const SKILL_DESCRIPTION =
 export const SELF_HOST_DOC = "https://signafaide.co.uk/docs/self-host";
 export const PRODUCTION_DOC = "https://signafaide.co.uk/docs/production";
 
+const LOCAL_TOOLS = `## MCP tools
+
+\`signafaide_setup\` previews the install command and code edit and changes nothing. \`signafaide_verify\` runs the checks, \`signafaide_status\` shows chains and keys, \`signafaide_records\` lists the records on this machine (metadata only, never inputs or outputs), \`signafaide_flush\` sends the waiting records once an API key exists and does nothing without one, \`signafaide_explain_error\` explains an error code. \`signafaide_init\` creates the external sandbox: call it only after the user has agreed, with \`confirm_user_agreed: true\` and \`user_words\` set to what the user wrote when they agreed. Without both it creates nothing.
+`;
+
+const PLUGIN_TOOLS = `## Commands
+
+Run these in the project folder (\`npx signafaide <command>\` in a TypeScript project, \`uv run signafaide <command>\` or \`.venv/bin/signafaide <command>\` in a Python one).
+
+- \`verify\` runs the checks on the local records and prints PASS or FAIL.
+- \`status\` shows the key, the agent chains, the records waiting to be sent and the quota.
+- \`replay\` shows what an agent saw and did, from the local records.
+- \`flush\` sends the waiting records once an API key exists, and does nothing without one.
+- \`init\` creates the external sandbox and from then on sends record hashes to the witness. It is the user's to run, as above: it accepts the Terms (https://signafaide.co.uk/legal/terms) and the Privacy notice (https://signafaide.co.uk/legal/privacy).
+- \`claim\` prints the link the user opens to claim the sandbox. Show it to the user; do not open it yourself.
+
+## MCP tools
+
+The plugin's \`signafaide\` MCP server is hosted (https://api.signafaide.co.uk/mcp). It reads nothing on this machine, needs no account and changes nothing. \`signafaide_quickstart\` gives the install command and code for a language and framework, \`signafaide_explain_error\` explains an error code, \`signafaide_check_auditor_link\` checks an auditor link, \`signafaide_verify_pack\` verifies a verification pack sent to it, and \`signafaide_service_keys\` gives the service's public keys. Recording and checking the project's own records use the commands above, on this machine.
+`;
+
 /** The skill text. `url`: the witness `agent setup --url` was given (a self-hosted witness). */
-export function skillBody(url?: string): string {
+/** `plugin`: the Claude Code plugin, which has the hosted MCP server and runs the command line instead of the local MCP server. */
+export function skillBody(url?: string, plugin = false): string {
   const witness = url
     ? `Once a person opts in, records go to the witness at \`${url}\` (set as \`SIGNAFAIDE_URL\` for the MCP server; the SDK reads it from the environment or \`.env\`).`
     : `Once a person opts in, records go to the hosted witness (https://api.signafaide.co.uk), or to a witness named by \`SIGNAFAIDE_URL\`.`;
@@ -61,10 +83,7 @@ When the user needs evidence for an auditor, a bank or a regulator, end your fin
 - Stored content: by default only hashes leave the machine and the inputs and outputs stay in \`.signafaide/chain/\`, which such a container loses with its disk. If the user will need them later (replay, an auditor reading inputs and outputs), turn on stored content (\`store_content=True\` in Python, \`storeContent: true\` in TypeScript; the witness keeps it encrypted, and live records need a plan that includes it) or keep \`.signafaide/chain/\` on a persistent volume. Say which one you chose.
 - A new container continues the chain with a signed start note. Call \`signafaide.stop()\` (Python) or \`await stop()\` (TypeScript) in the shutdown handler: it sends what is left and writes a signed stop note, so a routine restart is recorded as clean. A start with no stop note before it is shown as a warning, because records the earlier instance had not sent are not known.
 
-## MCP tools
-
-\`signafaide_setup\` previews the install command and code edit and changes nothing. \`signafaide_verify\` runs the checks, \`signafaide_status\` shows chains and keys, \`signafaide_records\` lists the records on this machine (metadata only, never inputs or outputs), \`signafaide_flush\` sends the waiting records once an API key exists and does nothing without one, \`signafaide_explain_error\` explains an error code. \`signafaide_init\` creates the external sandbox: call it only after the user has agreed, with \`confirm_user_agreed: true\` and \`user_words\` set to what the user wrote when they agreed. Without both it creates nothing.
-`;
+${plugin ? PLUGIN_TOOLS : LOCAL_TOOLS}`;
 }
 
 export const SKILL_BODY = skillBody();
@@ -72,6 +91,11 @@ export const SKILL_BODY = skillBody();
 /** SKILL.md for Claude Code (project skill and plugin). */
 export function claudeSkill(url?: string): string {
   return `---\nname: ${SKILL_NAME}\ndescription: ${SKILL_DESCRIPTION}\n---\n\n${skillBody(url)}`;
+}
+
+/** SKILL.md for the Claude Code plugin: the command line, and the hosted MCP server. */
+export function pluginSkill(): string {
+  return `---\nname: ${SKILL_NAME}\ndescription: ${SKILL_DESCRIPTION}\n---\n\n${skillBody(undefined, true)}`;
 }
 
 /** A Cursor project rule, applied when the agent judges it relevant. */

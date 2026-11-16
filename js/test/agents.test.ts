@@ -5,7 +5,7 @@ import { VERSION } from "../src/version.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AGENT_IDS, SETUP_NOTES, setup } from "../src/agents.js";
 import { main } from "../src/cli.js";
-import { SECTION_START, SKILL_BODY, claudeSkill, instructionsSection, skillBody } from "../src/skill.js";
+import { SECTION_START, SKILL_BODY, claudeSkill, instructionsSection, pluginSkill, skillBody } from "../src/skill.js";
 
 let root: string;
 let home: string;
@@ -224,6 +224,6 @@ describe("skill text", () => {
   });
 
   it("the plugin's SKILL.md is the generated one", () => {
-    expect(fs.readFileSync(path.join(__dirname, "../../plugin/skills/signafaide/SKILL.md"), "utf8")).toBe(claudeSkill());
+    expect(fs.readFileSync(path.join(__dirname, "../../plugin/skills/signafaide/SKILL.md"), "utf8")).toBe(pluginSkill());
   });
 });

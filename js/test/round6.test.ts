@@ -144,7 +144,7 @@ describe("#46: the release check", () => {
   // The files the check reads, copied into a scratch git repository so tags can be made freely.
   const FILES = [
     "scripts/release-check.mjs", "CHANGELOG.md", "js/package.json", "js/mcp/package.json", "js/src/version.ts", "js/src/http.ts",
-    "python/pyproject.toml", "python/src/signafaide/_version.py", "python/src/signafaide/http.py", "plugin/.mcp.json",
+    "python/pyproject.toml", "python/src/signafaide/_version.py", "python/src/signafaide/http.py",
     "plugin/.claude-plugin/plugin.json", "core/Cargo.toml", "verifier/Cargo.toml", "verifier/src/main.rs",
     "gemini-extension.json", ".cursor-plugin/plugin.json", "mcp.json", "README.md",
   ];

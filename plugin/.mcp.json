@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "signafaide": {
-      "command": "npx",
-      "args": ["-y", "signafaide-mcp@0.3.5"]
+      "type": "http",
+      "url": "https://api.signafaide.co.uk/mcp"
     }
   }
 }

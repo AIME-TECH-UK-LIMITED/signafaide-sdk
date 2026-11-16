@@ -63,7 +63,6 @@ const versions = {
   "python/src/signafaide/_version.py": read("python/src/signafaide/_version.py").match(/"([^"]+)"/)?.[1],
   "core/Cargo.toml": read("core/Cargo.toml").match(/^version = "([^"]+)"/m)?.[1],
   "verifier/Cargo.toml": read("verifier/Cargo.toml").match(/^version = "([^"]+)"/m)?.[1],
-  "plugin/.mcp.json": read("plugin/.mcp.json").match(/signafaide-mcp@([0-9][^"]*)/)?.[1],
   "plugin/.claude-plugin/plugin.json": JSON.parse(read("plugin/.claude-plugin/plugin.json")).version,
   "gemini-extension.json": JSON.parse(read("gemini-extension.json")).version,
   "gemini-extension.json (server)": read("gemini-extension.json").match(/signafaide-mcp@([0-9][^"]*)/)?.[1],
