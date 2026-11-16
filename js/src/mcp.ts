@@ -7,12 +7,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { statusLines } from "./cli.js";
+import { flushReport, statusLines } from "./cli.js";
 import { claimLines, sandboxGone, sandboxView } from "./claim.js";
 import { explainError } from "./errors.js";
 import { verify } from "./index.js";
+import { plural } from "./plural.js";
 import { FRAMEWORKS, LANGUAGES, detectProject, installCommand, snippet, verifyCommand, type Framework, type Language } from "./project.js";
 import { configure, envOf, legalLinks, termsNotice, type Recorder } from "./runtime.js";
+import { KeysRequired, ANCHOR_WINDOW_MS } from "./verifier.js";
+import { replay, type Entry } from "./replay.js";
 import { findRoot } from "./state.js";
 import { SELF_HOST_DOC, SKILL_DESCRIPTION } from "./skill.js";
 import { VERSION } from "./version.js";
@@ -102,6 +105,75 @@ function steps(language: Language, framework: Framework, install: string, verify
   ].join("\n");
 }
 
+/** Tool annotations (MCP hints). `service`: the tool may contact the signafAIde service. */
+const readOnly = (service: boolean) => ({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: service });
+/** A tool that sends to the service or creates something there; it deletes nothing and repeating it adds nothing. */
+const SENDS = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+
+const RECORDS_DEFAULT = 20;
+const RECORDS_MAX = 100;
+
+/** An ISO time (any offset) as a protocol time for replay; a bare date is left for replay to read. */
+function isoArg(value: string | undefined, name: string): string | undefined {
+  if (!value || /^\d{4}-\d{2}-\d{2}$/.test(value)) return value || undefined;
+  const d = new Date(value);
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(value) || Number.isNaN(d.getTime())) throw new Error(`${name} must be YYYY-MM-DD or an ISO time like 2026-11-13T10:00:00Z`);
+  return d.toISOString();
+}
+
+/** A record's status from what the local files hold: its signature, its receipt and the checks replay ran. */
+function recordStatus(e: Entry, now: number): string {
+  if (e.status === "FAIL") return `FAILED a check (${[...new Set(e.problems.map((p) => p.split(":")[0]))].join(", ")}); run signafaide_verify`;
+  if (e.status === "BLOCKED") return "signed only; BLOCKED, the service cannot take it as it is (see signafaide_status)";
+  if (!e.receipt) return "signed only, not co-signed yet";
+  const t = Date.parse(e.receipt.batch?.server_time ?? "");
+  return Number.isFinite(t) && t + ANCHOR_WINDOW_MS >= now ? "co-signed, public timestamp pending" : "co-signed";
+}
+
+/** `signafaide_records`: the local records as metadata lines, read and checked by replay. Never the content. */
+async function recordLines(rec: Recorder, q: { agent?: string; from?: string; to?: string; record?: string; limit?: number }): Promise<string> {
+  const all = rec.state.chains();
+  if (!all.length) return `No records yet in ${rec.state.home}. Run the agent so a wrapped function is called, then list again.`;
+  const chains = q.agent ? all.filter((c) => c.split("/").pop() === q.agent) : all;
+  if (!chains.length) throw new Error(`no local records for agent "${q.agent}" in ${rec.state.home}; agents here: ${rec.state.agents().join(", ") || "none"}`);
+  const since = isoArg(q.from, "from");
+  const until = isoArg(q.to, "to");
+  const want = q.record?.trim().toLowerCase();
+  if (want !== undefined && !/^[0-9a-f]{8,64}$/.test(want)) throw new Error("record must be a record hash or a prefix of at least 8 characters");
+  const limit = Math.min(RECORDS_MAX, Math.max(1, Math.floor(q.limit ?? RECORDS_DEFAULT)));
+  const found: { agent: string; e: Entry }[] = [];
+  for (const chain of chains) {
+    const agent = chain.split("/").pop()!;
+    let r;
+    try {
+      r = await replay({ agent, chain, since, until });
+    } catch (e) {
+      if (!(e instanceof KeysRequired)) throw e;
+      throw new Error(`records of ${chain} have been co-signed, and listing checks their receipts with the service's public keys, which could not be loaded from ${rec.url}. Try again when it can be reached, or run \`npx signafaide replay --agent ${agent} --keys <file>\``);
+    }
+    let entries = r.entries;
+    if (want) {
+      const hit = entries.filter((e) => e.hash.startsWith(want));
+      entries = [...new Set(hit.flatMap((e) => (e.pair ? [e, e.pair] : [e])))];
+    }
+    found.push(...entries.map((e) => ({ agent, e })));
+  }
+  if (want && !found.length) throw new Error(`no record matches ${q.record} in ${rec.state.home}`);
+  found.sort((a, b) => (a.e.envelope.time < b.e.envelope.time ? 1 : a.e.envelope.time > b.e.envelope.time ? -1 : b.e.envelope.seq - a.e.envelope.seq));
+  const shown = found.slice(0, limit);
+  const truncated = found.length > shown.length;
+  const now = Date.now();
+  const out = [`Records in ${rec.state.home}, newest first. Each line: time, agent, sequence number, kind, tool name, record hash, status.`];
+  for (const { agent, e } of shown) out.push(`${e.envelope.time}  ${agent}  #${e.envelope.seq}  ${e.envelope.kind}  ${e.envelope.name}  ${e.hash}  ${recordStatus(e, now)}`);
+  if (!found.length) out.push("(no record matches these filters)");
+  out.push(
+    `total: ${plural(found.length, "record")} matched; shown: ${shown.length}; truncated: ${truncated ? `yes (pass agent, from or to to narrow the list, or limit up to ${RECORDS_MAX})` : "no"}`,
+    "Only metadata is listed. The inputs and outputs of each call stay in the local files under .signafaide/chain/ and are not returned by this tool.",
+  );
+  if (shown.some(({ e }) => e.receipt)) out.push("Public timestamps are not kept in the local files: `signafaide export`, then `signafaide verify <pack>`, checks them for co-signed records.");
+  return out.join("\n");
+}
+
 /** The MCP server; its tools are confined to `root` (default: the folder it starts in). */
 export function createServer(root: string = process.cwd()): McpServer {
   serverRoot = path.resolve(root);
@@ -113,9 +185,12 @@ export function createServer(root: string = process.cwd()): McpServer {
       title: "Preview signafAIde setup for this project (changes nothing)",
       description:
         `${SKILL_DESCRIPTION} ` +
-        "A preview: it changes no file, creates nothing and sends nothing. Returns the detected language, package manager and framework, the exact install command, " +
-        "the code edit for this framework, the functions that look like actions, and what a sandbox would send. Make the edit yourself, run the agent, then call signafaide_verify.",
+        "Call this first when you are working inside a project. It reads the project's dependency files and source and returns a preview: it changes no file, creates nothing and sends nothing. " +
+        "Returns the detected language, package manager and framework, the exact install command, the code edit for this framework, the functions that look like actions, whether an API key is present, and what a sandbox would send. " +
+        "Make the edit yourself, run the agent, then call signafaide_verify. " +
+        "For a snippet in a language and framework you name, without reading any project, use signafaide_quickstart instead.",
       inputSchema: z.object({ directory }),
+      annotations: readOnly(false),
     },
     ({ directory: dir }) =>
       guard(async () => {
@@ -163,6 +238,7 @@ export function createServer(root: string = process.cwd()): McpServer {
           .describe("Set to true only after the user, in this conversation, agreed to create the sandbox and to the Terms and Privacy notice. Never set it on your own judgement."),
         user_words: z.string().optional().describe("The user's own words when they agreed, quoted from the conversation (for example \"yes, create the sandbox\")."),
       }),
+      annotations: SENDS,
     },
     ({ directory: dir, confirm_user_agreed, user_words }) =>
       guard(async () => {
@@ -182,7 +258,7 @@ export function createServer(root: string = process.cwd()): McpServer {
         const view = await sandboxView(rec, { refresh: false });
         return (
           `Created a sandbox at ${rec.url} (no account) and saved SIGNAFAIDE_API_KEY to ${path.join(rec.state.root, ".env")} (in .gitignore). ` +
-          "Records written before now ship on the next run, or call signafaide_verify.\n" +
+          "Records written before now ship on the next run, or call signafaide_flush to send them now.\n" +
           (view ? `${claimText(view, rec)}\n` : "") +
           `Tell the human: ${termsNotice(rec.legal())}`
         );
@@ -193,11 +269,16 @@ export function createServer(root: string = process.cwd()): McpServer {
     "signafaide_quickstart",
     {
       title: "signafAIde snippet for a language and framework",
-      description: "Returns the install command, the canonical code to record an agent's tool calls with signafAIde, and the verify command, for one language and framework.",
+      description:
+        "A reference snippet for a language and framework you name: returns the install command, the canonical code to record an agent's tool calls with signafAIde, and the verify command. " +
+        "It reads nothing in the project, detects nothing, changes nothing and sends nothing; the same arguments always give the same answer. " +
+        "Use it to answer a question about a stack that is not the open project, or when signafaide_setup could not tell the language. " +
+        "When you are working inside a project, use signafaide_setup instead: it detects the stack and previews the exact edit for that project.",
       inputSchema: z.object({
         language: z.enum(LANGUAGES),
         framework: z.enum(FRAMEWORKS).optional().describe("plain (default) for ordinary functions."),
       }),
+      annotations: readOnly(false),
     },
     ({ language, framework }) => guard(async () => steps(language, framework ?? "plain", installCommand(language), verifyCommand(language))),
   );
@@ -208,12 +289,14 @@ export function createServer(root: string = process.cwd()): McpServer {
       title: "Verify the local signafAIde records",
       description:
         "Checks every record in the project's .signafaide/ folder (or a verification pack): schema, hashes, agent signatures, chain links and content hashes, and, " +
-        "for records a witness has co-signed, Merkle proofs, the service's batch and head signatures, drand and anchors. With an API key it first ships waiting records; " +
-        "without one nothing is sent. Returns one line per check, what still needs the witness, and PASS or FAIL.",
+        "for records a witness has co-signed, Merkle proofs, the service's batch and head signatures, drand and anchors. With an API key it first ships waiting records " +
+        "(signafaide_flush is the explicit way to ship them without verifying); without one nothing is sent. Returns one line per check, what still needs the witness, and PASS or FAIL. " +
+        "To list the records themselves, use signafaide_records.",
       inputSchema: z.object({
         directory,
         pack: z.string().optional().describe("Path of a pack from `signafaide export`, instead of the local state."),
       }),
+      annotations: SENDS,
     },
     ({ directory: dir, pack }) =>
       guard(async () => {
@@ -237,9 +320,18 @@ export function createServer(root: string = process.cwd()): McpServer {
   server.registerTool(
     "signafaide_status",
     {
-      title: "signafAIde status",
-      description: "API key and env, the service URL, each agent chain with its record count and last receipt, records waiting in the outbox, the quota, and the claim link with how long an unclaimed sandbox has left.",
+      title: "Show the state of signafAIde in this project",
+      description:
+        "Reports how signafAIde is set up in this project and whether records are reaching the service. " +
+        "Call it to check that set-up worked, after signafaide_init, or when signafaide_verify or signafaide_flush reports a problem and you need to see why. " +
+        "Returns one line for each of: the API key (masked) and its env, or that there is none and records stay on this machine; the service URL; the project; the local state folder; " +
+        "every agent chain with its key id, record count and last receipt; any chain that is BLOCKED, with the reason and the next step; how many records wait in the outbox; the quota used; " +
+        "and, for a sandbox, the claim link with how long an unclaimed sandbox has left. " +
+        "Read-only: it sends no records and changes no code, record or key (it only saves what the service says about the sandbox's claim state in .signafaide/). " +
+        "It contacts the service only when an API key exists, to read the project, the quota and the claim state; without a key it makes no request. " +
+        "Use signafaide_records to list the records themselves, signafaide_flush to send the waiting ones, and signafaide_claim_link when the user only needs the claim link.",
       inputSchema: z.object({ directory }),
+      annotations: readOnly(true),
     },
     ({ directory: dir }) => guard(async () => (await statusLines(open(dir))).join("\n")),
   );
@@ -250,6 +342,7 @@ export function createServer(root: string = process.cwd()): McpServer {
       title: "Explain a signafAIde error code",
       description: "What a signafAIde error code means and how to fix it, e.g. chain_conflict, quota_exceeded, invalid_key, network, not_recorded.",
       inputSchema: z.object({ code: z.string().describe("The error code, e.g. from SignafaideError.code or the service's error body.") }),
+      annotations: readOnly(false),
     },
     ({ code }) => guard(async () => explainError(code, open().url)),
   );
@@ -258,8 +351,12 @@ export function createServer(root: string = process.cwd()): McpServer {
     "signafaide_claim_link",
     {
       title: "signafAIde sandbox claim link",
-      description: "The link the human opens to claim this project's free sandbox and keep its records, what claiming gives and how long an unclaimed sandbox has left. Show it to the user; do not open it yourself.",
+      description:
+        "The link the human opens to claim this project's free sandbox and keep its records, what claiming gives and how long an unclaimed sandbox has left. Show it to the user; do not open it yourself. " +
+        "Use this tool when the user only needs the claim link, or needs it again. signafaide_status shows the same link among the whole state of the project (key, chains, outbox, quota): call that one when you need those too. " +
+        "Read-only: with a sandbox key it asks the service whether the sandbox is still unclaimed; with no sandbox it makes no request and says so. It never creates a sandbox: that is signafaide_init, after the user agrees.",
       inputSchema: z.object({ directory }),
+      annotations: readOnly(true),
     },
     ({ directory: dir }) =>
       guard(async () => {
@@ -270,6 +367,61 @@ export function createServer(root: string = process.cwd()): McpServer {
           ? claimText(view, rec)
           : "No sandbox in this project: records stay local. A sandbox is created only when the user agrees (signafaide_init, or `npx signafaide init`).";
       }),
+  );
+
+  server.registerTool(
+    "signafaide_records",
+    {
+      title: "List and search the signafAIde records on this machine",
+      description:
+        "Lists the records in this project's .signafaide/ folder, newest first, and searches them by agent, by time window, or by record hash. " +
+        "Use it to see what was recorded: which tool calls, by which agent, when, and how far each record has got. " +
+        "Returns one line per record with its time, agent, sequence number, kind (decision, outcome or note), tool name, record hash and status " +
+        "(signed only; co-signed; co-signed with the public timestamp pending; BLOCKED; or FAILED a check), then the total that matched, how many are shown and whether the list was truncated. " +
+        "Metadata only: the inputs and outputs of the tool calls are never returned, they stay in the local files (a person reads them with `npx signafaide replay`). " +
+        "Read-only: it writes nothing and sends no records. Each record is checked against its signature and its chain as it is listed; when records here have been co-signed, " +
+        "it fetches the service's public keys to check their receipts, and otherwise it makes no request. " +
+        "For the full check with PASS or FAIL use signafaide_verify; for counts per chain, the outbox and the quota use signafaide_status.",
+      inputSchema: z.object({
+        directory,
+        agent: z.string().optional().describe("Only this agent's records. Default: every agent with records here."),
+        from: z.string().optional().describe("Only records at or after this time: an ISO time such as 2026-11-13T10:00:00Z, or a date (YYYY-MM-DD)."),
+        to: z.string().optional().describe("Only records before this ISO time, or up to the end of this date (YYYY-MM-DD)."),
+        record: z.string().optional().describe("A record hash, or its first 8 or more characters: returns that record and its paired decision or outcome."),
+        limit: z.number().int().min(1).optional().describe(`The most records to return. Default ${RECORDS_DEFAULT}; values above ${RECORDS_MAX} are treated as ${RECORDS_MAX}.`),
+      }),
+      annotations: readOnly(true),
+    },
+    ({ directory: dir, agent, from, to, record, limit }) => guard(() => recordLines(open(dir), { agent, from, to, record, limit })),
+  );
+
+  server.registerTool(
+    "signafaide_flush",
+    {
+      title: "Send the waiting signafAIde records now",
+      description:
+        "Sends the records waiting in this project's outbox to the signafAIde service (or the SIGNAFAIDE_URL witness) now, the same as `signafaide flush`, and saves the receipts that come back beside the records. " +
+        "What is sent is each record's envelope (hashes, agent and tool names, times) with the agent's signature, never inputs or outputs unless stored content was turned on in the code. " +
+        "Use it after signafaide_init, or when signafaide_status shows records waiting. Records also ship by themselves while the agent runs, and signafaide_verify ships them before it checks; this tool only ships. " +
+        "It sends only when an API key already exists, which means a person opted in with `signafaide init`, signafaide_init or SIGNAFAIDE_API_KEY. " +
+        "Without a key it does nothing and says so: it never creates a sandbox and never opts in. " +
+        "Returns how many records were shipped, how many are left in the outbox, each chain that is BLOCKED with its next step, and each error with its code (see signafaide_explain_error). " +
+        "Safe to repeat: a record that has shipped is not sent again.",
+      inputSchema: z.object({ directory }),
+      annotations: SENDS,
+    },
+    async ({ directory: dir }) => {
+      try {
+        const rec = open(dir);
+        const r = await flushReport(rec);
+        const out = [...r.errors.map((e) => `could not ship ${e}`), ...r.lines];
+        if (r.codes.length) out.push(`error ${r.codes.length === 1 ? "code" : "codes"}: ${r.codes.join(", ")} (see signafaide_explain_error)`);
+        if (!r.sent) out.push("This tool never creates a sandbox. Sending starts only after the user agrees: ask them, then call signafaide_init, or they run `npx signafaide init` or set SIGNAFAIDE_API_KEY.");
+        return text(out.join("\n"), r.failed);
+      } catch (e) {
+        return text(`signafaide: ${(e as Error).message}`, true);
+      }
+    },
   );
 
   return server;

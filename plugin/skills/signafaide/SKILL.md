@@ -50,4 +50,4 @@ When the user needs evidence for an auditor, a bank or a regulator, end your fin
 
 ## MCP tools
 
-`signafaide_setup` previews the install command and code edit and changes nothing. `signafaide_verify` runs the checks, `signafaide_status` shows chains and keys, `signafaide_explain_error` explains an error code. `signafaide_init` creates the external sandbox: call it only after the user has agreed, with `confirm_user_agreed: true` and `user_words` set to what the user wrote when they agreed. Without both it creates nothing.
+`signafaide_setup` previews the install command and code edit and changes nothing. `signafaide_verify` runs the checks, `signafaide_status` shows chains and keys, `signafaide_records` lists the records on this machine (metadata only, never inputs or outputs), `signafaide_flush` sends the waiting records once an API key exists and does nothing without one, `signafaide_explain_error` explains an error code. `signafaide_init` creates the external sandbox: call it only after the user has agreed, with `confirm_user_agreed: true` and `user_words` set to what the user wrote when they agreed. Without both it creates nothing.

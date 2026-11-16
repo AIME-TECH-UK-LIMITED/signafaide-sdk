@@ -9,6 +9,31 @@ The record format changed between v0.1.1 and v0.1.2 (salted content hashes) and 
 (packs name their project), before any public release. Records and packs written by a version
 verify with that version and later ones unless an entry below says otherwise.
 
+## v0.3.3 (2026-11-16)
+
+The MCP server gains two tools and clearer boundaries between the others. No change to records, packs, the verifiers or the protocol.
+
+- New MCP tool `signafaide_records`: lists and searches the records on this machine by agent, time
+  window (`from`, `to`) or record hash, newest first, 20 by default and 100 at most. Each line has the
+  record's time, agent, sequence number, kind, tool name, record hash and status (signed only,
+  co-signed, co-signed with the public timestamp pending, BLOCKED, or failed a check), followed by the
+  total matched and whether the list was truncated. It returns metadata only: inputs and outputs stay in
+  the local files. It reads the chain with the same code as `signafaide replay`, writes nothing and
+  sends no records.
+- New MCP tool `signafaide_flush`: sends the records waiting in the outbox now, with the same code and
+  the same words as `signafaide flush` (shipped, left in the outbox, BLOCKED chains, errors with their
+  codes). Without an API key it sends nothing and says so; it never creates a sandbox.
+- Every MCP tool now carries annotations (read-only, destructive, idempotent, open-world), so a client
+  can tell the tools that only read from the three that send (`signafaide_init`, `signafaide_verify`,
+  `signafaide_flush`). No tool is destructive.
+- Sharper tool descriptions. `signafaide_setup` is for work inside a project (it reads the project and
+  previews the exact edit); `signafaide_quickstart` is a reference snippet for a language and framework
+  the agent names and reads nothing. `signafaide_status` says what it returns, that it is read-only and
+  that it contacts the service only when a key exists; `signafaide_claim_link` is the tool for when the
+  person only needs the claim link. `signafaide_verify` names `signafaide_flush` as the explicit way to
+  ship waiting records. `signafaide_init` is unchanged.
+- The agent skill, the Claude Code plugin and the READMEs name the two new tools.
+
 ## v0.3.2 (2026-11-15)
 
 The claim step says why to claim a sandbox and how long is left. No change to records, packs or the verifiers.

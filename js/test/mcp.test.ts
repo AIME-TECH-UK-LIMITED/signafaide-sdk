@@ -47,7 +47,7 @@ describe("mcp server", () => {
     expect(process.cwd()).toBe(fs.realpathSync(ctx.root));
   });
 
-  it("lists the seven tools, each with a description", async () => {
+  it("lists the nine tools, each with a description and annotations", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([
       "signafaide_setup",
@@ -57,7 +57,36 @@ describe("mcp server", () => {
       "signafaide_status",
       "signafaide_explain_error",
       "signafaide_claim_link",
+      "signafaide_records",
+      "signafaide_flush",
     ]);
+    const hints = Object.fromEntries(tools.map((t) => [t.name.replace("signafaide_", ""), t.annotations]));
+    const readOnly = (service: boolean) => ({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: service });
+    const sends = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+    expect(hints).toEqual({
+      setup: readOnly(false),
+      init: sends,
+      quickstart: readOnly(false),
+      verify: sends,
+      status: readOnly(true),
+      explain_error: readOnly(false),
+      claim_link: readOnly(true),
+      records: readOnly(true),
+      flush: sends,
+    });
+    const by = Object.fromEntries(tools.map((t) => [t.name.replace("signafaide_", ""), t.description!]));
+    // Each tool names the sibling to use instead.
+    expect(by.setup).toContain("use signafaide_quickstart instead");
+    expect(by.quickstart).toContain("It reads nothing in the project");
+    expect(by.quickstart).toContain("use signafaide_setup instead");
+    expect(by.status).toContain("without a key it makes no request");
+    expect(by.status).toContain("signafaide_claim_link when the user only needs the claim link");
+    expect(by.claim_link).toContain("when the user only needs the claim link");
+    expect(by.verify).toContain("With an API key it first ships waiting records");
+    expect(by.verify).toContain("signafaide_flush");
+    expect(by.records).toContain("the inputs and outputs of the tool calls are never returned");
+    expect(by.flush).toContain("it never creates a sandbox and never opts in");
+    for (const d of Object.values(by)) expect(d).not.toMatch(/[\u2013\u2014]/);
     for (const t of tools) expect(t.description!.length).toBeGreaterThan(60);
     expect(tools[0].description).toContain("audit");
     expect(tools[0].description).toContain("changes no file, creates nothing and sends nothing");
@@ -253,6 +282,103 @@ describe("mcp server", () => {
     [out] = await call("signafaide_status");
     expect(out).toContain("(env test)");
     expect(out).toContain("quota: 0 of");
+  });
+
+  it("records: lists and filters the local records, metadata only", async () => {
+    let [out, err] = await call("signafaide_records");
+    expect(out).toContain("No records yet");
+    write("requirements.txt", "");
+    await call("signafaide_setup");
+    record((claim: string) => ({ paid: `payout-for-${claim}` }), { name: "approve_payout", agent: "claims-bot" })("secret-claim-777");
+    record((to: string) => `sent to ${to}`, { name: "send_email", agent: "mail-bot" })("private@example.org");
+    note("why", { reason: "confidential-reason" }, { agent: "claims-bot" });
+    [out, err] = await call("signafaide_records");
+    expect(err).toBe(false);
+    const rows = (o: string) => o.split("\n").filter((l) => /^\d{4}-\d{2}-\d{2}T/.test(l));
+    expect(rows(out)).toHaveLength(5);
+    for (const l of rows(out)) expect(l).toMatch(/^\S+Z  (claims-bot|mail-bot)  #\d+  (decision|outcome|note)  (approve_payout|send_email|why)  [0-9a-f]{64}  signed only, not co-signed yet$/);
+    expect(out).toContain("total: 5 records matched; shown: 5; truncated: no");
+    expect(out).toContain("The inputs and outputs of each call stay in the local files");
+    // metadata only: no input, output or note content
+    for (const secret of ["secret-claim-777", "payout-for", "private@example.org", "sent to", "confidential-reason"]) expect(out).not.toContain(secret);
+    expect(JSON.stringify(ctx.rec.state.readAll(ctx.rec.state.chains()[0]))).toMatch(/secret-claim-777|private@example.org/);
+    expect(ctx.service.calls).toEqual([]);
+
+    [out] = await call("signafaide_records", { agent: "mail-bot" });
+    expect(rows(out)).toHaveLength(2);
+    expect(out).not.toContain("claims-bot");
+    expect(out).toContain("total: 2 records matched; shown: 2; truncated: no");
+    [out, err] = await call("signafaide_records", { agent: "nobody" });
+    expect(err).toBe(true);
+    expect(out).toContain('no local records for agent "nobody"');
+
+    [out] = await call("signafaide_records", { limit: 2 });
+    expect(rows(out)).toHaveLength(2);
+    expect(out).toContain("total: 5 records matched; shown: 2; truncated: yes");
+    [out] = await call("signafaide_records", { limit: 5000 });
+    expect(rows(out)).toHaveLength(5);
+
+    [out] = await call("signafaide_records", { from: "2999-01-01" });
+    expect(rows(out)).toHaveLength(0);
+    expect(out).toContain("total: 0 records matched; shown: 0; truncated: no");
+    [out] = await call("signafaide_records", { from: "2000-01-01T00:00:00+01:00", to: new Date(Date.now() + 60_000).toISOString() });
+    expect(rows(out)).toHaveLength(5);
+    [out, err] = await call("signafaide_records", { from: "yesterday" });
+    expect(err).toBe(true);
+    expect(out).toContain("from must be YYYY-MM-DD or an ISO time");
+
+    [out] = await call("signafaide_records", { agent: "claims-bot" });
+    const decision = rows(out).find((l) => l.includes("  decision  "))!;
+    const hash = decision.split("  ")[5];
+    [out] = await call("signafaide_records", { record: hash.slice(0, 12) });
+    expect(rows(out)).toHaveLength(2); // the decision and its outcome
+    expect(rows(out).map((l) => l.split("  ")[3]).sort()).toEqual(["decision", "outcome"]);
+    [out, err] = await call("signafaide_records", { record: "0".repeat(64) });
+    expect(err).toBe(true);
+    expect(out).toContain("no record matches");
+    [, err] = await call("signafaide_records", { record: "abc" });
+    expect(err).toBe(true);
+    expect(fs.existsSync(path.join(ctx.root, ".env"))).toBe(false);
+    expect(ctx.service.calls).toEqual([]);
+  });
+
+  it("flush: without a key it sends nothing and says why; with one it ships and reports", async () => {
+    write("requirements.txt", "");
+    await call("signafaide_setup");
+    let [out, err] = await call("signafaide_flush");
+    expect(err).toBe(false);
+    expect(out).toContain("no API key: nothing was sent; 0 records stay local");
+    record((x: number) => x * 2, { name: "approve_payout" })(2);
+    note("why", { reason: "test" });
+    [out, err] = await call("signafaide_flush");
+    expect(err).toBe(false);
+    expect(out.split("\n")[0]).toBe("no API key: nothing was sent; 3 records stay local. Run `signafaide init` (or set SIGNAFAIDE_API_KEY) to send hashes");
+    expect(out).toContain("This tool never creates a sandbox. Sending starts only after the user agrees");
+    expect(ctx.service.calls).toEqual([]);
+    expect(fs.existsSync(path.join(ctx.root, ".env"))).toBe(false);
+
+    [out] = await call("signafaide_init", AGREED);
+    expect(out).toContain("call signafaide_flush to send them now");
+    [out, err] = await call("signafaide_flush");
+    expect(err).toBe(false);
+    expect(out).toBe("shipped 3 records, 0 left in the outbox");
+    expect(ctx.service.calls.filter((c) => c === "POST /v1/sandbox")).toHaveLength(1);
+    [out] = await call("signafaide_flush");
+    expect(out).toBe("shipped 0 records, 0 left in the outbox");
+    [out] = await call("signafaide_status");
+    expect(out).toContain("outbox: 0 records waiting");
+    [out] = await call("signafaide_records");
+    expect(out.split("\n").filter((l) => l.endsWith("  co-signed, public timestamp pending"))).toHaveLength(3);
+    expect(out).toContain("Public timestamps are not kept in the local files");
+
+    // The service cannot be reached: the error is reported, with its code, and the records wait.
+    record((x: number) => x + 1, { name: "approve_payout" })(1);
+    await ctx.service.close();
+    [out, err] = await call("signafaide_flush");
+    expect(err).toBe(true);
+    expect(out).toMatch(/^could not ship /);
+    expect(out).toMatch(/shipped 0 records, [12] left in the outbox/);
+    expect(out).toContain("(see signafaide_explain_error)");
   });
 
   it("explains every error code", async () => {

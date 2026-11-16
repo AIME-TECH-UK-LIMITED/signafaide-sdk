@@ -226,7 +226,7 @@ describe("the claim step", () => {
     const url = saved().claim_url;
     const step = ["Give the human the claim link and what follows it, in these words; do not open the link yourself:", `claim: ${url}`, WHY, left(30, at)];
     expect(created.split("\n")).toEqual([
-      `Created a sandbox at ${ctx.service.url} (no account) and saved SIGNAFAIDE_API_KEY to ${path.join(fs.realpathSync(ctx.root), ".env")} (in .gitignore). Records written before now ship on the next run, or call signafaide_verify.`,
+      `Created a sandbox at ${ctx.service.url} (no account) and saved SIGNAFAIDE_API_KEY to ${path.join(fs.realpathSync(ctx.root), ".env")} (in .gitignore). Records written before now ship on the next run, or call signafaide_flush to send them now.`,
       ...step,
       expect.stringMatching(/^Tell the human: By creating a sandbox you agree/),
     ]);

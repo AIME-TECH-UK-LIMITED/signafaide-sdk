@@ -114,6 +114,25 @@ export async function statusLines(rec: Recorder): Promise<string[]> {
   return lines;
 }
 
+/** `flush`, also run by the MCP `signafaide_flush` tool: ship the outbox now and say what happened.
+ * `errors` has one line per chain (or API key) that could not ship. With no API key nothing is sent. */
+export async function flushReport(rec: Recorder): Promise<{ lines: string[]; errors: string[]; codes: string[]; failed: boolean; sent: boolean }> {
+  const r = await rec.flush();
+  const errors = Object.entries(r.errors).map(([agent, e]) => `${agent}: ${e.message}`);
+  const codes = [...new Set(Object.values(r.errors).map((e) => e.code))];
+  if (!rec.apiKey) {
+    return { lines: [`no API key: nothing was sent; ${plural(r.left, "record")} stay local. Run \`signafaide init\` (or set SIGNAFAIDE_API_KEY) to send hashes`], errors, codes, failed: false, sent: false };
+  }
+  // Chains the service cannot take (too_old, chain_exists) stay on this machine: not "left to ship".
+  const local = Object.entries(r.errors)
+    .filter(([, e]) => e.code === "too_old" || e.code === "chain_exists")
+    .reduce((n, [c]) => n + rec.state.draftCount(c), 0);
+  const lines = [`shipped ${plural(r.shipped, "record")}, ${r.left - local} left in the outbox` + (local ? `; ${plural(local, "record")} kept on this machine only (see above)` : "")];
+  for (const b of rec.diagnose()) lines.push(`BLOCKED ${b.chain}: ${plural(b.records, "record")} cannot ship as they are. Next: ${b.next}`);
+  if (rec.apiKey.startsWith("sfa_live_") && Object.values(r.errors).some((e) => e.code === "quota_exceeded")) lines.push(UPGRADE_LIMIT(siteOf(rec.url)));
+  return { lines, errors, codes, failed: errors.length > 0, sent: true };
+}
+
 export const COMMANDS: Record<string, Command> = {
   init: {
     help:
@@ -485,21 +504,10 @@ export const COMMANDS: Record<string, Command> = {
   flush: {
     help: "ship the outbox now",
     async run() {
-      const rec = recorder();
-      const r = await rec.flush();
-      for (const [agent, e] of Object.entries(r.errors)) err(`${agent}: ${e.message}`);
-      if (!rec.apiKey) {
-        out(`no API key: nothing was sent; ${plural(r.left, "record")} stay local. Run \`signafaide init\` (or set SIGNAFAIDE_API_KEY) to send hashes`);
-        return 0;
-      }
-      // Chains the service cannot take (too_old, chain_exists) stay on this machine: not "left to ship".
-      const local = Object.entries(r.errors)
-        .filter(([, e]) => e.code === "too_old" || e.code === "chain_exists")
-        .reduce((n, [c]) => n + rec.state.draftCount(c), 0);
-      out(`shipped ${plural(r.shipped, "record")}, ${r.left - local} left in the outbox` + (local ? `; ${plural(local, "record")} kept on this machine only (see above)` : ""));
-      for (const b of rec.diagnose()) out(`BLOCKED ${b.chain}: ${plural(b.records, "record")} cannot ship as they are. Next: ${b.next}`);
-      if (rec.apiKey.startsWith("sfa_live_") && Object.values(r.errors).some((e) => e.code === "quota_exceeded")) out(UPGRADE_LIMIT(siteOf(rec.url)));
-      return Object.keys(r.errors).length ? 1 : 0;
+      const r = await flushReport(recorder());
+      for (const e of r.errors) err(e);
+      for (const l of r.lines) out(l);
+      return r.failed ? 1 : 0;
     },
   },
 };
