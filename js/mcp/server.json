@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "uk.co.signafaide/signafaide",
   "title": "signafAIde",
-  "description": "Signed, tamper-evident records of AI agent tool calls: set up, record, verify and check coverage.",
+  "description": "Audit evidence for AI agent tool calls: signed, independently co-signed, verifiable offline.",
   "websiteUrl": "https://signafaide.co.uk",
   "repository": {
     "url": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk",

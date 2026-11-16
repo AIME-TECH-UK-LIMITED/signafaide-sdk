@@ -1,7 +1,7 @@
 {
   "name": "signafaide",
   "version": "0.3.2",
-  "description": "Signed, chained records of what your AI agents decided. Hash-only by default.",
+  "description": "Audit evidence for AI agents: signed, independently co-signed records of every tool call, verifiable offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {

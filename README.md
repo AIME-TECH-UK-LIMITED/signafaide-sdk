@@ -1,6 +1,6 @@
 # signafAIde SDK
 
-signafAIde records the decisions AI agents make. Each record is signed with the agent's own key and chained on the machine that wrote it. Once a person opts in, a witness (the signafAIde service, or one you host) co-signs it and timestamps it publicly, so neither side can forge or edit a record alone. It attests integrity and timing, never whether a decision was right.
+signafAIde gives you audit evidence of what your AI agents did, for EU AI Act record-keeping, ISO/IEC 42001 and SOC 2. Each tool call is recorded, signed with the agent's own key and chained on the machine that wrote it. Once a person opts in, an independent witness (the signafAIde service, or one you host) co-signs it and timestamps it publicly, so neither side can forge, edit or remove a record alone, and an auditor can check it offline without trusting either. It attests integrity and timing, never whether a decision was right.
 
 - **Free on its own:** the SDK and the verifiers are Apache-2.0 and need no account. On their own they give you a signed, chained, offline-verifiable record of every tool call, on your machine. The service adds what one party cannot give itself: an independent second signature, two public time bounds, and a check that no record is missing.
 - **Local first:** with no API key, records are signed, chained and verified in `.signafaide/`, and nothing is sent. Sending starts only when a person runs `signafaide init` (a sandbox: no account, email or card) or sets `SIGNAFAIDE_API_KEY`.

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "signafaide"
 version = "0.3.2"
-description = "Signed, chained records of what your AI agents decided. Hash-only by default."
+description = "Audit evidence for AI agents: signed, independently co-signed records of every tool call, verifiable offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }

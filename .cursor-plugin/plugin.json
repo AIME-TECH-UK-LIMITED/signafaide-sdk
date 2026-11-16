@@ -1,7 +1,7 @@
 {
   "name": "signafaide",
   "version": "0.3.2",
-  "description": "Signed, tamper-evident records of AI agent tool calls: an MCP server to set it up and verify it, and a skill that says when to use it.",
+  "description": "Audit evidence for AI agent tool calls: each one signed, co-signed by an independent witness and publicly timestamped, so an auditor can verify it offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2. An MCP server to set it up and verify it, and a skill that says when to use it.",
   "author": { "name": "AIMETECH" },
   "homepage": "https://signafaide.co.uk",
   "repository": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk",

@@ -1,7 +1,7 @@
 {
   "name": "signafaide",
   "version": "0.3.2",
-  "description": "Signed, tamper-evident records of AI agent tool calls: set up, record, verify and check coverage.",
+  "description": "Audit evidence for AI agent tool calls: each one signed, co-signed by an independent witness and publicly timestamped, so an auditor can verify it offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2.",
   "mcpServers": {
     "signafaide": {
       "command": "npx",
