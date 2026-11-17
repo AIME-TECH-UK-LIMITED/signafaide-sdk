@@ -167,7 +167,14 @@ def test_middleware_and_langsmith_spans_built_after_the_run_record_a_call_once(t
     spec.loader.exec_module(frameworks)
     script = frameworks.LANGSMITH
     (tmp_path / ".git").mkdir()
-    out = subprocess.run([sys.executable, "-c", script, "middleware"], cwd=tmp_path, capture_output=True, text=True, timeout=120)
+    # The child runs in another folder: it finds this package where this process imported it
+    # from, whatever made it importable here (an install, or a relative PYTHONPATH such as src).
+    import langchain_signafaide
+
+    here = str(pathlib.Path(langchain_signafaide.__file__).resolve().parents[1])
+    paths = [here] + [str(pathlib.Path(p).resolve()) for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(paths)}
+    out = subprocess.run([sys.executable, "-c", script, "middleware"], cwd=tmp_path, capture_output=True, text=True, timeout=120, env=env)
     assert out.returncode == 0, out.stderr[-2000:]
     got = json.loads(out.stdout.strip().splitlines()[-1])
     assert got["inside"] == 1

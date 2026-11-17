@@ -31,6 +31,7 @@ class FakeService:
     def __init__(self):
         self.key = SigningKey.generate()
         self.key_doc = {"key_id": self.key.key_id, "public_key": b64url(self.key.public_key), "valid_from": "2020-01-01T00:00:00.000Z", "valid_to": None}
+        self.extra_keys = []  # more keys served after key_doc (a rotation in progress)
         self.projects = {}  # api_key -> project
         self.calls = []
         self.fail = None  # (status, code, message) returned once for the next /v1/records
@@ -41,6 +42,16 @@ class FakeService:
         self.sandbox_n = 0
         self.sandbox_days = 30  # days an unclaimed sandbox is kept; None: a witness that sends no expires_at (an older one)
         self.registrations = []
+        #: Tool-call checks (§3.5, §10, §11): the signed rule set versions per project, the shared
+        #: list's signed updates, and how the witness answers a strict decision.
+        self.rule_items = {}  # project -> [{rules, sig, service_key_id}], oldest first
+        self.list_updates = []  # [{list, sig, service_key_id}]
+        self.list_entries = []
+        self.rules_fetches = []  # (version query, If-None-Match) of every GET /v1/rules
+        self.no_ruling = False  # a witness that does not rule: receipts without a ruling
+        self.ruling_error = None  # e.g. "rules_unavailable": the receipt says why there is no ruling
+        self.disclosed = {}  # record_hash -> (disclosed, disclosed_salt) the witness received
+        self.req_headers = {}
         self.client_ids = []  # X-Signafaide-Client of every request
         self.events = []
         handler = self._handler()
@@ -74,7 +85,7 @@ class FakeService:
         if method == "GET" and path == "/healthz":
             return 200, "ok"
         if method == "GET" and path == "/.well-known/signafaide-keys.json":
-            return 200, {"keys": [self.key_doc]}
+            return 200, {"keys": [self.key_doc, *self.extra_keys]}
         if method == "POST" and path == "/v1/sandbox":
             self.sandbox_n += 1
             key = "sfa_test_" + f"{self.sandbox_n:032d}"
@@ -144,6 +155,22 @@ class FakeService:
             return 200, {"period": "2026-11", "used": prj["used"], "quota": 1000, "plan": prj.get("plan", "free")}
         if method == "GET" and path == "/v1/export":
             return 200, self.export(prj, query.get("agent"), query.get("from"), query.get("to"))
+        if method == "GET" and path == "/v1/rules":
+            items = self.rule_items.get(prj["project"], [])
+            self.rules_fetches.append((query.get("version"), self.req_headers.get("If-None-Match")))
+            if not items:
+                return 200, {"rules": None}
+            item = items[-1] if query.get("version") is None else next((i for i in items if str(i["rules"]["version"]) == query["version"]), None)
+            if item is None:
+                return err(404, "not_found", "No such version.")
+            if self.req_headers.get("If-None-Match") == f'"{hash_json(item["rules"])}"':
+                return 304, ""
+            return 200, item
+        if method == "GET" and path == "/v1/fingerprints":
+            since = query.get("since")
+            if since is None:
+                return 200, {"snapshot": self.list_snapshot(), "updates": []}
+            return 200, {"snapshot": None, "updates": [u for u in self.list_updates if u["list"]["seq"] > int(since)][:1000]}
         if method == "POST" and path == "/v1/experiments":
             self.experiments = getattr(self, "experiments", []) + [body]
             return 201, {"id": f"exp_{len(self.experiments)}", "n": len(body["rows"]), "url": f"{self.url}/app/experiments/{len(self.experiments)}"}
@@ -180,6 +207,15 @@ class FakeService:
                 return err(400, "bad_signature", "The record signature does not verify; sign record_hash with domain 'record'.")
             if ("content" in r) != ("salt" in r) or ("content" in r and content_hash(r["content"], r["salt"]) != env["content_hash"]):
                 return err(400, "content_mismatch", "content does not match content_hash; send the exact content you hashed.")
+            ch = env.get("checks") or {}
+            if ("disclosed" in r) != (ch.get("disclosed_hash") is not None):
+                return err(400, "invalid_record", "disclosed and disclosed_salt come exactly when checks.disclosed_hash is set.")
+            if "disclosed" in r:
+                from signafaide.checks import disclosed_hash
+
+                if disclosed_hash(r["disclosed"], r["disclosed_salt"]) != ch["disclosed_hash"]:
+                    return err(400, "content_mismatch", "disclosed does not hash to checks.disclosed_hash.")
+                self.disclosed[h] = (r["disclosed"], r["disclosed_salt"])
             seq, last = tips.get(env["agent"], (0, None))
             if env["seq"] != seq + 1 or env["prev"] != last:
                 return err(409, "chain_conflict", "This record does not extend the service chain; the head is attached.", head={"agent": env["agent"], "seq": seq, "record_hash": last})
@@ -225,11 +261,92 @@ class FakeService:
                     "head": sh["head"],
                     "head_sig": sh["head_sig"],
                 }
+                from signafaide.checks import asks_for_ruling
+
+                if r["envelope"]["kind"] == "decision" and asks_for_ruling(r["envelope"].get("checks")):
+                    if self.ruling_error:
+                        rc["ruling_error"] = self.ruling_error
+                    elif not self.no_ruling:
+                        g = self.rule(prj, r, rc)
+                        rc["ruling"], rc["ruling_sig"] = g, self.key.sign("ruling", hash_json(g))
                 prj["records"][hashes[i]] = (r, rc)
                 prj["used"] += 1
         for r in records:
             receipts.append(prj["records"][record_hash(r)][1])
         return 200, {"receipts": receipts, "heads": heads}
+
+    # --- tool-call checks -----------------------------------------------------
+
+    def publish_rules(self, api_key, rules, *, mode="enforce", default="allow", fail=None, addresses=None, approved=None, issued=None, set_id="rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+                      fingerprint_exceptions=None):
+        """Publish a new rule set version for the key's project (§10)."""
+        prj = self.projects[api_key]
+        items = self.rule_items.setdefault(prj["project"], [])
+        prev = items[-1]["rules"] if items else None
+        doc = {"format": "signafaide-rules/1", "project": prj["project"], "env": prj["env"], "set": set_id, "version": len(items) + 1,
+               "prev": hash_json(prev) if prev else None, "issued": issued or now(), "mode": mode, "default": default, "fail": fail or {},
+               "addresses": addresses or {"hosts": [], "cidrs": []}, "approved": approved, "rules": rules}
+        if fingerprint_exceptions is not None:
+            doc["fingerprint_exceptions"] = fingerprint_exceptions
+        item = {"rules": doc, "sig": self.key.sign("rules", hash_json(doc)), "service_key_id": self.key.key_id}
+        items.append(item)
+        return item
+
+    def list_update(self, add=(), remove=()):
+        """Publish an update of the shared fingerprint list (§11.2)."""
+        from signafaide.checks import state_hash
+
+        key = lambda e: (e["kind"], e["fingerprint"])  # noqa: E731
+        rm = {key(e) for e in remove}
+        self.list_entries = sorted([e for e in self.list_entries if key(e) not in rm] + list(add), key=key)
+        prev = hash_json(self.list_updates[-1]["list"]) if self.list_updates else None
+        doc = {"format": "signafaide-fingerprints/1", "list": "shared", "type": "update", "seq": len(self.list_updates) + 1, "prev": prev, "issued": now(),
+               "add": sorted(add, key=key), "remove": sorted(remove, key=key), "state_hash": state_hash(self.list_entries)}
+        self.list_updates.append({"list": doc, "sig": self.key.sign("fingerprints", hash_json(doc)), "service_key_id": self.key.key_id})
+
+    def list_snapshot(self):
+        from signafaide.checks import state_hash
+
+        last = hash_json(self.list_updates[-1]["list"]) if self.list_updates else None
+        doc = {"format": "signafaide-fingerprints/1", "list": "shared", "type": "snapshot", "seq": len(self.list_updates), "last": last, "issued": now(),
+               "entries": self.list_entries, "state_hash": state_hash(self.list_entries)}
+        return {"list": doc, "sig": self.key.sign("fingerprints", hash_json(doc)), "service_key_id": self.key.key_id}
+
+    def rule(self, prj, r, rc):
+        """The witness's ruling (§3.5), as the real one decides it (no rate limits here)."""
+        from signafaide import checks as C
+
+        env, ch = r["envelope"], r["envelope"]["checks"]
+        values = r.get("disclosed") or {}
+        items = self.rule_items.get(prj["project"], [])
+        doc = items[-1]["rules"] if items else None
+        listed = {(e["kind"], e["fingerprint"]) for e in self.list_entries}
+        # A match the rule set excepts (§10.1 fingerprint_exceptions) is no match.
+        excepted = {(e["kind"], e["fingerprint"]) for e in (doc or {}).get("fingerprint_exceptions") or []}
+        hit = any((k, ch["tool"][k]) in listed and (k, ch["tool"][k]) not in excepted for k in ("tool", "description", "server") if ch["tool"][k])
+        missing = []
+        if doc is None:
+            res = {"result": "block", "basis": "fingerprint", "matched": []} if hit else {"result": "allow", "basis": "default", "matched": []}
+            mode, rules = "enforce", None
+        else:
+            mode, rules = doc["mode"], {"set": doc["set"], "version": doc["version"], "hash": hash_json(doc)}
+            client = next((x for x in ch["rules"] if x["set"] == doc["set"]), None)
+            missing = [p for p in C.needed_fields(doc, env["agent"], env["name"]) if p not in ch["disclosed"]]
+            if client is not None and client["version"] > doc["version"]:
+                res = {"result": "block", "basis": "rules_version", "matched": []}
+            elif missing:
+                res = {"result": "block", "basis": "fields_missing", "matched": []}
+            elif hit:
+                res = {"result": "block", "basis": "fingerprint", "matched": []}
+            else:
+                res = C.evaluate(doc, env["agent"], env["name"], lambda p: values.get(p, C.ABSENT), count=lambda lim: 0)
+        g = {"v": 1, "record_hash": rc["record_hash"], "batch_hash": rc["batch_hash"], "server_time": rc["batch"]["server_time"],
+             "ruling": res["result"] if mode == "enforce" else "allow", "mode": mode, "basis": res["basis"], "matched": res["matched"],
+             "missing": missing[:64] if res["basis"] == "fields_missing" else [], "rules": rules, "fingerprints": len(self.list_updates),
+             "reason": f"{res['result'].capitalize()}ed ({res['basis']})."}
+        if mode == "watch":
+            g["enforce_ruling"] = res["result"]
+        return g
 
     def export(self, prj, agent, from_, to):
         """Every agent of the project unless ``agent`` narrows it, as the service does."""
@@ -276,10 +393,15 @@ class FakeService:
                 body = json.loads(self.rfile.read(n)) if n else None
                 q = dict(urllib.parse.parse_qsl(u.query))
                 svc.client_ids.append(self.headers.get("X-Signafaide-Client"))
+                svc.req_headers = dict(self.headers)
                 if svc.hang:
                     time.sleep(svc.hang)
                 status, obj = svc.route(method, u.path, q, body, self.headers.get("Authorization"))
                 data = obj.encode() if isinstance(obj, str) else json.dumps(obj).encode()
+                if status == 304:
+                    self.send_response(304)
+                    self.end_headers()
+                    return
                 self.send_response(status)
                 self.send_header("Content-Type", "text/plain" if isinstance(obj, str) else "application/json")
                 self.send_header("Content-Length", str(len(data)))

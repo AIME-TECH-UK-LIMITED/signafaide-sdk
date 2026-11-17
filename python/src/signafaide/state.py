@@ -998,6 +998,10 @@ def wire_record(rec: dict, store_content: bool) -> dict:
         out["content"] = rec["content"]
         if "salt" in rec:
             out["salt"] = rec["salt"]
+    # The values a strict call disclosed to the witness go with it, whatever the content mode (§2.3, §10.4).
+    if "disclosed" in rec and "disclosed_salt" in rec:
+        out["disclosed"] = rec["disclosed"]
+        out["disclosed_salt"] = rec["disclosed_salt"]
     return out
 
 

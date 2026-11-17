@@ -12,6 +12,11 @@ use base64::Engine;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
+/// The tool-call checks vectors (`vectors.json` `checks`).
+#[path = "vectors_checks.rs"]
+pub mod checks_vectors;
+use checks_vectors::PackTamper;
+
 pub const PROJECT: &str = "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D";
 pub const AGENT: &str = "agent-a";
 const AGENT_KEY_FROM: &str = "2026-11-13T09:00:00.000Z";
@@ -285,13 +290,14 @@ fn build_with(mode: Build, contents: Vec<Sample>) -> Fixture {
             name,
             content_hash: content_hash(&content, &sample_salt(i)).unwrap(),
             reference: if kind == Kind::Outcome { decision } else { None },
+            checks: None,
         };
         if mode == Build::ForkedPrev && i == 3 {
             envelope.prev = Some(sha256(b"forged prev"));
         }
         let hash = envelope.record_hash().unwrap();
         let sig = ak.sign(Domain::Record, &hash);
-        records.push((SignedRecord { envelope, key_id: ak.key_id(), sig, content: store.then_some(content), salt: store.then(|| sample_salt(i)) }, hash));
+        records.push((SignedRecord { envelope, key_id: ak.key_id(), sig, content: store.then_some(content), salt: store.then(|| sample_salt(i)), disclosed: None, disclosed_salt: None }, hash));
         if kind == Kind::Decision {
             decision = Some(hash);
         }
@@ -352,6 +358,9 @@ fn build_with(mode: Build, contents: Vec<Sample>) -> Fixture {
                 service_key_id: sk.key_id(),
                 head: head.clone(),
                 head_sig: head_sig.clone(),
+                ruling: None,
+                ruling_sig: None,
+                ruling_error: None,
             });
         }
         batches.push((batch, bh, bsig));
@@ -396,6 +405,8 @@ fn build_with(mode: Build, contents: Vec<Sample>) -> Fixture {
                 sig: r.sig.clone(),
                 content: r.content.clone(),
                 salt: r.salt.clone(),
+                disclosed: r.disclosed.clone(),
+                disclosed_salt: r.disclosed_salt.clone(),
                 receipt: rc.clone(),
             })
             .unwrap()
@@ -418,6 +429,7 @@ fn build_with(mode: Build, contents: Vec<Sample>) -> Fixture {
         heads: heads.iter().map(|rc| SignedHead { head: rc.head.clone(), head_sig: rc.head_sig.clone() }).collect(),
         records: pack_records,
         anchors: vec![serde_json::to_value(&anchor).unwrap()],
+        rule_sets: None,
         export_sig: String::new(),
     })
     .unwrap();
@@ -684,6 +696,34 @@ pub fn tampered_packs() -> Vec<(&'static str, &'static str, Value, Inputs)> {
         ("schema", "generated is in year 0000", edit(&|p| p["generated"] = json!("0000-01-01T00:00:00.000Z")), none()),
         ("schema", "filter.agents holds an agent name with a trailing newline", edit(&|p| p["filter"]["agents"] = json!(["agent-a\n"])), none()),
         ("drand", "batch 1 claims a drand round far beyond any protocol time", build(Build::HugeRound).pack, none()),
+        // Tool-call checks (§2.8, §3.5, §7 checks 1, 6, 8 and 12).
+        ("schema", "a decision's checks.result is not the strongest of its entries (signed as written)", checks_vectors::checks_pack(PackTamper::BadChecks), none()),
+        ("batch_sig", "a ruling was changed to block after the witness signed it", checks_vectors::checks_pack(PackTamper::RulingChanged), none()),
+        ("batch_sig", "a ruling was copied onto the receipt of the outcome, which did not ask for one", {
+            let mut p = checks_vectors::checks_pack(PackTamper::Valid);
+            let (g, sig) = (p["records"][0]["receipt"]["ruling"].clone(), p["records"][0]["receipt"]["ruling_sig"].clone());
+            p["records"][1]["receipt"]["ruling"] = g;
+            p["records"][1]["receipt"]["ruling_sig"] = sig;
+            p
+        }, none()),
+        ("head_sig", "a decision names rule set version 2 with another rules_hash than the pack holds", checks_vectors::checks_pack(PackTamper::RulesHashMismatch), none()),
+        ("head_sig", "the rule set version in the pack was changed after the service signed it", {
+            let mut p = checks_vectors::checks_pack(PackTamper::Valid);
+            p["rule_sets"][0]["rules"]["default"] = json!("block");
+            sign_export(&mut p);
+            p
+        }, none()),
+        ("head_sig", "the rule set version was dropped from the pack after the service signed the export", {
+            let mut p = checks_vectors::checks_pack(PackTamper::Valid);
+            p.as_object_mut().unwrap().remove("rule_sets");
+            p
+        }, none()),
+        ("content", "a disclosed value differs from the call's input (its disclosed_hash matches)", checks_vectors::checks_pack(PackTamper::DisclosedDiffers), none()),
+        ("content", "a disclosed value was changed after the record was signed", {
+            let mut p = checks_vectors::checks_pack(PackTamper::Valid);
+            p["records"][0]["disclosed"]["/amount"] = json!(300);
+            p
+        }, none()),
     ]
 }
 
@@ -870,6 +910,8 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         ("two agents: one declared its tools, the other did not", two_declared, two_agent_keys()),
         ("telemetry notes: tools recorded from sampled telemetry spans, decisions written before, after and both", telemetry_notes, none()),
         ("telemetry notes: sampling that follows the caller, one tool with its decision written before the tool ran; a decision named like a telemetry note is not one", telemetry_before, none()),
+        ("tool-call checks: a strict call ruled allow by the witness, its outcome, the rule set version and the disclosed values", checks_vectors::checks_pack(PackTamper::Valid), none()),
+        ("tool-call checks: the pack an auditor link gives, without the disclosed values", checks_vectors::checks_pack(PackTamper::NoDisclosed), none()),
     ]
 }
 
@@ -925,8 +967,11 @@ fn expected(report: &verify::Report) -> Value {
     for c in &report.checks {
         checks.insert(c.id.into(), json!(c.value.clone().unwrap_or_else(|| serde_json::to_value(c.status).unwrap().as_str().unwrap().to_string())));
     }
-    json!({"result": report.result, "result_line": report.result_line(), "checks": checks, "coverage": report.coverage, "coverage_lines": report.coverage_lines(),
-           "telemetry": report.telemetry, "telemetry_lines": report.telemetry_lines()})
+    let mut out = json!({"result": report.result, "result_line": report.result_line(), "checks": checks, "coverage": report.coverage, "coverage_lines": report.coverage_lines(),
+           "telemetry": report.telemetry, "telemetry_lines": report.telemetry_lines()});
+    out["tool_call_checks"] = json!(report.tool_checks);
+    out["tool_call_checks_lines"] = json!(report.tool_checks_lines());
+    out
 }
 
 fn jcs_cases() -> Vec<Value> {
@@ -1231,6 +1276,7 @@ pub fn generate() -> Value {
     });
     // Added here, not inside the macro above, which is at its expansion limit.
     out["tool_names"] = json!(tool_name_cases());
+    out["checks"] = checks_vectors::generate();
     out["tool_names_note"] = json!("Tool declarations (spec 2.6). declared_name is the tool's name as a declaration holds it: the name itself up to 101 characters (Unicode code points), else its first 92 characters, a tilde and the first 8 hex characters of sha256(UTF-8 tool name). recorded_note and unrecorded_note are the envelope names of the two notes that declare the tool. A variant's expect.coverage is the report's coverage object and expect.coverage_lines its coverage lines, in order. Telemetry notes (spec 2.7): a variant's expect.telemetry is the report's telemetry object (agents with a telemetry note only) and expect.telemetry_lines its telemetry lines, in order.");
     out
 }

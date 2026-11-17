@@ -24,8 +24,11 @@ import weakref
 from pathlib import PurePath
 from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple
 
+from . import checks as checks_lib
 from . import jcs, runtime, telemetry
 from ._version import __version__
+from .checks_runtime import CheckError, Plan, ToolInfo
+from .coverage import declared_name
 from .http import SignafaideError
 from .records import record_hash
 
@@ -46,6 +49,18 @@ _WRAPPED: Dict[str, Set[str]] = {}
 _LISTED: Dict[str, Set[str]] = {}
 #: The full tool list given to ``declare_tools``, by agent: (names, unrecorded).
 _EXPLICIT: Dict[str, Tuple[list, Set[str]]] = {}
+#: Tool names a wrapper of the SDK records in this process (``record``, ``wrap_tools``,
+#: ``wrap_tool``), with a framework tool's own name when the wrapper names it otherwise. With
+#: tool-call checks on, the telemetry plug-in leaves a span of such a tool to the wrapper (§8):
+#: the wrapper's decision carries the checks, and a span's decision written at its start would not.
+_BY_WRAPPER: Set[str] = set()
+
+
+def wrapper_records(name: str) -> bool:
+    """Whether a wrapper of the SDK in this process records tool calls named *name*."""
+    return name in _BY_WRAPPER
+
+
 #: Bumped whenever one of the three changes, so a recorder looks again only then.
 _tools_version = 0
 #: recorder -> agent -> the ``_tools_version`` its declaration was last checked at.
@@ -149,6 +164,7 @@ def _reset_tool_registry() -> None:
         _WRAPPED.clear()
         _LISTED.clear()
         _EXPLICIT.clear()
+        _BY_WRAPPER.clear()
         _tools_version += 1
         _told_declare = False
 
@@ -162,18 +178,114 @@ class _Spec:
     meta: Optional[dict] = None
     #: Wrapped by ``wrap_tools`` / ``wrap_tool``: part of the tool list it declares.
     listed: bool = False
+    #: What the agent is shown of the tool, for its fingerprints (§11.1): a framework tool's
+    #: description and input schema; a plain function has none.
+    tool: Optional[ToolInfo] = None
 
     def __post_init__(self) -> None:
+        _BY_WRAPPER.add(self.name)
+        if self.tool is not None and self.tool.name:
+            _BY_WRAPPER.add(self.tool.name)
         _remember(_WRAPPED, self.agent, self.name)
         if self.listed:
             _remember(_LISTED, self.agent, self.name)
 
-    def decide(self, args: Any) -> tuple:
+    def decide(self, args: Any, plan: Optional[Plan] = None) -> tuple:
         rec = runtime.get()
         _declare_before_call(rec, self.agent)
         meta = {"sdk": f"signafaide-python/{__version__}", **(self.meta or {})}
-        d = rec.write("decision", self.name, {"input": to_jsonable(args), "meta": to_jsonable(meta)}, agent=self.agent, store_content=self.store_content)
+        extra = {"checks": plan.checks, "disclosed": plan.disclosed, "disclosed_salt": plan.disclosed_salt} if plan is not None else {}
+        d = rec.write("decision", self.name, {"input": to_jsonable(args), "meta": to_jsonable(meta)}, agent=self.agent, store_content=self.store_content, **extra)
         return rec, d
+
+    def tool_info(self) -> ToolInfo:
+        return self.tool or ToolInfo(self.name)
+
+    def _checked_begin(self, args: Any, call_id: Optional[str]) -> Tuple[Optional[tuple], Optional[Plan]]:
+        """:meth:`_begin` with the tool-call checks (§8 steps 1 and 2) when a checks file is in
+        place: the plan of the call, and its decision written with ``checks``."""
+        rec = runtime.get()
+        if not rec.checks.enabled():
+            return self._begin(args, call_id), None
+        # The checks name the tool as the envelope does (the wrapper's name, declared, §2.6); the
+        # fingerprints cover what the agent is shown of it (§11.1).
+        plan = rec.checks.plan(self.tool_info(), self.agent or rec.default_agent, to_jsonable(args), strict_code=self.strict, call_id=call_id,
+                               declared=declared_name(self.name))
+        # With checks on the wrapper never takes over a span's decision: it writes its own, with
+        # the checks, and asks for the ruling of a strict call (§8).
+        return self._begin(args, call_id, lambda a: self.decide(a, plan), adopt=False), plan
+
+    def outcome_checked(self, rec: runtime.Recorder, d: dict, content: dict, *, ran: bool, ruling: str, results: Optional[list] = None) -> None:
+        results = results or []
+        checks = {"ran": ran, "ruling": ruling, "results": results, "result": checks_lib.combined(results)}
+        try:
+            rec.write("outcome", self.name, content, agent=d["envelope"]["agent"], ref=record_hash(d), store_content=self.store_content, checks=checks)
+        except Exception as e:  # report, never mask the call's own result
+            log.error("signafaide: could not write the outcome of %s: %s", self.name, e)
+
+    def _refused(self, rec: runtime.Recorder, d: dict, err: CheckError, ruling: str) -> CheckError:
+        """The outcome of a call that did not run (§8 steps 3 and 4), and the error to raise."""
+        e: Dict[str, Any] = {"type": "Blocked" if err.code == "blocked" else "NotRun", "message": err.message}
+        if err.code != "blocked":
+            e["code"] = err.code
+        if err.check:
+            e["check"] = err.check
+        if err.rule:
+            e["rule"] = err.rule
+        self.outcome_checked(rec, d, {"error": e}, ran=False, ruling=ruling)
+        if err.code != "blocked":
+            rec.note_strict_refused(self.name, err)
+        return err
+
+    def _ran(self, rec: runtime.Recorder, d: dict, ruling: str, value: Any) -> None:
+        results = rec.checks.result_entries(value)
+        self.outcome_checked(rec, d, {"output": value}, ran=True, ruling=ruling, results=results)
+
+    def _checked_call(self, rec: runtime.Recorder, d: dict, plan: Plan, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]], claimed: Any) -> Any:
+        try:
+            if plan.blocked is not None:
+                raise self._refused(rec, d, plan.blocked, "not_asked")
+            ruling = "not_asked"
+            if plan.strict:
+                rec.strict_used = True
+                ruling, err = rec.checks.ruling(d, plan, self.name)
+                if err is not None:
+                    raise self._refused(rec, d, err, ruling)
+            token = runtime.RECORDING.set(self.name)
+            try:
+                out = fn()
+            except BaseException as e:
+                self.outcome_checked(rec, d, _error(e), ran=True, ruling=ruling)
+                raise
+            finally:
+                runtime.RECORDING.reset(token)
+        finally:
+            self._ended(claimed)
+        self._ran(rec, d, ruling, to_jsonable(output(out) if output else out))
+        return out
+
+    async def _checked_acall(self, rec: runtime.Recorder, d: dict, plan: Plan, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]], claimed: Any) -> Any:
+        try:
+            if plan.blocked is not None:
+                raise self._refused(rec, d, plan.blocked, "not_asked")
+            ruling = "not_asked"
+            if plan.strict:
+                rec.strict_used = True
+                ruling, err = await asyncio.get_running_loop().run_in_executor(None, rec.checks.ruling, d, plan, self.name)
+                if err is not None:
+                    raise self._refused(rec, d, err, ruling)
+            token = runtime.RECORDING.set(self.name)
+            try:
+                out = await fn()
+            except BaseException as e:
+                self.outcome_checked(rec, d, _error(e), ran=True, ruling=ruling)
+                raise
+            finally:
+                runtime.RECORDING.reset(token)
+        finally:
+            self._ended(claimed)
+        self._ran(rec, d, ruling, to_jsonable(output(out) if output else out))
+        return out
 
     def outcome(self, rec: runtime.Recorder, d: dict, content: dict) -> None:
         try:
@@ -190,19 +302,21 @@ class _Spec:
         except SignafaideError as e:
             # Agent frameworks often swallow a tool's error (the model just sees a failed tool):
             # say once, on stderr, that a strict tool did not run and how to fix it.
-            rec.warn_strict_refused(self.name, e)
+            rec.note_strict_refused(self.name, e)
             raise NotRecorded(f"{e.message} (strict mode: {self.name} did not run)", code=e.code, status=e.status, docs=e.docs, body=e.body) from None
 
-    def _begin(self, args: Any, call_id: Optional[str]) -> Optional[tuple]:
+    def _begin(self, args: Any, call_id: Optional[str], decide: Optional[Callable[[Any], tuple]] = None, *, adopt: bool = True) -> Optional[tuple]:
         """The decision of this call, or None when the telemetry plug-in has already written it for
-        the tool span that is running now (it then writes the outcome too): one call, one decision."""
-        adopt = runtime.telemetry_adopt
-        held = adopt(self.name, call_id) if adopt else None
+        the tool span that is running now (it then writes the outcome too): one call, one decision.
+        Not with *adopt* False (tool-call checks on)."""
+        take = runtime.telemetry_adopt if adopt else None
+        held = take(self.name, call_id) if take else None
         if held is not None:
             return None if not self.strict else (held[0], held[1], True, None)
-        rec, d = self.decide(args)
+        rec, d = (decide or self.decide)(args)
         claim = runtime.telemetry_claim
-        return rec, d, False, claim(self.name, call_id) if claim else None
+        alias = self.tool.name if self.tool is not None and self.tool.name != self.name else None
+        return rec, d, False, claim(self.name, call_id, alias) if claim else None
 
     @staticmethod
     def _ended(claimed: Any) -> None:
@@ -217,10 +331,12 @@ class _Spec:
         call's span by it."""
         if runtime.recording_disabled():
             return fn()
-        begun = self._begin(args, call_id)
+        begun, plan = self._checked_begin(args, call_id)
         if begun is None:
             return fn()
         rec, d, adopted, claimed = begun
+        if plan is not None and not adopted:
+            return self._checked_call(rec, d, plan, fn, output, claimed)
         if self.strict:
             self.strict_check(rec, d)
         if adopted:
@@ -240,10 +356,12 @@ class _Spec:
     async def acall(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None, *, call_id: Optional[str] = None) -> Any:
         if runtime.recording_disabled():
             return await fn()
-        begun = self._begin(args, call_id)
+        begun, plan = self._checked_begin(args, call_id)
         if begun is None:
             return await fn()
         rec, d, adopted, claimed = begun
+        if plan is not None and not adopted:
+            return await self._checked_acall(rec, d, plan, fn, output, claimed)
         if self.strict:
             await asyncio.get_running_loop().run_in_executor(None, self.strict_check, rec, d)
         if adopted:
@@ -333,9 +451,10 @@ def wrap_tool(
 ) -> Any:
     """Record one tool. See :func:`wrap_tools`."""
     if _is_openai_agents_tool(tool):
-        return _wrap_openai_agents(tool, _Spec(name or tool.name, agent, strict, store_content, listed=declare_tools))
+        info = ToolInfo(tool.name, getattr(tool, "description", "") or "", getattr(tool, "params_json_schema", None))
+        return _wrap_openai_agents(tool, _Spec(name or tool.name, agent, strict, store_content, listed=declare_tools, tool=info))
     if _is_langchain_tool(tool):
-        return _wrap_langchain(tool, _Spec(name or tool.name, agent, strict, store_content, listed=declare_tools))
+        return _wrap_langchain(tool, _Spec(name or tool.name, agent, strict, store_content, listed=declare_tools, tool=_langchain_info(tool)))
     if callable(tool):
         return _record_with(_Spec(name or tool.__name__, agent, strict, store_content, listed=declare_tools), tool)
     raise TypeError(f"wrap_tools cannot record {type(tool).__name__}: pass a function, a LangChain tool or an OpenAI Agents FunctionTool")
@@ -357,9 +476,23 @@ def _wrap_openai_agents(tool: Any, spec: _Spec) -> Any:
             args = json.loads(input_json) if input_json else {}
         except ValueError:
             args = input_json
-        return await spec.acall(args, lambda: original(ctx, input_json))
+        call_id = getattr(ctx, "tool_call_id", None)  # the model's tool call id
+        return await spec.acall(args, lambda: original(ctx, input_json), call_id=call_id if isinstance(call_id, str) and call_id else None)
 
     return dataclasses.replace(tool, on_invoke_tool=on_invoke_tool)
+
+
+def _langchain_info(tool: Any) -> ToolInfo:
+    """A LangChain tool's name, description and input schema (§11.1), as the model is shown them."""
+    schema: Any = None
+    with contextlib.suppress(Exception):
+        a = getattr(tool, "tool_call_schema", None) or getattr(tool, "args_schema", None)
+        if isinstance(a, dict):
+            schema = a
+        elif a is not None and hasattr(a, "model_json_schema"):
+            schema = a.model_json_schema()
+        schema = json.loads(json.dumps(schema)) if schema is not None else None
+    return ToolInfo(tool.name, getattr(tool, "description", "") or "", schema)
 
 
 def _is_langchain_tool(t: Any) -> bool:

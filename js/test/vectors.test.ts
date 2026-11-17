@@ -218,6 +218,10 @@ describe.skipIf(!v)("spec/vectors.json", () => {
       expect(JSON.parse(JSON.stringify(r.toJSON())).telemetry, c.name).toEqual(c.expect.telemetry);
       expect(r.telemetryLines(), c.name).toEqual(c.expect.telemetry_lines);
       for (const line of c.expect.telemetry_lines) expect(String(r).split("\n"), c.name).toContain(`telemetry: ${line}`);
+      // Tool-call checks (§2.8, §3.5, §7): likewise.
+      expect(JSON.parse(JSON.stringify(r.toJSON())).tool_call_checks, c.name).toEqual(c.expect.tool_call_checks);
+      expect(r.toolChecksLines(), c.name).toEqual(c.expect.tool_call_checks_lines);
+      for (const line of c.expect.tool_call_checks_lines) expect(String(r).split("\n"), c.name).toContain(`tool-call checks: ${line}`);
     }
     expect(v.variants.filter((c: any) => Object.values<any>(c.expect.coverage).some((x) => x.declared_at_seq !== null)).length).toBe(7);
     expect(v.variants.filter((c: any) => Object.keys(c.expect.telemetry).length).length).toBe(2);
@@ -255,7 +259,7 @@ describe.skipIf(!v)("spec/vectors.json", () => {
   });
 
   it("tampered packs fail at the expected check", () => {
-    expect(v.tampered.length).toBe(49);
+    expect(v.tampered.length).toBe(57);
     for (const c of v.tampered) {
       const r = verifyPack(c.pack, ...inputs(c, { drand }));
       expect(r.firstFailed(), c.tamper).toBe(c.first_failed);

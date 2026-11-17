@@ -7,7 +7,7 @@ The signafAIde MCP server for coding agents, over stdio. It is a separate packag
 the SDK's version:
 
 ```json
-{"command": "npx", "args": ["-y", "signafaide-mcp@0.3.5"]}
+{"command": "npx", "args": ["-y", "signafaide-mcp@0.4.0"]}
 ```
 
 ## Tools
@@ -22,6 +22,8 @@ the SDK's version:
 | `signafaide_records` | lists and searches the records on this machine by agent, time or record hash. Read-only, metadata only: inputs and outputs stay in the local files |
 | `signafaide_flush` | sends the waiting records now, like `signafaide flush`. Without an API key it sends nothing; it never creates a sandbox |
 | `signafaide_explain_error` | what an error code means and how to fix it |
+| `signafaide_explain_ruling` | explains a tool call's ruling from a record hash (local records, or a verification pack): the checks, the ruling and its basis, matched rules, rule set version, fields not disclosed, how to allow the call. Read-only; never prints a disclosed value |
+| `signafaide_show_rules` | the rules held: rule set version, mode, default, each rule on one line, the fail mode of each strict tool and the fields it discloses. Read-only |
 | `signafaide_claim_link` | the sandbox claim link, for when the user only needs the link |
 
 Nothing is sent until a person opts in with `signafaide init`, `signafaide_init` or `SIGNAFAIDE_API_KEY`.

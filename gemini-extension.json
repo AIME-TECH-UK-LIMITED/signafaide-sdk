@@ -1,11 +1,11 @@
 {
   "name": "signafaide",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "description": "Audit evidence for AI agent tool calls: each one signed, co-signed by an independent witness and publicly timestamped, so an auditor can verify it offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2.",
   "mcpServers": {
     "signafaide": {
       "command": "npx",
-      "args": ["-y", "signafaide-mcp@0.3.5"]
+      "args": ["-y", "signafaide-mcp@0.4.0"]
     }
   }
 }

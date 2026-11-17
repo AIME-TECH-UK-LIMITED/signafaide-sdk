@@ -145,6 +145,7 @@ class SignafaideSpanProcessor(SpanProcessor):
         self._agent = agent
         self._store_content = store_content
         self._declare = declare_tools
+        self._told_checks = False
         self._lock = threading.Lock()
         #: span id -> the decision written when the span started.
         self._open: "OrderedDict[int, dict]" = OrderedDict()
@@ -259,6 +260,13 @@ class SignafaideSpanProcessor(SpanProcessor):
         if self._by_gateway(rec, agent, call["tool"]):
             self._keep(self._skipped, span_id, True)
             return
+        # With tool-call checks on, a wrapper of the SDK that records this tool writes the call's
+        # decision itself, with its checks and, when strict, the witness's ruling (§8). The span is
+        # left to it: when it ends, the wrapper's call is matched to it as for a span that says
+        # only at its end that it is a tool call, and recorded here only when no wrapper ran.
+        if decorator.wrapper_records(call["tool"]) and _checks_on(rec):
+            self._keep(self._began, span_id, next(_ticks))
+            return
         d = self._decide(rec, agent, span, call, at_start=True)
         self._keep(self._open, span_id, {"rec": rec, "decision": d, "tool": call["tool"], "id": _call_id(call), "input": "input" in call})
 
@@ -299,7 +307,15 @@ class SignafaideSpanProcessor(SpanProcessor):
         if not held["input"] and "input" in call:  # the span named its arguments only after it started
             content["input"] = _value(call["input"])
         d = held["decision"]
-        held["rec"].write("outcome", d["envelope"]["name"], content, agent=d["envelope"]["agent"], ref=record_hash(d), store_content=self._store_content)
+        checks = None
+        if "checks" in d["envelope"]:
+            # Tool-call checks (§8): the result checks on what the span says the tool returned, in
+            # watch mode; the plug-in never blocks and never asks for a ruling, so the call ran, not asked.
+            from .checks import combined
+
+            results = held["rec"].checks.result_entries(content["output"], telemetry=True) if "output" in content else []
+            checks = {"ran": True, "ruling": "not_asked", "results": results, "result": combined(results)}
+        held["rec"].write("outcome", d["envelope"]["name"], content, agent=d["envelope"]["agent"], ref=record_hash(d), store_content=self._store_content, checks=checks)
 
     @staticmethod
     def _marker(span: Any, call: dict) -> dict:
@@ -318,6 +334,23 @@ class SignafaideSpanProcessor(SpanProcessor):
                 kind = _text(a.get("exception.type")) or kind
                 message = _text(a.get("exception.message")) or message
         return {"type": kind or "Error", "message": message}
+
+    def _checks_of(self, rec: runtime.Recorder, agent: str, tool: str, value: Any, call_id: Any) -> Optional[dict]:
+        """The ``checks`` of a decision written from a span (§8): every entry in watch mode, never
+        strict, since the tool runs whatever they find. None when checks are off, and when they
+        cannot run (an invalid checks file is said once; the plug-in never raises into the program)."""
+        from .checks_runtime import ToolInfo
+
+        try:
+            if not rec.checks.enabled():
+                return None
+            plan = rec.checks.plan(ToolInfo(tool), agent, to_jsonable(value), strict_code=False, call_id=call_id, telemetry=True)
+            return plan.checks if plan is not None else None
+        except Exception as e:  # noqa: BLE001 - never in the way
+            if not self._told_checks:
+                self._told_checks = True
+                log.error("signafaide: tool-call checks of telemetry spans are off: %s", e)
+            return None
 
     def _decide(self, rec: runtime.Recorder, agent: str, span: Any, call: dict, *, at_start: bool) -> dict:
         """Write the decision of a tool call, behind the notes that say where it comes from
@@ -353,7 +386,8 @@ class SignafaideSpanProcessor(SpanProcessor):
         name = declared_name(tool)
         if name != tool:
             meta["tool"] = tool
-        items.append(("decision", name, {"input": _value(call["input"]) if "input" in call else None, "meta": meta}, None))
+        value = _value(call["input"]) if "input" in call else None
+        items.append(("decision", name, {"input": value, "meta": meta}, None, {"checks": self._checks_of(rec, agent, tool, value, call.get("id"))}))
         d = rec.write_run(items, agent=agent, store_content=self._store_content)[-1]
         sampled.add(agent)
         noted[(agent, tool)] = when
@@ -371,6 +405,14 @@ class SignafaideSpanProcessor(SpanProcessor):
                 held["adopted"] = True
                 return held["rec"], held["decision"]
         return None
+
+
+def _checks_on(rec: runtime.Recorder) -> bool:
+    """Whether tool-call checks are on for *rec* (a checks file is in place); never raises."""
+    try:
+        return rec.checks.enabled()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _call_id(call: dict) -> Optional[str]:
@@ -405,11 +447,12 @@ def _adopt(name: str, call_id: Optional[str] = None) -> Optional[tuple]:
     return None
 
 
-def _claim(name: str, call_id: Optional[str] = None) -> Optional[dict]:
-    """A wrapper of the SDK has just written the decision of a call of the tool *name*: that
-    call's own span is not recorded again (see ``_claimed``)."""
+def _claim(name: str, call_id: Optional[str] = None, alias: Optional[str] = None) -> Optional[dict]:
+    """A wrapper of the SDK has just written the decision of a call of the tool *name* (*alias*: a
+    framework tool's own name, when the wrapper names it otherwise): that call's own span is not
+    recorded again (see ``_claimed``)."""
     try:
-        claim = {"tool": name, "id": call_id, "tick": next(_ticks), "begin": time.time_ns(), "end": None}
+        claim = {"tool": name, "alias": alias, "id": call_id, "tick": next(_ticks), "begin": time.time_ns(), "end": None}
         with _claims_lock:
             _claims.append(claim)
             del _claims[:-_MAX_OPEN]
@@ -442,7 +485,7 @@ def _claimed(tool: str, *, call_id: Optional[str] = None, running: bool = False,
     with _claims_lock:
         for i in range(len(_claims) - 1, -1, -1):
             c = _claims[i]
-            if c["tool"] != tool:
+            if c["tool"] != tool and c.get("alias") != tool:
                 continue
             if call_id and c["id"]:
                 if c["id"] != call_id:

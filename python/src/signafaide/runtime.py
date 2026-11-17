@@ -21,7 +21,7 @@ from .crypto import SigningKey, b64url, hash_json
 from .http import DEFAULT_URL, Client, SignafaideError
 from .records import (API_KEY_RE, AGENT_RE, INSTANCE_STOP, MAX_CLOCK_SKEW_MS, instance_stop_content, is_stop_note, agent_name, clamp_time, make_draft, make_record, now, parse_time, record_hash,
                       registration, valid_project_id, with_wall_time)
-from .state import TOOL_SOURCE_REFRESH_MS, PENDING, KeyProvider, State, StateError, agent_key_env_name, append_env_file, key_fingerprint, read_env_file, scope_of, wire_record
+from .state import TOOL_SOURCE_REFRESH_MS, PENDING, KeyProvider, State, StateError, agent_key_env_name, append_env_file, find_root, key_fingerprint, read_env_file, scope_of, wire_record
 from . import telemetry
 
 log = logging.getLogger("signafaide")
@@ -44,9 +44,10 @@ RECORDING: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("signa
 #: wrapper inside that span writes no second one. ``claim(name, call_id)`` tells it that a wrapper
 #: has written the decision of a call of the tool, and returns what ``done`` takes when the call
 #: has ended, so the call's own span is not recorded again whenever it arrives. *call_id* is the
-#: model's tool call id when the wrapper knows it. None of them ever raises.
+#: model's tool call id when the wrapper knows it; ``claim`` also takes an *alias*, a framework
+#: tool's own name when the wrapper names the tool otherwise. None of them ever raises.
 telemetry_adopt: Optional[Callable[[str, Optional[str]], Optional[tuple]]] = None
-telemetry_claim: Optional[Callable[[str, Optional[str]], object]] = None
+telemetry_claim: Optional[Callable[..., object]] = None
 telemetry_done: Optional[Callable[[object], None]] = None
 
 
@@ -55,14 +56,19 @@ def recording_disabled() -> bool:
     return os.environ.get("SIGNAFAIDE_DISABLED", "").strip().lower() in ("1", "true", "yes")
 
 
-def test_mode() -> bool:
+def test_mode(api_key: Optional[str] = None) -> bool:
     """Test mode: records are written to a temporary folder and never sent, so unit tests never ship
     records under a production agent name. On with ``SIGNAFAIDE_TEST=1``, and by itself under pytest
-    unless ``SIGNAFAIDE_TEST=0``."""
+    unless ``SIGNAFAIDE_TEST=0``. Never by itself with a live API key (``sfa_live_``, from the code,
+    the environment or the project's ``.env``): a test runner's variable set in production must not
+    turn strict calls into calls that run without a ruling."""
     v = os.environ.get("SIGNAFAIDE_TEST", "").strip().lower()
     if v:
         return v in ("1", "true", "yes")
-    return "PYTEST_CURRENT_TEST" in os.environ
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        return False
+    key = api_key if api_key is not None else os.environ.get("SIGNAFAIDE_API_KEY", "")
+    return not (key or "").strip().startswith("sfa_live_")
 
 
 #: Problems found on this machine, not refusals by the witness: they never slow shipping down.
@@ -91,7 +97,7 @@ class Recorder:
         on_head: Optional[Callable[[List[dict]], None]] = None,
         instance_stop: Optional[bool] = None,
     ):
-        self.test = test_mode()
+        self.test = test_mode(api_key or os.environ.get("SIGNAFAIDE_API_KEY") or read_env_file(find_root() / ".env").get("SIGNAFAIDE_API_KEY") or "")
         if home is None and self.test and not os.environ.get("SIGNAFAIDE_HOME"):
             import tempfile
 
@@ -138,6 +144,8 @@ class Recorder:
         self._registered: Set[tuple] = set()
         self._reconciled: Set[str] = set()
         self._blocked: Dict[str, Tuple[str, SignafaideError]] = {}
+        # Receipts the last shipments returned, by record hash: a strict call whose record another call's shipment carried takes its receipt from here.
+        self._recent_receipts: Dict[str, dict] = {}
         self._halted: Optional[Tuple[str, SignafaideError]] = None
         self._ship_lock = threading.Lock()
         self._wake = threading.Event()
@@ -151,6 +159,11 @@ class Recorder:
         self._stopped = False
         self._told_local = False
         self._told_bad_key = False
+        self._told_env_url = False
+        #: Tool-call checks (§8): the checks file, the held rule set and shared list.
+        from .checks_runtime import ChecksState
+
+        self.checks = ChecksState(self)
         if hasattr(os, "register_at_fork"):
             os.register_at_fork(after_in_child=self._after_fork)
 
@@ -161,7 +174,21 @@ class Recorder:
 
     @property
     def url(self) -> str:
-        return (self._url or self._setting("SIGNAFAIDE_URL") or DEFAULT_URL).rstrip("/")
+        given = self._url or os.environ.get("SIGNAFAIDE_URL")
+        if given:
+            return given.rstrip("/")
+        env_file = self.state.root / ".env"
+        from_file = read_env_file(env_file).get("SIGNAFAIDE_URL")
+        if not from_file:
+            return DEFAULT_URL
+        url = from_file.rstrip("/")
+        # The witness checks the rule sets, the shared list and the rulings of this program: say
+        # once where its address came from when a file in the project, not the code or the
+        # environment, set it.
+        if url != DEFAULT_URL and not self._told_env_url and not self.quiet:
+            self._told_env_url = True
+            print(f"signafaide: note: the witness is {url}, set by SIGNAFAIDE_URL in {env_file}, not by the code or the process environment", file=sys.stderr)
+        return url
 
     @property
     def raw_api_key(self) -> Optional[str]:
@@ -353,13 +380,19 @@ class Recorder:
         agent: Optional[str] = None,
         ref: Optional[str] = None,
         store_content: Optional[bool] = None,
+        checks: Optional[dict] = None,
+        disclosed: Optional[dict] = None,
+        disclosed_salt: Optional[str] = None,
     ) -> dict:
         """Sign and chain one record locally (synchronous, no network) and queue it for
         shipping. The chain is this API key's ``<project>/<env>/<agent>`` (§8); while the key's
-        project is not known yet, the record is a signed draft."""
-        return self.write_run([(kind, name, content, ref)], agent=agent, store_content=store_content)[0]
+        project is not known yet, the record is a signed draft. *checks* is what the tool-call
+        checks found (§2.8); *disclosed* and *disclosed_salt* the values a strict call sends the
+        witness (§2.3)."""
+        extra = {"checks": checks, "disclosed": disclosed, "disclosed_salt": disclosed_salt}
+        return self.write_run([(kind, name, content, ref, extra)], agent=agent, store_content=store_content)[0]
 
-    def write_run(self, items: List[Tuple[str, str, dict, Optional[str]]], *, agent: Optional[str] = None, store_content: Optional[bool] = None) -> List[dict]:
+    def write_run(self, items: List[tuple], *, agent: Optional[str] = None, store_content: Optional[bool] = None) -> List[dict]:
         """:meth:`write` for records that must follow each other with nothing between them (a
         tool declaration, §2.6): ``(kind, name, content, ref)`` each, signed and appended under
         one hold of the chain lock."""
@@ -380,26 +413,27 @@ class Recorder:
                 for e in self._adopt_into(bucket, api_key).values():
                     self._report(f"signafaide: {e}")
             builds = []
-            for kind, name, content, ref in items:
+            for kind, name, content, ref, *more in items:
+                extra = (more[0] if more else None) or {}
                 if bucket.startswith(PENDING + "/"):
                     # The project is not known yet, and an envelope names it: keep a draft, signed later (§8).
-                    def build(seq, prev, prev_time, scope=scope, key=key, kind=kind, name=name, content=content, ref=ref):
+                    def build(seq, prev, prev_time, scope=scope, key=key, kind=kind, name=name, content=content, ref=ref, extra=extra):
                         t, c = self._timed(content, prev_time, agent, scope)
-                        return make_draft(key, kind=kind, agent=agent, seq=seq, prev=prev, name=name, content=c, ref=ref, store_content=sc, time=t)
+                        return make_draft(key, kind=kind, agent=agent, seq=seq, prev=prev, name=name, content=c, ref=ref, store_content=sc, time=t, **extra)
                 else:
                     project, env = bucket.split("/")
 
-                    def build(seq, prev, prev_time, chain=chain, project=project, env=env, scope=scope, key=key, kind=kind, name=name, content=content, ref=ref):
+                    def build(seq, prev, prev_time, chain=chain, project=project, env=env, scope=scope, key=key, kind=kind, name=name, content=content, ref=ref, extra=extra):
                         r = self.state.translate_ref(chain, ref)
                         t, c = self._timed(content, prev_time, agent, scope)
-                        return make_record(key, kind=kind, project=project, env=env, agent=agent, seq=seq, prev=prev, name=name, content=c, ref=r, time=t)
+                        return make_record(key, kind=kind, project=project, env=env, agent=agent, seq=seq, prev=prev, name=name, content=c, ref=r, time=t, **extra)
 
                 builds.append(build)
             recs = self.state.append_run(chain, builds, lambda r: wire_record(r, sc), still_valid=lambda b=bucket: self._write_bucket(api_key, agent) == b)
             if recs is not None:
                 break
         self._pending += len(recs)
-        if any(name != INSTANCE_STOP for _, name, _, _ in items):
+        if any(it[1] != INSTANCE_STOP for it in items):
             self._wrote.add(agent)
         if not api_key and not self._told_local and not self.quiet and not self.test:
             self._told_local = True
@@ -631,7 +665,7 @@ class Recorder:
         second = self.flush(timeout, background=background)
         return {"shipped": first["shipped"] + second["shipped"], "left": second["left"], "errors": second["errors"], "stopped": [] if second["left"] else stopped}
 
-    def warn_strict_refused(self, tool: str, err: SignafaideError) -> None:
+    def note_strict_refused(self, tool: str, err: SignafaideError) -> None:
         """One stderr line, the first time a strict tool is refused in this process (frameworks
         often swallow the tool's error): the tool, why, and the fix."""
         if self._told_strict:
@@ -655,11 +689,12 @@ class Recorder:
         bucket = self.state.bucket(api_key)
         self._adopt_into(bucket, api_key, self._remote_bases(bucket, api_key) if self.state.has_drafts() else None)
         h = self.state.translate_ref(f"{bucket}/{agent}", h)  # a draft is signed by now
-        received = self._ship_chain(f"{bucket}/{agent}", api_key, timeout)
-        if h not in received:
+        # Another call's shipment may have carried this record already (calls of one batch, calls at once): its receipt was kept.
+        got = self._recent_receipts.get(h) or self._ship_chain(f"{bucket}/{agent}", api_key, timeout).get(h) or self._recent_receipts.get(h)
+        if got is None:
             raise SignafaideError(f"The service did not return a receipt for record {h[:12]}; check `signafaide status`.", code="not_recorded")
         self._adopt_into(self.state.bucket(api_key), api_key)
-        return received[h]
+        return got
 
     def _explain(self, e: SignafaideError, chain: str, key_id: str, current: str) -> SignafaideError:
         """The witness's refusal, in words that say what happened and what to do."""
@@ -759,6 +794,9 @@ class Recorder:
                     except Exception as e:  # noqa: BLE001 - a hook never stops recording
                         log.warning("signafaide: on_head failed (the heads are still in head.json): %s", e)
                 received.update(got)
+                self._recent_receipts.update(got)
+                while len(self._recent_receipts) > 4096:
+                    del self._recent_receipts[next(iter(self._recent_receipts))]
                 self._pending = 0
                 if not got:
                     raise SignafaideError("The service accepted the batch but returned no matching receipts.", code="no_receipts")
@@ -952,6 +990,9 @@ class Recorder:
     def _after_fork(self) -> None:
         self._ship_lock = threading.Lock()
         self._wake = threading.Event()
+        from .checks_runtime import ChecksState
+
+        self.checks = ChecksState(self)  # its refresher thread and locks do not survive a fork
         self._thread = None
         self._tool_thread = None
         self._tool_stop = threading.Event()

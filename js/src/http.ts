@@ -91,7 +91,8 @@ export class Client {
   /** Said instead of "no answer within <timeout> s" when the request shares a larger limit. */
   readonly timeoutLabel?: string;
 
-  async request(method: string, path: string, opts: { body?: unknown; auth?: boolean; query?: Record<string, string | undefined> } = {}): Promise<any> {
+  /** One request. Returns the JSON answer, or null for 304 Not Modified (a request with `If-None-Match`). */
+  async request(method: string, path: string, opts: { body?: unknown; auth?: boolean; query?: Record<string, string | undefined>; headers?: Record<string, string> } = {}): Promise<any> {
     const auth = opts.auth ?? true;
     let url = this.url + path;
     const q = Object.entries(opts.query ?? {}).filter((e): e is [string, string] => e[1] != null);
@@ -99,6 +100,7 @@ export class Client {
     const headers: Record<string, string> = { Accept: "application/json", [HEADER]: this.clientId };
     if (typeof process !== "undefined" && process.versions?.node) headers["User-Agent"] = `signafaide-js/${VERSION}`;
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+    Object.assign(headers, opts.headers ?? {});
     if (auth) {
       if (!this.apiKey) throw new SignafaideError("No API key: run `signafaide init` or set SIGNAFAIDE_API_KEY.", { code: "invalid_key" });
       headers.Authorization = `Bearer ${this.apiKey}`;
@@ -113,6 +115,7 @@ export class Client {
       throw new SignafaideError(`Cannot reach the signafAIde service at ${this.url} (${reason}); check the network or SIGNAFAIDE_URL.`, { code: "network" });
     }
     const { status, text, contentType: ctype } = resp;
+    if (status === 304) return null;
     if (status < 200 || status >= 300) throw serviceError(status, text);
     return ctype.includes("json") || /^[[{]/.test(text) ? JSON.parse(text) : text;
   }
@@ -166,6 +169,17 @@ export class Client {
 
   serviceKeys(): Promise<{ keys: any[] }> {
     return this.request("GET", "/.well-known/signafaide-keys.json", { auth: false });
+  }
+
+  /** The project's signed rule set (§6, §10.2): `{rules, sig, service_key_id}`, `{"rules": null}`
+   * without one, or null when `etag` (its `rules_hash`) is still current. */
+  rules(etag?: string | null, version?: number): Promise<any> {
+    return this.request("GET", "/v1/rules", { query: { version: version === undefined ? undefined : String(version) }, headers: etag ? { "If-None-Match": `"${etag}"` } : {} });
+  }
+
+  /** The shared fingerprint list (§6, §11.2): `{snapshot, updates}`. */
+  fingerprints(since?: number | null): Promise<any> {
+    return this.request("GET", "/v1/fingerprints", { query: { since: since == null ? undefined : String(since) } });
   }
 }
 

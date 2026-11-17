@@ -255,7 +255,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-python/0.3.5 (python 3.12.3; adapter=none; agent=claude-code; via=sdk)
+X-Signafaide-Client: signafaide-python/0.4.0 (python 3.12.3; adapter=none; agent=claude-code; via=sdk)
 ```
 
 It holds the SDK and its version, the Python runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `otel` for the OpenTelemetry processor, or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`) and kept in `.signafaide/config.json`; it is never guessed per process. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
@@ -273,7 +273,7 @@ The header and the events hold no content, file paths, hostnames or user names. 
 | `SIGNAFAIDE_HEAD_FILE` | unset: a file outside `.signafaide/` (a persistent volume) that also keeps the newest signed heads, for containers whose disk does not last; or `on_head=` in `signafaide.init` |
 | `SIGNAFAIDE_INSTANCE_STOP` | unset: a signed stop note is written at a clean exit when a head file is set; `1` always, `0` never (see Containers that restart) |
 | `SIGNAFAIDE_EXIT_FLUSH_MS` | `3000`: the longest a finished program is kept open to send; `0` never |
-| `SIGNAFAIDE_TEST` | test mode is on by itself under pytest (records in a temporary folder, nothing sent); `1` forces it, `0` turns it off |
+| `SIGNAFAIDE_TEST` | test mode is on by itself under pytest (records in a temporary folder, nothing sent), except with a live API key (`sfa_live_`); `1` forces it, `0` turns it off |
 | `SIGNAFAIDE_DISABLED` | `1`: wrapped functions run and nothing is recorded |
 | `SIGNAFAIDE_DECLARE_TOOLS` | `0`: `wrap_tools` does not declare the tools it wraps (`declare_tools()` still does) |
 | `SIGNAFAIDE_SEGMENT_BYTES` | `67108864`: a shipped chain file larger than this rolls into a sealed segment |

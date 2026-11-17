@@ -6,6 +6,7 @@ use signafaide_core::ots::DetachedFile;
 use signafaide_core::sign::{self, Domain};
 use signafaide_core::verify::{contents_from_text, verify_pack, Options, Status};
 use signafaide_core::*;
+use signafaide_core::hash::hash_json;
 use base64::Engine;
 use serde_json::{json, Value};
 
@@ -229,6 +230,12 @@ fn variants_pass_with_their_values() {
         for line in r.telemetry_lines() {
             assert!(r.to_text().contains(&format!("telemetry: {line}\n")), "{}\n{}", t["name"], r.to_text());
         }
+        // Tool-call checks (§7): likewise.
+        assert_eq!(serde_json::to_value(&r.tool_checks).unwrap(), t["expect"]["tool_call_checks"], "{}", t["name"]);
+        assert_eq!(json!(r.tool_checks_lines()), t["expect"]["tool_call_checks_lines"], "{}", t["name"]);
+        for line in r.tool_checks_lines() {
+            assert!(r.to_text().contains(&format!("tool-call checks: {line}\n")), "{}\n{}", t["name"], r.to_text());
+        }
     }
     // The instance-start note (§8) names the chain and the seq it continues after.
     let notes: Vec<&str> = variants.iter().filter_map(|t| t["expect"]["chain_note"].as_str()).collect();
@@ -369,7 +376,7 @@ fn time_clamp_vectors() {
 fn every_tampered_pack_fails_at_its_check() {
     let v = vectors();
     let tampered = v["tampered"].as_array().unwrap();
-    assert_eq!(tampered.len(), 49, "one tampered pack per rule");
+    assert_eq!(tampered.len(), 57, "one tampered pack per rule");
     for id in v["check_ids"].as_array().unwrap() {
         assert!(tampered.iter().any(|t| t["check"] == *id), "no tampered pack for {id}");
     }
@@ -453,4 +460,297 @@ fn malformed_pack_is_a_failure_not_a_crash() {
     let v = vectors();
     let r = verify_pack(&json!({"format": "nope"}), &keys(&v)).unwrap();
     assert_eq!(r.first_failed(), Some("schema"));
+}
+
+// --- Tool-call checks (`checks`; §2.8, §3.5, §7, §10, §11), checked against the library ---------
+
+use signafaide_core::checks::{self, envelope, fingerprints, report, rules, ruling};
+
+fn domain(name: &str) -> Domain {
+    match name {
+        "ruling" => Domain::Ruling,
+        "rules" => Domain::Rules,
+        "fingerprints" => Domain::Fingerprints,
+        "batch" => Domain::Batch,
+        "head" => Domain::Head,
+        other => panic!("unknown domain {other}"),
+    }
+}
+
+fn service_keys(v: &Value) -> Vec<KeyEntry> {
+    from_value::<KeysDocument>(&v["keys_document"]).unwrap().keys
+}
+
+#[test]
+fn checks_signatures_and_domains() {
+    let v = vectors();
+    let service = v["keys"][1]["public_key"].as_str().unwrap();
+    let c = &v["checks"];
+    let names: Vec<&str> = c["signatures"].as_array().unwrap().iter().map(|s| s["domain"].as_str().unwrap()).collect();
+    assert_eq!(names, ["ruling", "rules", "fingerprints"]);
+    for s in c["signatures"].as_array().unwrap() {
+        let d = domain(s["domain"].as_str().unwrap());
+        assert_eq!(hex::encode(sign::message(d, &h(&s["hash"]))), s["message_hex"].as_str().unwrap());
+        sign::verify(service, d, &h(&s["hash"]), s["sig"].as_str().unwrap()).unwrap();
+    }
+    for s in c["cross_domain"].as_array().unwrap() {
+        let d = domain(s["verify_domain"].as_str().unwrap());
+        assert!(sign::verify(service, d, &h(&s["hash"]), s["sig"].as_str().unwrap()).is_err());
+    }
+}
+
+#[test]
+fn checks_conditions_and_evaluation() {
+    let c = &vectors()["checks"];
+    let input = &c["conditions"]["input"];
+    for t in c["conditions"]["cases"].as_array().unwrap() {
+        let cond = rules::parse_condition(&t["condition"]).unwrap();
+        let got = match rules::condition(&cond, rules::resolve(input, &cond.field)) {
+            rules::Holds::Yes => json!(true),
+            rules::Holds::No => json!(false),
+            rules::Holds::Error => json!("error"),
+        };
+        assert_eq!(got, t["expect"], "{}", t["name"]);
+    }
+    let now = time::parse(c["evaluation"]["now"].as_str().unwrap()).unwrap();
+    for t in c["evaluation"]["cases"].as_array().unwrap() {
+        let rs = rules::RuleSet::parse(&c["evaluation"]["rule_sets"][t["rule_set"].as_str().unwrap()]).unwrap();
+        let (agent, tool) = (t["agent"].as_str().unwrap(), t["tool"].as_str().unwrap());
+        let field = |p: &str| rules::resolve(&t["input"], p).cloned();
+        let hist = t["history"].as_array().unwrap();
+        let mut count = |l: &rules::Limit| -> Result<i64, ()> {
+            Ok(hist
+                .iter()
+                .filter(|x| {
+                    let same = match l.per {
+                        rules::Per::Agent => x["agent"] == agent,
+                        rules::Per::Tool => x["tool"] == tool,
+                        rules::Per::AgentTool => x["agent"] == agent && x["tool"] == tool,
+                    };
+                    let at = time::parse(x["server_time"].as_str().unwrap()).unwrap();
+                    same && now - l.seconds * 1000 < at && at <= now
+                })
+                .count() as i64)
+        };
+        let e = if t["where"] == "witness" { rules::evaluate(&rs, agent, tool, &field, Some(&mut count)) } else { rules::evaluate(&rs, agent, tool, &field, None) }.unwrap();
+        assert_eq!(json!({"result": e.result.as_str(), "basis": e.basis.as_str(), "matched": e.matched}), t["expect"], "{}", t["name"]);
+    }
+    for m in c["modes"].as_array().unwrap() {
+        let mode = rules::Mode::parse(m["mode"].as_str().unwrap()).unwrap();
+        assert_eq!(Value::Object(rules::apply_mode(m["check_result"].as_str().unwrap(), mode)), m["expect"]);
+    }
+    for t in c["client_rule_entries"]["cases"].as_array().unwrap() {
+        let rs = rules::RuleSet::parse(&c["client_rule_entries"]["rule_sets"][t["rule_set"].as_str().unwrap()]).unwrap();
+        let local = t["set"] == "local";
+        let mode = rules::entry_mode(rs.mode, t["strict"].as_bool().unwrap(), local);
+        let set = if local { "local".to_string() } else { rs.set.clone() };
+        let e = rules::client_entry(&rs, mode, &set, t["agent"].as_str().unwrap(), t["tool"].as_str().unwrap(), &t["input"]);
+        assert_eq!(e, t["expect"]["entry"], "{}", t["name"]);
+        assert_eq!(e["result"] != "block", t["expect"]["runs"].as_bool().unwrap(), "{}", t["name"]);
+    }
+}
+
+#[test]
+fn checks_rule_set_documents_and_updates() {
+    let v = vectors();
+    let c = &v["checks"];
+    let keys = service_keys(&v);
+    for k in ["v1", "v2"] {
+        let e = &c["rule_sets"][k];
+        rules::RuleSet::parse(&e["rules"]).unwrap();
+        assert_eq!(jcs::canonicalize(&e["rules"]).unwrap(), e["rules_jcs"].as_str().unwrap());
+        assert_eq!(sha256(e["rules_jcs"].as_str().unwrap().as_bytes()), h(&e["rules_hash"]));
+        sign::verify(&keys[0].public_key, Domain::Rules, &h(&e["rules_hash"]), e["sig"].as_str().unwrap()).unwrap();
+    }
+    for t in c["rule_sets_invalid"].as_array().unwrap() {
+        assert!(rules::RuleSet::parse(&t["rules"]).is_err(), "{}", t["name"]);
+    }
+    let u = &c["rule_set_updates"];
+    for t in u["cases"].as_array().unwrap() {
+        let held = (!t["held"].is_null()).then_some(&t["held"]);
+        let got = rules::accept(held, &t["offered"], &keys, u["project"].as_str().unwrap(), u["env"].as_str().unwrap());
+        assert_eq!(json!(got), t["expect"], "{}", t["name"]);
+    }
+    let v2 = rules::RuleSet::parse(&c["rule_sets"]["v2"]["rules"]).unwrap();
+    let v1 = rules::RuleSet::parse(&c["rule_sets"]["v1"]["rules"]).unwrap();
+    for t in c["disclosure"].as_array().unwrap() {
+        let rs = if t["rules_version"] == 1 { &v1 } else { &v2 };
+        let need = rs.needed(t["agent"].as_str().unwrap(), t["tool"].as_str().unwrap());
+        let opt: Vec<&str> = t["disclose"].as_array().unwrap().iter().map(|p| p.as_str().unwrap()).collect();
+        let disclosed: Vec<&String> = need.iter().filter(|p| opt.contains(&p.as_str())).collect();
+        let missing: Vec<&String> = need.iter().filter(|p| !opt.contains(&p.as_str())).collect();
+        assert_eq!(json!({"disclosed": disclosed, "missing": missing}), t["expect"], "{}", t["name"]);
+    }
+    let d = &c["disclosed"];
+    assert_eq!(jcs::canonicalize(&d["values"]).unwrap(), d["values_jcs"].as_str().unwrap());
+    assert_eq!(checks::disclosed_hash(&d["values"], d["salt"].as_str().unwrap()).unwrap(), h(&d["disclosed_hash"]));
+    let a = &d["absent_field"];
+    assert_eq!(checks::disclosed_hash(&a["values"], a["salt"].as_str().unwrap()).unwrap(), h(&a["disclosed_hash"]));
+}
+
+#[test]
+fn checks_tool_fingerprints_and_shared_list() {
+    let v = vectors();
+    let c = &v["checks"];
+    for t in c["tool_fingerprints"].as_array().unwrap() {
+        let tool = &t["tool"];
+        let si = (!t["server_info"].is_null()).then_some(&t["server_info"]);
+        let got = checks::tool_fingerprints(tool["name"].as_str().unwrap(), tool["description"].as_str().unwrap(), &tool["input_schema"], si).unwrap();
+        assert_eq!(got, t["expect"], "{}", t["name"]);
+        if let Some(s) = t["stripped_schema_jcs"].as_str() {
+            assert_eq!(jcs::canonicalize(&checks::strip_schema(&tool["input_schema"])).unwrap(), s);
+        }
+    }
+    let keys = service_keys(&v);
+    let l = &c["fingerprint_list"];
+    for t in l["cases"].as_array().unwrap() {
+        let mut held = fingerprints::Held::default();
+        let mut err = None;
+        for it in t["apply"].as_array().unwrap() {
+            match fingerprints::accept(&held, it, &keys) {
+                Ok(next) => held = next,
+                Err(e) => {
+                    err = Some(e);
+                    break;
+                }
+            }
+        }
+        assert_eq!(json!({"error": err, "seq": held.seq, "state_hash": held.state_hash()}), t["expect"], "{}", t["name"]);
+    }
+    for u in l["updates"].as_array().unwrap() {
+        assert_eq!(hash_json(&u["list"]).unwrap(), h(&u["list_hash"]));
+    }
+}
+
+#[test]
+fn checks_rulings_and_ruled_record() {
+    let v = vectors();
+    let c = &v["checks"];
+    let r = &c["rulings"];
+    let held_list = fingerprints::Held {
+        seq: 4,
+        last: None,
+        entries: r["fingerprint_entries"].as_array().unwrap().iter().map(|e| fingerprints::Entry::parse(e).unwrap()).collect(),
+    };
+    let now = time::parse(r["now"].as_str().unwrap()).unwrap();
+    for t in r["cases"].as_array().unwrap() {
+        let doc = t["rule_set"].as_str().map(|k| &r["rule_sets"][k]);
+        let rs = doc.map(|d| rules::RuleSet::parse(d).unwrap());
+        let hash = doc.map(|d| hash_json(d).unwrap().hex());
+        let held = rs.as_ref().map(|rs| ruling::Held { rule_set: rs, rules_hash: hash.as_deref().unwrap() });
+        let hist = t["history"].as_array().unwrap();
+        let mut count = |l: &rules::Limit| -> Result<i64, ()> {
+            Ok(hist.iter().filter(|x| {
+                let at = time::parse(x["server_time"].as_str().unwrap()).unwrap();
+                x["agent"] == "agent-a" && x["tool"] == "approve_payout" && now - l.seconds * 1000 < at && at <= now
+            }).count() as i64)
+        };
+        let d = ruling::decide(held.as_ref(), "agent-a", "approve_payout", &t["checks"], t["disclosed"].as_object().unwrap(), 4, &|k, f| held_list.listed(k, f), &mut count).unwrap();
+        let mut got = d.object("", "", "");
+        for k in ["v", "record_hash", "batch_hash", "server_time", "reason"] {
+            got.as_object_mut().unwrap().remove(k);
+        }
+        assert_eq!(got, t["expect"], "{}", t["name"]);
+    }
+    let rr = &c["ruled_record"];
+    let service = v["keys"][1]["public_key"].as_str().unwrap();
+    let e = Envelope::parse(&rr["record"]["envelope"]).unwrap();
+    assert_eq!(jcs::canonicalize(&rr["record"]["envelope"]).unwrap(), rr["envelope_jcs"].as_str().unwrap());
+    assert_eq!(e.record_hash().unwrap(), h(&rr["record_hash"]));
+    let rec: SignedRecord = from_value(&rr["record"]).unwrap();
+    assert_eq!(rec.check_content().unwrap(), None);
+    let receipt: Receipt = from_value(&rr["receipt"]).unwrap();
+    let g = receipt.ruling.as_ref().unwrap();
+    ruling::validate(g).unwrap();
+    assert_eq!(jcs::canonicalize(g).unwrap(), rr["ruling_jcs"].as_str().unwrap());
+    assert_eq!(hash_json(g).unwrap(), h(&rr["ruling_hash"]));
+    sign::verify(service, Domain::Ruling, &h(&rr["ruling_hash"]), receipt.ruling_sig.as_deref().unwrap()).unwrap();
+    assert_eq!(g["record_hash"], rr["record_hash"]);
+    assert_eq!(checks::disclosed_hash(&rr["record"]["disclosed"], rr["record"]["disclosed_salt"].as_str().unwrap()).unwrap(), h(&rr["record"]["envelope"]["checks"]["disclosed_hash"]));
+    for t in rr["tampered"].as_array().unwrap() {
+        let ok = sign::verify(service, Domain::Ruling, &hash_json(&t["ruling"]).unwrap(), t["ruling_sig"].as_str().unwrap()).is_ok() && t["ruling"]["record_hash"] == rr["record_hash"];
+        assert!(!ok, "{}", t["name"]);
+    }
+}
+
+#[test]
+fn checks_envelopes_and_verifier_lines() {
+    let c = &vectors()["checks"];
+    for t in c["envelopes_with_checks"]["valid"].as_array().unwrap() {
+        let e = Envelope::parse(&t["envelope"]).unwrap_or_else(|err| panic!("{}: {err}", t["name"]));
+        assert_eq!(e.record_hash().unwrap(), h(&t["record_hash"]), "{}", t["name"]);
+    }
+    for t in c["envelopes_with_checks"]["invalid"].as_array().unwrap() {
+        assert!(Envelope::parse(&t["envelope"]).is_err(), "{}", t["name"]);
+    }
+    // A checks object of null is not an absent one (§2.2).
+    let mut e = c["envelopes_with_checks"]["valid"][3]["envelope"].clone();
+    e["checks"] = Value::Null;
+    assert!(Envelope::parse(&e).is_err());
+    assert!(envelope::asks_for_ruling(&c["ruled_record"]["record"]["envelope"]["checks"]));
+    let vl = &c["verifier_lines"];
+    let recs = vl["records"].as_array().unwrap();
+    let (mut lines, mut json_out) = (Vec::new(), serde_json::Map::new());
+    for agent in ["agent-a", "agent-b"] {
+        let items: Vec<report::Item> = recs
+            .iter()
+            .filter(|r| r["record"]["agent"] == agent)
+            .map(|r| report::Item {
+                seq: r["record"]["seq"].as_u64().unwrap(),
+                kind: Kind::parse(r["record"]["kind"].as_str().unwrap()).unwrap(),
+                checks: r["record"].get("checks"),
+                decision_seq: r["record"]["ref_seq"].as_u64(),
+                ruling: (!r["ruling"].is_null()).then_some(&r["ruling"]),
+            })
+            .collect();
+        if let Some(j) = report::agent_checks(&items) {
+            lines.extend(report::lines(agent, &j));
+            json_out.insert(agent.into(), serde_json::to_value(&j).unwrap());
+        }
+    }
+    assert_eq!(json!(lines), vl["expect"]["checks_lines"]);
+    assert_eq!(Value::Object(json_out), vl["expect"]["checks"]);
+}
+
+#[test]
+fn checks_secret_tokens_rebuild() {
+    let c = &vectors()["checks"];
+    for (id, t) in c["local_checks"]["tokens"].as_object().unwrap() {
+        let whole: String = t["parts"].as_array().unwrap().iter().map(|p| p.as_str().unwrap()).collect();
+        assert_eq!(sha256(whole.as_bytes()), h(&t["sha256"]), "{id}");
+        assert!(t["parts"].as_array().unwrap().len() >= 2, "{id} is written in parts");
+    }
+    // No whole token is in the file (secret scanners).
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../spec/vectors.json")).unwrap();
+    for t in c["local_checks"]["tokens"].as_object().unwrap().values() {
+        let whole: String = t["parts"].as_array().unwrap().iter().map(|p| p.as_str().unwrap()).collect();
+        let escaped = serde_json::to_string(&whole).unwrap();
+        assert!(!text.contains(&escaped[1..escaped.len() - 1]), "a whole token is in vectors.json");
+    }
+}
+
+#[test]
+fn checks_fingerprint_exceptions() {
+    let v = vectors();
+    let c = &v["checks"];
+    let fe = &c["fingerprint_exceptions"];
+    let held = fingerprints::Held {
+        seq: 4,
+        last: None,
+        entries: fe["fingerprint_entries"].as_array().unwrap().iter().map(|e| fingerprints::Entry::parse(e).unwrap()).collect(),
+    };
+    for t in fe["cases"].as_array().unwrap() {
+        // The exceptions as a held rule set carries them: the vectors' excepted version with this case's list.
+        let rs = (!t["exceptions"].is_null()).then(|| {
+            let mut doc = c["rulings"]["rule_sets"]["excepted"].clone();
+            doc["fingerprint_exceptions"] = t["exceptions"].clone();
+            rules::RuleSet::parse(&doc).unwrap()
+        });
+        let found: Vec<&str> = ["description", "server", "tool"]
+            .into_iter()
+            .filter(|k| t["tool"][*k].as_str().is_some_and(|f| held.listed(k, f) && !rs.as_ref().is_some_and(|rs| rs.excepts(k, f))))
+            .collect();
+        let got = serde_json::json!({"result": if found.is_empty() { "allow" } else { "block" }, "found": found});
+        assert_eq!(got, t["expect"], "{}", t["name"]);
+    }
 }

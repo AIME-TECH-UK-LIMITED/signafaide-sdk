@@ -7,8 +7,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
+import { defaultChecksFile, toolFingerprints } from "../src/checks.js";
 import { declaredName, toolNote } from "../src/coverage.js";
-import { GATEWAY_ERROR, outcomeContent, runGateway, type GatewayOptions, type GatewayResult } from "../src/gateway.js";
+import { GATEWAY_ERROR, INVALID_REQUEST, PARSE_ERROR, outcomeContent, runGateway, type GatewayOptions, type GatewayResult } from "../src/gateway.js";
 import { verify } from "../src/index.js";
 import { recordHash } from "../src/records.js";
 import { useProject } from "./helpers.js";
@@ -62,6 +63,12 @@ class Session {
 
   send(msg: object | string): void {
     this.stdin.write((typeof msg === "string" ? msg : JSON.stringify(msg)) + "\n");
+  }
+
+  /** Write the client's last line with no newline after it, and close the client's side. */
+  sendLast(msg: object | string): Promise<GatewayResult> {
+    this.stdin.end(typeof msg === "string" ? msg : JSON.stringify(msg));
+    return this.result;
   }
 
   call(id: number | string, name: string, args: object = {}): void {
@@ -473,5 +480,163 @@ describe("gateway: a call that cannot be recorded does not run", () => {
     } finally {
       delete process.env.SIGNAFAIDE_DISABLED;
     }
+  });
+});
+
+describe("gateway: tool-call checks (spec §8)", () => {
+  const writeChecks = (over: Record<string, unknown> = {}): void =>
+    fs.writeFileSync(path.join(ctx.root, "signafaide.checks.json"), JSON.stringify({ ...defaultChecksFile(), ...over }));
+
+  it("checks every call before forwarding it: fingerprints from serverInfo and tools/list, the JSON-RPC id as call_id, a blocked call answered here", async () => {
+    writeChecks({ mode: "enforce" });
+    const s = new Session();
+    s.send({ jsonrpc: "2.0", id: 0, method: "initialize", params: {} });
+    await s.answer(0);
+    await s.list(1);
+    s.call(2, "echo", { url: "http://169.254.169.254/latest/meta-data/" });
+    const refused = await s.answer(2);
+    expect(refused.error.code).toBe(GATEWAY_ERROR);
+    expect(refused.error.data).toEqual({ signafaide: "blocked", check: "address" });
+    expect(refused.error.message).toContain("the address check found metadata");
+    s.call("b", "echo", { n: 1 });
+    expect((await s.answer("b")).result.content[0].text).toBe('{"n":1}');
+    await s.settled();
+    expect(s.seen().filter((l) => l.includes("tools/call"))).toHaveLength(1); // the server never saw the blocked call
+    const [d1, o1, d2, o2] = calls();
+    const fps = toolFingerprints("echo", "echo", { type: "object" }, { name: "fake", version: "1" });
+    expect(d1.envelope.checks!.tool).toEqual(fps);
+    expect(d1.envelope.checks!.call_id).toBe(2);
+    expect(d1.envelope.checks!.result).toBe("block");
+    expect(o1.envelope.checks).toEqual({ ran: false, ruling: "not_asked", results: [], result: "allow" });
+    expect((o1.content as any).error.type).toBe("Blocked");
+    expect(d2.envelope.checks!.call_id).toBe("b");
+    expect(o2.envelope.checks).toEqual({ ran: true, ruling: "not_asked", results: [{ check: "hidden_instruction", result: "allow", mode: "enforce", found: [] }], result: "allow" });
+    await s.close();
+  });
+
+  it("a batch: each call is checked on its own; the blocked one is answered with the server's answer to the rest", async () => {
+    writeChecks({ mode: "enforce" });
+    const s = new Session();
+    s.send([
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "echo", arguments: { host: "http://localhost:8080/" } } },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "echo", arguments: { a: 1 } } },
+    ]);
+    const answer = await s.next((m) => Array.isArray(m));
+    expect(answer.map((m: any) => m.id).sort()).toEqual([1, 2]);
+    expect(answer.find((m: any) => m.id === 1).error.data).toEqual({ signafaide: "blocked", check: "address" });
+    expect(answer.find((m: any) => m.id === 2).result).toBeDefined();
+    const decisions = calls().filter((r) => r.envelope.kind === "decision");
+    expect(decisions.map((r) => r.envelope.checks!.call_id)).toEqual([1, 2]);
+    await s.close();
+  });
+
+  it("strictness only from --strict, --strict-tools and the checks file; the rule set's fail mode only for strict tools; missing fields named", async () => {
+    await ctx.rec.createSandbox();
+    ctx.service.publishRules(ctx.rec.apiKey!, [{ id: "limit", about: "Big payouts.", action: "block", tools: ["slow"], agents: null, when: [{ field: "/ms", op: "gt", value: 1000 }] }], {
+      fail: { echo: "open", slow: "open" },
+    });
+    writeChecks({ tools: { slow: { strict: true } } });
+    await ctx.rec.checks.pullRules();
+    const s = new Session();
+    s.call(1, "echo", { a: 1 }); // not strict: the rule set's fail entry does not make it strict
+    expect((await s.answer(1)).result).toBeDefined();
+    s.call(2, "slow", { ms: 1, tag: "x" }); // strict by the checks file; /ms not disclosed
+    const refused = await s.answer(2);
+    expect(refused.error.data).toEqual({ signafaide: "blocked", check: "fields_missing", rules_version: 1, missing: ["/ms"] });
+    expect(refused.error.message).toContain("Add /ms to the disclose list of slow");
+    const decisions = calls().filter((r) => r.envelope.kind === "decision");
+    expect(decisions.map((r) => [r.envelope.checks!.strict, r.envelope.checks!.fail])).toEqual([
+      [false, null],
+      [true, "open"],
+    ]);
+    expect(calls().at(-1)!.envelope.checks).toEqual({ ran: false, ruling: "block", results: [], result: "allow" });
+    await s.close();
+  });
+
+  it("a strict call with no ruling and fail mode closed is answered with no_ruling", async () => {
+    await ctx.rec.createSandbox();
+    ctx.service.noRuling = true;
+    writeChecks();
+    const s = new Session({ strictTools: ["echo"] });
+    s.call(1, "echo", { a: 1 });
+    const refused = await s.answer(1);
+    expect(refused.error.data).toEqual({ signafaide: "no_ruling" });
+    await s.settled();
+    expect(s.seen().filter((l) => l.includes("tools/call"))).toEqual([]);
+    expect(calls().at(-1)!.envelope.checks).toEqual({ ran: false, ruling: "none", results: [], result: "allow" });
+    await s.close();
+  });
+});
+
+describe("gateway: what reaches the server is what was checked (release review)", () => {
+  const writeChecks = (over: Record<string, unknown> = {}): void =>
+    fs.writeFileSync(path.join(ctx.root, "signafaide.checks.json"), JSON.stringify({ ...defaultChecksFile(), ...over }));
+  const METADATA = { url: "http://169.254.169.254/latest/meta-data/" };
+
+  it("with checks on, a line that does not parse is answered with a parse error and never forwarded", async () => {
+    writeChecks({ mode: "enforce" });
+    const s = new Session();
+    // Another parser (Python's json) reads NaN; this one cannot, so it never saw a call to check.
+    s.send('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{"url":"http://169.254.169.254/latest/meta-data/","pad":NaN}}}');
+    const refused = await s.next((m) => m?.id === null && m?.error);
+    expect(refused.error.code).toBe(PARSE_ERROR);
+    expect(refused.error.data).toEqual({ signafaide: "parse_error" });
+    s.send("5");
+    expect((await s.next((m) => m?.id === null && m?.error?.code === INVALID_REQUEST)).error.data).toEqual({ signafaide: "invalid_request" });
+    await s.settled();
+    expect(s.seen().filter((l) => l.includes("tools/call") || l === "5")).toEqual([]);
+    expect(s.stderr).toContain("a client line was not forwarded");
+    await s.close();
+  });
+
+  it("with strict mode on and checks off, a line that does not parse is answered too", async () => {
+    const s = new Session({ strictTools: ["echo"] });
+    s.send('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{"n":1}}} // a comment');
+    expect((await s.next((m) => m?.id === null && m?.error)).error.code).toBe(PARSE_ERROR);
+    await s.settled();
+    expect(s.seen().filter((l) => l.includes("tools/call"))).toEqual([]);
+    await s.close();
+  });
+
+  it("with checks on, a call is forwarded as the gateway parsed it, never as the client's bytes", async () => {
+    writeChecks({ mode: "enforce" });
+    const s = new Session();
+    // A duplicate key: this parser keeps the last value, another may keep the first.
+    const dup = '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"url":"http://169.254.169.254/latest/meta-data/"}},"params":{"name":"echo","arguments":{"n":1}}}';
+    s.send(dup);
+    expect((await s.answer(3)).result.content[0].text).toBe('{"n":1}');
+    s.send([JSON.parse('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"echo","arguments":{"n":2}}}')]);
+    await s.next((m) => Array.isArray(m) && m[0]?.id === 4);
+    await s.settled();
+    const seen = s.seen().filter((l) => l.includes("tools/call"));
+    expect(seen).toEqual([JSON.stringify(JSON.parse(dup)), JSON.stringify([{ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "echo", arguments: { n: 2 } } }])]);
+    await s.close();
+  });
+
+  for (const shape of ["batch", "single message"] as const) {
+    it(`the last line with no newline goes the same way as every other (${shape})`, async () => {
+      writeChecks({ mode: "enforce" });
+      const s = new Session();
+      const call = { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "echo", arguments: METADATA } };
+      await s.sendLast(shape === "batch" ? [call] : call);
+      expect(s.seen().filter((l) => l.includes("tools/call"))).toEqual([]);
+      const refused = s.raw.map((l) => JSON.parse(l)).flat().find((m: any) => m.id === 9);
+      expect(refused.error.data).toEqual({ signafaide: "blocked", check: "address" });
+      expect(calls().map((r) => r.envelope.kind)).toEqual(["decision", "outcome"]);
+    });
+  }
+
+  it("strict with checks off: a call whose id is not a string or a number is refused as an invalid request, unforwarded and unrecorded", async () => {
+    const s = new Session({ strict: true });
+    s.send({ jsonrpc: "2.0", id: null, method: "tools/call", params: { name: "echo", arguments: { n: 1 } } });
+    const refused = await s.next((m) => m?.id === null && m?.error);
+    expect(refused.error.code).toBe(INVALID_REQUEST);
+    expect(refused.error.data).toEqual({ signafaide: "invalid_request" });
+    s.send({ jsonrpc: "2.0", id: { a: 1 }, method: "tools/call", params: { name: "echo", arguments: { n: 2 } } });
+    await s.next((m) => m?.id === null && m?.error?.code === INVALID_REQUEST);
+    await s.settled();
+    expect(s.seen().filter((l) => l.includes("tools/call"))).toEqual([]);
+    expect(calls()).toEqual([]);
+    await s.close();
   });
 });

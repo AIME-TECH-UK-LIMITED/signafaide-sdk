@@ -13,6 +13,12 @@ fn required<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Opti
     Option::<T>::deserialize(d)
 }
 
+/// An optional field that, when present, keeps its value, `null` included, so that a field that
+/// must be absent rather than null (`checks`, §2.2) is caught by validation instead of dropped.
+fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(d).map(Some)
+}
+
 /// Parse a JSON value into a strict protocol type.
 pub fn from_value<T: DeserializeOwned>(v: &Value) -> Result<T> {
     T::deserialize(v).map_err(|e| Error::new(e.to_string()))
@@ -104,6 +110,10 @@ pub struct Envelope {
     pub content_hash: Hash,
     #[serde(rename = "ref", deserialize_with = "required")]
     pub reference: Option<Hash>,
+    /// What the tool-call checks of this call found (§2.8); absent (never null) when the client
+    /// ran none. An envelope without it hashes exactly as before checks existed.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub checks: Option<Value>,
 }
 
 impl Envelope {
@@ -138,8 +148,12 @@ impl Envelope {
         match (self.kind, self.reference.is_some()) {
             (Kind::Outcome, false) => bail!("an outcome must set ref to the record_hash of its decision"),
             (Kind::Decision | Kind::Note, true) => bail!("ref must be null unless kind is outcome"),
-            _ => Ok(()),
+            _ => {}
         }
+        if let Some(c) = &self.checks {
+            crate::checks::envelope::validate(self.kind, &self.name, c).map_err(Error::new)?;
+        }
+        Ok(())
     }
 
     pub fn time_ms(&self) -> i64 {
@@ -185,6 +199,12 @@ pub struct SignedRecord {
     /// The content's salt (§2.1), sent only together with `content`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub salt: Option<String>,
+    /// The values a strict call disclosed to the witness (§2.3, §10.4), `{pointer: value}`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub disclosed: Option<Value>,
+    /// The disclosed values' own salt (§2.3), never the content's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disclosed_salt: Option<String>,
 }
 
 impl SignedRecord {
@@ -278,6 +298,16 @@ pub struct Receipt {
     pub service_key_id: String,
     pub head: Head,
     pub head_sig: String,
+    /// The witness's ruling (§3.5) on a decision that asked for one, kept as sent: check 6
+    /// validates it field by field.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub ruling: Option<Value>,
+    /// The service's signature over domain `ruling` and `ruling_hash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ruling_sig: Option<String>,
+    /// Why the witness could not rule (`rules_unavailable`); not signed (§3.4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ruling_error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -519,6 +549,11 @@ pub struct PackRecord {
     pub content: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub salt: Option<String>,
+    /// Disclosed values (§2.3), only in the key holder's own export (§7).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub disclosed: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disclosed_salt: Option<String>,
     pub receipt: Receipt,
 }
 
@@ -564,6 +599,10 @@ pub struct Pack {
     pub heads: Vec<SignedHead>,
     pub records: Vec<Value>,
     pub anchors: Vec<Value>,
+    /// The signed rule set versions (§10) the records name or that were in force meanwhile (§7),
+    /// each `{rules, sig, service_key_id}`; present when the project has a rule set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_sets: Option<Vec<Value>>,
     /// The service's signature (domain `export`) over the export statement (§7).
     pub export_sig: String,
 }
@@ -579,6 +618,10 @@ pub struct ExportStatement<'a> {
     pub filter: &'a PackFilter,
     pub heads: Vec<&'a Head>,
     pub records_hash: Hash,
+    /// The `rules_hash` of each `rule_sets` entry of the pack, in pack order; present exactly
+    /// when the pack has `rule_sets`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule_sets: Option<Vec<Hash>>,
 }
 
 impl ExportStatement<'_> {
@@ -608,6 +651,10 @@ impl Pack {
             filter: &self.filter,
             heads: self.heads.iter().map(|h| &h.head).collect(),
             records_hash: records_hash(&list)?,
+            rule_sets: match &self.rule_sets {
+                None => None,
+                Some(sets) => Some(sets.iter().map(|s| s.get("rules").ok_or_else(|| Error::new("a rule_sets entry has no rules")).and_then(hash_json)).collect::<Result<_>>()?),
+            },
         })
     }
 

@@ -15,6 +15,7 @@ import { AGENT_RE, CLEAN_RESTART_NOTE, INSTANCE_NOTE, INSTANCE_START, INSTANCE_S
 import { plural } from "./plural.js";
 import { coverage, coverageLines, telemetry, telemetryLines, type Coverage, type Telemetry } from "./coverage.js";
 import { checkHeader, type BlockRoots } from "./timestamps.js";
+import { acceptRules, agentChecks, asksForRuling, checksLines, disclosedErrors, rulingErrors, type AgentChecks } from "./checks.js";
 
 export const CHECKS = [
   ["schema", "Envelope schema"],
@@ -208,6 +209,9 @@ export class Report {
    * tools recorded from telemetry spans, when their decisions were written, and whether the
    * telemetry is sampled. A note, never a failure. */
   telemetry: Record<string, Telemetry> = {};
+  /** Tool-call checks per agent (§7; per chain for local state), for agents with a line: what
+   * the checks of the agent's records found and the rulings on their receipts. A report, never a failure. */
+  toolChecks: Record<string, AgentChecks> = {};
 
   constructor(
     readonly checks: Check[],
@@ -260,6 +264,11 @@ export class Report {
     return Object.entries(this.telemetry).flatMap(([agent, t]) => telemetryLines(agent, t));
   }
 
+  /** The tool-call checks report in words (§7), agent by agent. */
+  toolChecksLines(): string[] {
+    return Object.entries(this.toolChecks).flatMap(([agent, j]) => checksLines(agent, j));
+  }
+
   lines(): string[] {
     const out = [...this.notes];
     if (this.project && this.env) {
@@ -279,6 +288,7 @@ export class Report {
     if (this.checks.some((c) => c.status === "pending")) out.push(PENDING_MEANS);
     out.push(...this.coverageLines().map((l) => `coverage: ${l}`));
     out.push(...this.telemetryLines().map((l) => `telemetry: ${l}`));
+    out.push(...this.toolChecksLines().map((l) => `tool-call checks: ${l}`));
     out.push(...this.after);
     out.push(...this.blocked.map((b) => `BLOCKED ${b}`));
     out.push(this.resultLine);
@@ -305,6 +315,7 @@ export class Report {
       checks: this.checks,
       coverage: this.coverage,
       telemetry: this.telemetry,
+      tool_call_checks: this.toolChecks,
       ...(this.after.length ? { not_yet: this.after } : {}),
       ...(this.blocked.length ? { blocked: this.blocked } : {}),
     };
@@ -417,7 +428,23 @@ export function recordsHash(records: any[]): string {
 
 /** The export statement the service signs (§7, domain `export`). */
 export function exportStatement(pack: any): object {
-  return { project: pack.project, ...(pack.project_name !== undefined ? { project_name: pack.project_name } : {}), env: pack.env, generated: pack.generated, filter: pack.filter, heads: pack.heads.map((sh: any) => sh.head), records_hash: recordsHash(pack.records) };
+  const out: Record<string, unknown> = {
+    project: pack.project,
+    ...(pack.project_name !== undefined ? { project_name: pack.project_name } : {}),
+    env: pack.env,
+    generated: pack.generated,
+    filter: pack.filter,
+    heads: pack.heads.map((sh: any) => sh.head),
+    records_hash: recordsHash(pack.records),
+  };
+  // The rules_hash of each rule set version the pack holds, in pack order (§7).
+  if (pack.rule_sets !== undefined && pack.rule_sets !== null) {
+    out.rule_sets = pack.rule_sets.map((e: any) => {
+      if (!e || typeof e !== "object" || e.rules === undefined) throw new Error("a rule_sets entry has no rules");
+      return hashJson(e.rules);
+    });
+  }
+  return out;
 }
 
 /** True for `http://localhost` and loopback addresses: the only hosts plain http is accepted from. */
@@ -486,6 +513,7 @@ export function verifyPack(pack: any, serviceKeys: KeyDoc[] | null, opts: PackOp
   report.projectName = typeof pack.project_name === "string" ? pack.project_name : null;
   report.coverage = v.coverage;
   report.telemetry = v.telemetry;
+  report.toolChecks = v.toolChecks;
   return report;
 }
 
@@ -519,6 +547,7 @@ export function verifyLocalState(local: LocalInput, serviceKeys: KeyDoc[], drand
   report.nothingCosigned = v.nothingCosigned;
   report.coverage = v.coverage;
   report.telemetry = v.telemetry;
+  report.toolChecks = v.toolChecks;
   return report;
 }
 
@@ -540,10 +569,13 @@ function packError(pack: any): string | null {
   if (pack.format !== "signafaide-pack/1") return `format is '${pack.format}', expected 'signafaide-pack/1'`;
   const fields = ["format", "generated", "project", "env", "service_keys", "agent_keys", "filter", "heads", "records", "anchors", "export_sig"];
   for (const k of fields) if (!(k in pack)) return `missing field \`${k}\``;
-  const extra = Object.keys(pack).filter((k) => !fields.includes(k) && k !== "project_name").sort();
+  const extra = Object.keys(pack)
+    .filter((k) => !fields.includes(k) && k !== "project_name" && k !== "rule_sets")
+    .sort();
   if (extra.length) return `unknown field \`${extra[0]}\``;
   for (const k of ["service_keys", "agent_keys", "heads", "records", "anchors"]) if (!Array.isArray(pack[k])) return `\`${k}\` must be a list`;
   if (typeof pack.export_sig !== "string") return "`export_sig` must be a string";
+  if ("rule_sets" in pack && !Array.isArray(pack.rule_sets)) return "`rule_sets` must be a list";
   if (pack.env !== "test" && pack.env !== "live") return "env must be test or live";
   if (!validProjectId(pack.project)) return "project is not a valid project id";
   if ("project_name" in pack) {
@@ -657,6 +689,8 @@ class Verifier {
   coverage: Record<string, Coverage> = {};
   /** Telemetry notes per chain (§7), filled by `run`. */
   telemetry: Record<string, Telemetry> = {};
+  /** Tool-call checks per chain (§7), filled by `run`. */
+  toolChecks: Record<string, AgentChecks> = {};
   /** Local state: chain id -> the witness's signed head a chain continues after (§8). */
   localBases: Record<string, { head: any; head_sig: string; stop?: any }> = {};
 
@@ -746,6 +780,7 @@ class Verifier {
     this.drand(batches);
     this.anchors(anchors, batches);
     this.content(recs);
+    this.toolChecks = this.reportChecks(chains);
     if (this.local && !shipped.length && recs.length) {
       this.nothingCosigned = true;
       // Local records no witness has co-signed yet: the checks of the witness's part are not passes.
@@ -896,6 +931,26 @@ class Verifier {
     return chains;
   }
 
+  /** The tool-call checks report (§7), per agent (per chain locally), in chain order. */
+  private reportChecks(chains: Map<string, Map<number, Rec>>): Record<string, AgentChecks> {
+    const out: Record<string, AgentChecks> = {};
+    for (const agent of [...chains.keys()].sort()) {
+      const chain = chains.get(agent)!;
+      const seqOf = new Map<string, number>();
+      for (const [seq, x] of chain) seqOf.set(x.h, seq);
+      const items = [...chain.keys()]
+        .sort((a, b) => a - b)
+        .map((seq) => {
+          const r = chain.get(seq)!.r;
+          const e = r.envelope;
+          return { seq, kind: e.kind, checks: e.checks, decision_seq: e.ref ? (seqOf.get(e.ref) ?? null) : null, ruling: r.receipt?.ruling };
+        });
+      const j = agentChecks(items);
+      if (j) out[agent] = j;
+    }
+    return out;
+  }
+
   // 5
   private merkle(shipped: Rec[]): void {
     for (const { label, r, h } of shipped) {
@@ -926,6 +981,42 @@ class Verifier {
         acc.fail(item, `batch_sig: ${(e as Error).message}`);
       }
       batches.set(`${String(rc.batch.seq).padStart(16, "0")}\n${computed}`, rc);
+    }
+    // Rulings on receipts (§3.5): signed over domain `ruling` by a service key active at its
+    // server_time, naming this receipt's record, batch and time, and only on a decision that asked.
+    const rulings = new Map<string, string>();
+    for (const { label, r, h } of shipped) {
+      const rc = r.receipt;
+      const item = `ruling on ${label}`;
+      const asked = r.envelope.kind === "decision" && asksForRuling(r.envelope.checks);
+      const g = rc.ruling;
+      const sig = rc.ruling_sig;
+      if (g === undefined && sig === undefined) {
+        if ("ruling_error" in rc && (rc.ruling_error !== "rules_unavailable" || !asked)) acc.fail(item, "ruling_error is only rules_unavailable, on the receipt of a decision that asked for a ruling");
+        continue;
+      }
+      if (g === undefined || sig === undefined) {
+        acc.fail(item, "ruling and ruling_sig come together");
+        continue;
+      }
+      acc.checked++;
+      if ("ruling_error" in rc) acc.fail(item, "a receipt with a ruling has no ruling_error");
+      const err = rulingErrors(g);
+      if (err) {
+        acc.fail(item, err);
+        continue;
+      }
+      const gh = hashJson(g);
+      try {
+        const k = this.serviceKey(rc.service_key_id, g.server_time);
+        if (typeof sig !== "string" || !verifySig(k.public_key, "ruling", gh, sig)) throw new Error("signature does not verify");
+      } catch (e) {
+        acc.fail(item, `ruling_sig: ${(e as Error).message}`);
+      }
+      if (g.record_hash !== rc.record_hash || g.batch_hash !== rc.batch_hash || g.server_time !== rc.batch.server_time) acc.fail(item, "the ruling names another record, batch or time than its receipt");
+      if (!asked) acc.fail(item, "a ruling on a record that did not ask for one (only a strict decision not blocked on the client asks)");
+      if (rulings.has(h) && rulings.get(h) !== gh) acc.fail(item, "two different rulings for one record");
+      if (!rulings.has(h)) rulings.set(h, gh);
     }
     return batches;
   }
@@ -998,6 +1089,7 @@ class Verifier {
       } catch (e) {
         acc.fail("export statement", (e as Error).message);
       }
+      this.checkRuleSets();
       const agents = this.x.filter.agents;
       inFilter = (a: string): boolean => agents === null || agents.includes(a);
       for (const { label, r } of this.recs) {
@@ -1212,6 +1304,44 @@ class Verifier {
     }
   }
 
+  /** Check 8 (§7): each `rule_sets` entry is a valid document of the pack's project and env,
+   * signed over domain `rules` by a service key active at its `issued` (§10.2 steps 1 to 3); no
+   * two share a version; no record or ruling names a held version with another hash. */
+  private checkRuleSets(): void {
+    const acc = this.acc[7];
+    const held = new Map<string, string>(); // "<set>\n<version>" -> rules_hash
+    const versions = new Set<number>();
+    const ruleSets: any[] = Array.isArray(this.x.pack?.rule_sets) ? this.x.pack.rule_sets : [];
+    ruleSets.forEach((e, i) => {
+      const item = `rule_sets[${i}]`;
+      acc.checked++;
+      if (!exactKeys(e, ["rules", "sig", "service_key_id"])) return acc.fail(item, "a rule_sets entry is {rules, sig, service_key_id}");
+      const step = acceptRules(null, e, this.serviceKeys, this.project ?? "", this.env ?? "");
+      if (step !== null) {
+        const why: Record<string, string> = {
+          schema: "not a valid rule set",
+          project: "the rule set belongs to another project or env",
+          signature: "the rule set's sig does not verify with a service key active at its issued",
+        };
+        return acc.fail(item, why[step] ?? step);
+      }
+      const doc = e.rules;
+      if (versions.has(doc.version)) acc.fail(item, `two rule_sets entries hold version ${doc.version}`);
+      versions.add(doc.version);
+      held.set(`${doc.set}\n${doc.version}`, hashJson(doc));
+    });
+    for (const { label, r } of this.recs) {
+      const named: any[] = [...(Array.isArray(r.envelope.checks?.rules) ? r.envelope.checks.rules : [])];
+      const g = r.receipt?.ruling;
+      if (g && typeof g === "object" && g.rules && typeof g.rules === "object") named.push(g.rules);
+      for (const x of named) {
+        if (!x || typeof x !== "object") continue;
+        const k = `${x.set}\n${x.version}`;
+        if (held.has(k) && held.get(k) !== x.hash) acc.fail(label, `names rule set ${x.set} version ${x.version} with a rules_hash other than the version the pack holds`);
+      }
+    }
+  }
+
   // 12
   private content(recs: Rec[]): void {
     const acc = this.acc[11];
@@ -1220,16 +1350,23 @@ class Verifier {
       let salt: unknown = r.salt;
       const local = this.contents.get(h);
       if (c === undefined && salt === undefined && local) ({ content: c, salt } = local);
-      if (c === undefined && salt === undefined) continue;
+      const hasDisclosed = "disclosed" in r || "disclosed_salt" in r;
+      if (c === undefined && salt === undefined && !hasDisclosed) continue;
       acc.checked++;
-      let ch: string | null;
-      try {
-        ch = checkContent(c, salt, r.envelope.content_hash);
-      } catch (e) {
-        acc.fail(label, (e as Error).message);
-        continue;
+      let matched: unknown = undefined;
+      if (c !== undefined || salt !== undefined) {
+        try {
+          const ch = checkContent(c, salt, r.envelope.content_hash);
+          if (ch !== null) acc.fail(label, `content hashes to ${ch}, envelope says ${r.envelope.content_hash}`);
+          else matched = c;
+        } catch (e) {
+          acc.fail(label, (e as Error).message);
+        }
       }
-      if (ch !== null) acc.fail(label, `content hashes to ${ch}, envelope says ${r.envelope.content_hash}`);
+      if (hasDisclosed) {
+        const err = disclosedErrors(r, matched);
+        if (err) acc.fail(label, err);
+      }
     }
     if (!acc.checked) {
       acc.notChecked = true;

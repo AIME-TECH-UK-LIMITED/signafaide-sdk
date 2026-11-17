@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 from .jcs import canonicalize
 
-DOMAINS = ("record", "batch", "head", "anchor", "register", "rotate", "agent_key", "export", "draft")
+DOMAINS = ("record", "batch", "head", "anchor", "register", "rotate", "agent_key", "export", "draft", "ruling", "rules", "fingerprints")
 HEX64 = re.compile(r"\A[0-9a-f]{64}\Z")
 SALT_RE = re.compile(r"\A[0-9a-f]{32}\Z")
 _B64URL = re.compile(r"\A[A-Za-z0-9_-]*\Z")

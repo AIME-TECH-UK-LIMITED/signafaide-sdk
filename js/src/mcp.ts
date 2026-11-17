@@ -12,6 +12,7 @@ import { claimLines, sandboxGone, sandboxView } from "./claim.js";
 import { explainError } from "./errors.js";
 import { verify } from "./index.js";
 import { plural } from "./plural.js";
+import { explainRulingLines, showRulesLines } from "./rulings.js";
 import { FRAMEWORKS, LANGUAGES, detectProject, installCommand, steps as quickstartSteps, verifyCommand, type Framework, type Language } from "./project.js";
 import { configure, envOf, legalLinks, termsNotice, type Recorder } from "./runtime.js";
 import { KeysRequired, ANCHOR_WINDOW_MS } from "./verifier.js";
@@ -412,6 +413,39 @@ export function createServer(root: string = process.cwd()): McpServer {
         return text(`signafaide: ${(e as Error).message}`, true);
       }
     },
+  );
+
+  server.registerTool(
+    "signafaide_explain_ruling",
+    {
+      title: "Explain a signafAIde ruling on a tool call",
+      description:
+        "Explains why a tool call was allowed, noted or blocked: the client's tool-call checks, the witness's ruling (allow or block, mode, basis), the rules that matched, the rule set version, the fields that were not disclosed, and how to allow the call. " +
+        "Pass the record hash (or its first 8 or more characters) of the call's decision or outcome, from signafaide_records. Pass pack to read a verification pack instead of the local records. " +
+        "Read-only: it reads local files, makes no request and changes nothing. It never prints a disclosed value, only field pointers, rule ids, codes and versions. " +
+        "It does not re-verify the record (use signafaide_verify); to see all the rules held, use signafaide_show_rules.",
+      inputSchema: z.object({
+        directory,
+        record: z.string().describe("A record hash, or its first 8 or more characters: a decision or its outcome."),
+        pack: z.string().optional().describe("Path of a verification pack (from `signafaide export` or an auditor link) to read the record from, instead of the local records."),
+      }),
+      annotations: readOnly(false),
+    },
+    ({ directory: dir, record, pack }) => guard(async () => explainRulingLines(open(dir), record, pack ? inside(pack) : undefined).join("\n")),
+  );
+
+  server.registerTool(
+    "signafaide_show_rules",
+    {
+      title: "Show the tool-call rules this project holds",
+      description:
+        "Shows the rules in force for this project's tool-call checks: the held rule set (version, mode, default, each rule on one line), the local rules and mode of the checks file, the fail mode of each strict tool, and the fields each strict tool discloses to the witness. " +
+        "Use it before explaining a ruling, or to see what a call would meet. " +
+        "Read-only: it reads local files, makes no request and changes nothing; `signafaide rules pull` fetches a newer version.",
+      inputSchema: z.object({ directory }),
+      annotations: readOnly(false),
+    },
+    ({ directory: dir }) => guard(async () => showRulesLines(open(dir)).join("\n")),
   );
 
   return server;

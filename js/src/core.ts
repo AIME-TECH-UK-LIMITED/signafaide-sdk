@@ -36,6 +36,27 @@ export {
 } from "./records.js";
 export { Client, DEFAULT_URL, SignafaideError, fetchJson } from "./http.js";
 export {
+  acceptRules,
+  agentChecks,
+  applyList,
+  asksForRuling,
+  checksErrors,
+  checksFileErrors,
+  checksLines,
+  defaultChecksFile,
+  disclosedErrors,
+  disclosedHash,
+  emptyList,
+  evaluate,
+  neededFields,
+  ruleSetErrors,
+  rulingErrors,
+  stateHash,
+  toolFingerprints,
+  type AgentChecks,
+  type ToolFingerprints,
+} from "./checks.js";
+export {
   MAX_DECLARED_NAME,
   TOOLS,
   TOOL_PREFIX,

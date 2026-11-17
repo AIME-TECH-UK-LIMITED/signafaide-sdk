@@ -29,13 +29,14 @@ async function cli(...args: string[]): Promise<[number, string, string]> {
 
 describe("cli", () => {
   it("has the same commands as the Python CLI, plus the coding-agent ones and the MCP gateway", () => {
-    expect(Object.keys(COMMANDS).filter((c) => !["agent", "mcp", "gateway"].includes(c))).toEqual(["init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush"]);
+    expect(Object.keys(COMMANDS).filter((c) => !["agent", "mcp", "gateway"].includes(c))).toEqual(["init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush", "checks", "rules"]);
   });
 
   it("init, then claim", async () => {
     const [code, out] = await cli("init");
     expect(code).toBe(0);
-    expect(out.split("\n")).toHaveLength(5); // ready + claim link, why claim, time left, terms, what is sent
+    expect(out.split("\n")).toHaveLength(7); // ready + claim link, why claim, time left, terms, what is sent, which tool-call checks are on, how to change them
+    expect(out).toContain("tool-call checks: on in watch mode");
     expect(out).toContain(`claim it at ${ctx.service.url}/app/claim/`);
     expect(out).toContain(`By creating a sandbox you agree to the signafAIde Terms (${ctx.service.url}/legal/terms) and Privacy notice (${ctx.service.url}/legal/privacy).`);
     expect(out).toContain("records written before now ship with their original times");
