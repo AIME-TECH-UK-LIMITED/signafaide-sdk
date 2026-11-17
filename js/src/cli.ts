@@ -15,6 +15,8 @@ import { StateError, findRoot } from "./state.js";
 import { AGENT_IDS, SETUP_NOTES, setup } from "./agents.js";
 import { runGateway } from "./gateway.js";
 import { KeysRequired } from "./verifier.js";
+import { FILE_CHECKS, defaultChecksFile } from "./checks.js";
+import { checksPath } from "./checks-runtime.js";
 import { VERSION } from "./version.js";
 
 export interface Command {
@@ -159,6 +161,7 @@ export const COMMANDS: Record<string, Command> = {
         out(view.claimed || sandboxGone(view) ? `key found (${mask(key)}); ${first}` : `key found (${mask(key)}); claim the sandbox at ${view.claim_url}`);
         for (const line of rest) out(line);
       } else out(`key found (${mask(key)}, env ${envOf(key)}); nothing to create`);
+      initChecks(rec);
       return 0;
     },
   },
@@ -438,6 +441,7 @@ export const COMMANDS: Record<string, Command> = {
         const what = r.changes.map((c) => `${c.file} ${dry && /^(created|updated)$/.test(c.result) ? `would be ${c.result}` : c.result}`).join(", ");
         out(`${r.agent}: ${what}${r.note ? `; note: ${r.note}` : ""}`);
       }
+      if (!dry) initChecks(configure({ quiet: true, via: "cli", root }));
       for (const line of SETUP_NOTES(v.url)) out(line);
       return results.some((r) => r.changes.some((c) => c.result.startsWith("skipped"))) ? 1 : 0;
     },
@@ -511,7 +515,108 @@ export const COMMANDS: Record<string, Command> = {
       return r.failed ? 1 : 0;
     },
   },
+
+  checks: {
+    help: "tool-call checks: `checks status` (exit 1 on a problem), `checks approve <tool>`",
+    usage:
+      "checks status | checks approve <tool> [--agent X]\n" +
+      "  status: whether checks are on, the mode, each strict tool with its fail mode and the fields it discloses, the held rule set and list, any problem\n" +
+      "  approve <tool>: re-approve a changed tool (local approvals): its next call approves the description and schema it has then",
+    options: { agent: { type: "string" } },
+    async run(v, pos) {
+      const rec = recorder();
+      if (pos[0] === "approve") {
+        const tool = pos[1];
+        if (!tool) {
+          err("signafaide checks approve: name the tool");
+          return 2;
+        }
+        const agents = rec.checks.approve(tool, v.agent);
+        const held = rec.checks.heldRules();
+        if (held && held.approved !== null) {
+          out(`${tool}: the rule set approves tools (version ${held.version}); re-approve it in the console, which publishes a new version`);
+          return 1;
+        }
+        out(
+          agents.length
+            ? `${tool}: approval dropped for ${agents.join(", ")}; its next call approves the description and schema it has then`
+            : `${tool}: no local approval held; its next call approves the description and schema it has then`,
+        );
+        return 0;
+      }
+      if (pos[0] !== "status" || pos.length > 1) {
+        err(`usage: signafaide ${(COMMANDS.checks.usage ?? "").split("\n")[0]}`);
+        return 2;
+      }
+      const [lines, problem] = rec.checks.status();
+      for (const line of lines) out(line);
+      return problem ? 1 : 0;
+    },
+  },
+
+  rules: {
+    help: "the project's rule set: `rules pull`, `rules show`, `rules test <tool> <arguments JSON>`",
+    usage:
+      "rules pull | rules show | rules test <tool> '<arguments JSON>' [--agent X]\n" +
+      "  pull: fetch the project's rule set now; show: print the held one; test: evaluate a call as the client does",
+    options: { agent: { type: "string" } },
+    async run(v, pos) {
+      const rec = recorder();
+      if (pos[0] === "pull") {
+        out(await rec.checks.pullRules());
+        return "rules" in rec.checks.problems ? 1 : 0;
+      }
+      if (pos[0] === "show") {
+        const item = rec.checks.heldRulesItem();
+        if (!item) {
+          out("no rule set held" + (rec.apiKey ? "" : " (no API key)") + "; `signafaide rules pull` fetches it");
+          return 1;
+        }
+        out(JSON.stringify(item.rules, null, 2));
+        return 0;
+      }
+      if (pos[0] !== "test" || !pos[1] || pos[2] === undefined) {
+        err(`usage: signafaide ${(COMMANDS.rules.usage ?? "").split("\n")[0]}`);
+        return 2;
+      }
+      let args: unknown;
+      try {
+        args = JSON.parse(pos[2]);
+      } catch (e) {
+        throw new SyntaxError(`the arguments are not JSON: ${(e as Error).message}`);
+      }
+      for (const line of rec.checks.testCall(pos[1], args, v.agent || rec.defaultAgent)) out(line);
+      return 0;
+    },
+  },
 };
+
+/** Turn tool-call checks on in watch mode (§8): write the checks file when there is none, and say
+ * which checks are on, in which mode, which tools are strict and which fields leave the machine. */
+function initChecks(rec: Recorder): void {
+  const p = checksPath(rec.state.root);
+  if (p === null) {
+    out("tool-call checks: off (SIGNAFAIDE_CHECKS=0)");
+    return;
+  }
+  const how =
+    `tool-call checks: change it in ${p}: "mode": "enforce" blocks instead of noting, "strict": true on a tool asks the witness for a ruling, "disclose" lists the fields of its arguments that may leave the machine; ` +
+    "`signafaide checks status` shows what is on, which tools are strict and which fields leave";
+  if (!fs.existsSync(p)) {
+    fs.writeFileSync(p, JSON.stringify(defaultChecksFile(), null, 2) + "\n");
+    out(
+      `tool-call checks: on in watch mode (${path.basename(p)}, commit it with the code): ${FILE_CHECKS.join(", ")} and your rules note what they find and never block. ` +
+        "No tool is strict and no field of a tool's arguments leaves the machine; only tool fingerprints do.",
+    );
+  } else {
+    const [lines] = rec.checks.status();
+    out("tool-call checks: " + lines[0].replace(/^checks: /, ""));
+    // Which tools are strict and which fields leave the machine, as the file says.
+    for (const l of lines.slice(1)) if (/^(strict tool |PROBLEM)/.test(l)) out("tool-call checks: " + l);
+    if (!lines.some((l) => /^strict tool /.test(l))) out("tool-call checks: no tool is strict; only tool fingerprints leave the machine unless a tool lists fields in disclose");
+  }
+  out(how);
+}
 
 /** `path/to/file.js:function` or `package:function`. */
 export async function loadCandidate(spec: string): Promise<(input: any) => unknown> {

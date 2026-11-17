@@ -22,6 +22,12 @@ pub enum Domain {
     Export,
     /// A client's local draft, before its project is known (§8); never sent to the service.
     Draft,
+    /// The witness's ruling on a strict decision (§3.5).
+    Ruling,
+    /// A published rule set version (§10.2).
+    Rules,
+    /// An update or snapshot of the shared fingerprint list (§11.2).
+    Fingerprints,
 }
 
 impl Domain {
@@ -36,6 +42,9 @@ impl Domain {
             Domain::AgentKey => "agent_key",
             Domain::Export => "export",
             Domain::Draft => "draft",
+            Domain::Ruling => "ruling",
+            Domain::Rules => "rules",
+            Domain::Fingerprints => "fingerprints",
         }
     }
 }
@@ -131,7 +140,7 @@ mod tests {
         let h = sha256(b"x");
         let sig = k.sign(Domain::Record, &h);
         verify(&k.public_key_b64(), Domain::Record, &h, &sig).unwrap();
-        for d in [Domain::Batch, Domain::Head, Domain::Anchor, Domain::Register, Domain::Rotate, Domain::AgentKey, Domain::Export] {
+        for d in [Domain::Batch, Domain::Head, Domain::Anchor, Domain::Register, Domain::Rotate, Domain::AgentKey, Domain::Export, Domain::Draft, Domain::Ruling, Domain::Rules, Domain::Fingerprints] {
             assert!(verify(&k.public_key_b64(), d, &h, &sig).is_err());
         }
         assert_eq!(k.key_id().len(), 16);

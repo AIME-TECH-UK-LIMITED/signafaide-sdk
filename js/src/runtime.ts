@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { b64url, hashJson, type SigningKey } from "./crypto.js";
 import { Client, DEFAULT_URL, SignafaideError, type Transport } from "./http.js";
 import { nodeTransport } from "./nodehttp.js";
+import { ChecksState } from "./checks-runtime.js";
 import { plural } from "./plural.js";
 import { claimNotes, daysLeft, parseExpiry } from "./claim.js";
 import {
@@ -31,7 +32,7 @@ import {
   type SignedRecord,
 } from "./records.js";
 import { TOOL_SOURCE_REFRESH_MS } from "./state.js";
-import { PENDING, State, StateError, agentKeyEnvName, monotonicMs, appendEnvFile, keyFingerprint, readEnvFile, scopeOf, type Base, type KeyProvider, type KeyScope } from "./state.js";
+import { PENDING, State, StateError, findRoot, agentKeyEnvName, monotonicMs, appendEnvFile, keyFingerprint, readEnvFile, scopeOf, type Base, type KeyProvider, type KeyScope } from "./state.js";
 import { adapterField, clientHeader, detectAgent, telemetryEnabled } from "./telemetry.js";
 import { TOOLS, byCodePoint, declaredName, telemetry, telemetryLines, toolNoteName } from "./coverage.js";
 
@@ -55,10 +56,11 @@ export const recording = new AsyncLocalStorage<string>();
  * wrapper inside that span writes no second one. `claim(name, callId)` tells it that a wrapper
  * has written the decision of a call of the tool, and returns what `done` takes when the call has
  * ended, so the call's own span is not recorded again whenever it arrives. `callId` is the
- * model's tool call id when the wrapper knows it. None of them ever throws. */
+ * model's tool call id when the wrapper knows it; `alias`, a framework tool's own name when the
+ * wrapper names the tool otherwise (a span may carry either). None of them ever throws. */
 export const telemetryHooks: {
   adopt?: (name: string, callId?: string) => [Recorder, SignedRecord] | null;
-  claim?: (name: string, callId?: string) => unknown;
+  claim?: (name: string, callId?: string, alias?: string) => unknown;
   done?: (claim: unknown) => void;
 } = {};
 
@@ -69,11 +71,14 @@ export function recordingDisabled(env: NodeJS.ProcessEnv = process.env): boolean
 
 /** Test mode: records are written to a temporary folder and never sent, so unit tests never ship
  * records under a production agent name. On with `SIGNAFAIDE_TEST=1`, and by itself under
- * Vitest, Jest and `node --test` unless `SIGNAFAIDE_TEST=0`. */
-export function testMode(env: NodeJS.ProcessEnv = process.env): boolean {
+ * Vitest, Jest and `node --test` unless `SIGNAFAIDE_TEST=0`. Never by itself with a live API key
+ * (`sfa_live_`, from the code, the environment or the project's `.env`): a test runner's variable
+ * set in production must not turn strict calls into calls that run without a ruling. */
+export function testMode(env: NodeJS.ProcessEnv = process.env, apiKey?: string): boolean {
   const v = (env.SIGNAFAIDE_TEST ?? "").trim();
   if (v) return /^(1|true|yes)$/i.test(v);
-  return !!(env.VITEST || env.JEST_WORKER_ID || env.NODE_TEST_CONTEXT);
+  if (!(env.VITEST || env.JEST_WORKER_ID || env.NODE_TEST_CONTEXT)) return false;
+  return !(apiKey ?? env.SIGNAFAIDE_API_KEY ?? "").trim().startsWith("sfa_live_");
 }
 
 export interface RecorderOptions {
@@ -141,8 +146,22 @@ function removeAtExit(dir: string): void {
   testHomes.add(dir);
 }
 
+/** One record of a run (`writeRun`): what the tool-call checks found (§2.8) and the values a
+ * strict call discloses to the witness (§2.3) travel with it. */
+export interface RunItem {
+  kind: Kind;
+  name: string;
+  content: Record<string, unknown>;
+  ref?: string | null;
+  checks?: Record<string, unknown>;
+  disclosed?: Record<string, unknown>;
+  disclosedSalt?: string;
+}
+
 export class Recorder {
   readonly state: State;
+  /** Tool-call checks (§8): the checks file, the held rule set and shared list. */
+  readonly checks: ChecksState;
   storeContent: boolean;
   readonly flushIntervalMs: number;
   readonly flushSize: number;
@@ -171,6 +190,8 @@ export class Recorder {
   private reconciled = new Set<string>();
   /** Chains the witness refused, with the configuration they were refused under. */
   private blocked = new Map<string, { fp: string; err: SignafaideError }>();
+  /** Receipts the last shipments returned, by record hash: a strict call whose record another call's shipment carried takes its receipt from here. */
+  private recentReceipts = new Map<string, Receipt>();
   /** A refusal that applies to every chain (quota, API key): nothing is sent until the configuration changes. */
   private halted?: { fp: string; err: SignafaideError };
   private shipping: Promise<unknown> = Promise.resolve();
@@ -187,12 +208,13 @@ export class Recorder {
   private exitHooked = false;
   private toldLocal = false;
   private toldBadKey = false;
+  private toldEnvUrl = false;
   private exitFlushed = false;
   private closed = false;
   private onHead?: RecorderOptions["onHead"];
 
   constructor(opts: RecorderOptions = {}) {
-    this.test = testMode();
+    this.test = testMode(process.env, opts.apiKey || process.env.SIGNAFAIDE_API_KEY || readEnvFile(path.join(opts.root ? path.resolve(opts.root) : findRoot(), ".env")).SIGNAFAIDE_API_KEY || "");
     const temp = opts.home === undefined && this.test && !process.env.SIGNAFAIDE_HOME ? fs.mkdtempSync(path.join(os.tmpdir(), "signafaide-test-")) : undefined;
     // Test mode sends nothing and keeps nothing: the folder goes when the process ends.
     if (temp) removeAtExit(temp);
@@ -212,6 +234,7 @@ export class Recorder {
     this.via = opts.via ?? "sdk";
     const envMs = Number(process.env.SIGNAFAIDE_EXIT_FLUSH_MS);
     this.exitFlushMs = Math.max(0, opts.exitFlushMs ?? (process.env.SIGNAFAIDE_EXIT_FLUSH_MS !== undefined && Number.isFinite(envMs) ? envMs : 3000));
+    this.checks = new ChecksState(this);
   }
 
   // --- configuration ------------------------------------------------------------
@@ -221,7 +244,19 @@ export class Recorder {
   }
 
   get url(): string {
-    return (this._url || this.setting("SIGNAFAIDE_URL") || DEFAULT_URL).replace(/\/+$/, "");
+    const given = this._url || process.env.SIGNAFAIDE_URL;
+    if (given) return given.replace(/\/+$/, "");
+    const envFile = path.join(this.state.root, ".env");
+    const fromFile = readEnvFile(envFile).SIGNAFAIDE_URL;
+    if (!fromFile) return DEFAULT_URL;
+    const url = fromFile.replace(/\/+$/, "");
+    // The witness checks the rule sets, the shared list and the rulings of this program: say once
+    // where its address came from when a file in the project, not the code or the environment, set it.
+    if (url !== DEFAULT_URL && !this.toldEnvUrl && !this.quiet) {
+      this.toldEnvUrl = true;
+      console.error(`signafaide: note: the witness is ${url}, set by SIGNAFAIDE_URL in ${envFile}, not by the code or the process environment`);
+    }
+    return url;
   }
 
   /** SIGNAFAIDE_API_KEY as set, even when it is not a valid key. */
@@ -413,13 +448,18 @@ export class Recorder {
 
   /** Sign and chain one record locally (synchronous) and queue it for shipping.
    * The chain is this API key's `<project>/<env>/<agent>` (§8). */
-  write(kind: Kind, name: string, content: Record<string, unknown>, opts: { agent?: string; ref?: string | null; storeContent?: boolean } = {}): SignedRecord {
-    return this.writeRun([{ kind, name, content, ref: opts.ref }], opts)[0];
+  write(
+    kind: Kind,
+    name: string,
+    content: Record<string, unknown>,
+    opts: { agent?: string; ref?: string | null; storeContent?: boolean; checks?: Record<string, unknown>; disclosed?: Record<string, unknown>; disclosedSalt?: string } = {},
+  ): SignedRecord {
+    return this.writeRun([{ kind, name, content, ref: opts.ref, checks: opts.checks, disclosed: opts.disclosed, disclosedSalt: opts.disclosedSalt }], opts)[0];
   }
 
   /** `write` for records that must follow each other with nothing between them (a tool
    * declaration, §2.6): they are signed and appended under one hold of the chain lock. */
-  writeRun(items: { kind: Kind; name: string; content: Record<string, unknown>; ref?: string | null }[], opts: { agent?: string; storeContent?: boolean } = {}): SignedRecord[] {
+  writeRun(items: RunItem[], opts: { agent?: string; storeContent?: boolean } = {}): SignedRecord[] {
     const why = noWrites.getStore();
     if (why) throw new SignafaideError(`${why} must not write records: candidate functions must be side-effect free (it tried to record "${items[0]?.name}")`, { code: "no_writes" });
     const agent = opts.agent || this.defaultAgent;
@@ -435,15 +475,15 @@ export class Recorder {
       if (!fs.existsSync(this.state.chainPath(chain))) for (const e of Object.values(this.adoptInto(bucket, apiKey))) this.report(`signafaide: ${e.message}`);
       const [project, env] = bucket.split("/") as [string, "test" | "live"];
       // Before the project is known, an envelope cannot name it: keep a draft, signed when it is (§8).
-      const builds = items.map(({ kind, name, content, ref }) =>
+      const builds = items.map(({ kind, name, content, ref, checks, disclosed, disclosedSalt }) =>
         bucket.startsWith(PENDING + "/")
           ? (seq: number, prev: string | null, prevTime: string | null) => {
               const [time, c] = this.timed(content, prevTime, agent, scope);
-              return makeDraft(key, { kind, agent, seq, prev, name, content: c, ref: ref ?? null, time }, sc);
+              return makeDraft(key, { kind, agent, seq, prev, name, content: c, ref: ref ?? null, time, checks, disclosed, disclosedSalt }, sc);
             }
           : (seq: number, prev: string | null, prevTime: string | null) => {
               const [time, c] = this.timed(content, prevTime, agent, scope);
-              return makeRecord(key, { kind, project, env, agent, seq, prev, name, content: c, ref: this.state.translateRef(chain, ref), time });
+              return makeRecord(key, { kind, project, env, agent, seq, prev, name, content: c, ref: this.state.translateRef(chain, ref), time, checks, disclosed, disclosedSalt });
             },
       );
       recs = this.state.appendRun(chain, builds, (r) => wireRecord(r, sc), () => this.writeBucket(apiKey, agent) === bucket);
@@ -707,7 +747,7 @@ export class Recorder {
 
   /** One stderr line, the first time a strict tool is refused in this process (frameworks often
    * swallow the tool's error): the tool, why, and the fix. */
-  warnStrictRefused(tool: string, err: SignafaideError): void {
+  noteStrictRefused(tool: string, err: SignafaideError): void {
     if (this.toldStrict) return;
     this.toldStrict = true;
     const fix =
@@ -732,7 +772,8 @@ export class Recorder {
       const bucket = this.state.bucket(apiKey);
       this.adoptInto(bucket, apiKey, this.state.hasDrafts() ? await this.remoteBases(bucket, apiKey) : {});
       const h = this.state.translateRef(`${bucket}/${rec.envelope.agent}`, recordHash(rec))!; // a draft is signed by now
-      const got = (await this.shipChain(`${bucket}/${rec.envelope.agent}`, apiKey, timeoutMs)).get(h);
+      // Another call's shipment may have carried this record already (calls of one batch, calls at once): its receipt was kept.
+      const got = this.recentReceipts.get(h) ?? (await this.shipChain(`${bucket}/${rec.envelope.agent}`, apiKey, timeoutMs)).get(h);
       if (!got) throw new SignafaideError(`The service did not return a receipt for record ${h.slice(0, 12)}; check \`signafaide status\`.`, { code: "not_recorded" });
       this.adoptInto(this.state.bucket(apiKey), apiKey);
       return got;
@@ -831,7 +872,11 @@ export class Recorder {
           console.warn(`signafaide: onHead failed (the heads are still in head.json): ${(e as Error).message}`);
         }
       }
-      for (const [h, r] of got) received.set(h, r);
+      for (const [h, r] of got) {
+        received.set(h, r);
+        this.recentReceipts.set(h, r);
+        if (this.recentReceipts.size > 4096) this.recentReceipts.delete(this.recentReceipts.keys().next().value!);
+      }
       this.pending = 0;
       if (!got.size) throw new SignafaideError("The service accepted the batch but returned no matching receipts.", { code: "no_receipts" });
       this.state.setBlocked(chain, null);
@@ -1049,6 +1094,7 @@ export class Recorder {
   /** Stop the background timer and exit hooks (records stay in the outbox). */
   close(): void {
     this.closed = true;
+    this.checks.stop();
     if (this.toolTimer) clearInterval(this.toolTimer);
     this.toolTimer = undefined;
     if (this.timer) clearInterval(this.timer);

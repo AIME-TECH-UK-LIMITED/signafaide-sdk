@@ -108,7 +108,36 @@ def cmd_init(a: argparse.Namespace) -> int:
             print(line)
     else:
         print(f"key found ({_mask(key)}, env {runtime._env_of(key)}); nothing to create")
+    _init_checks(rec)
     return 0
+
+
+def _init_checks(rec: runtime.Recorder) -> None:
+    """Turn tool-call checks on in watch mode (§8): write the checks file when there is none, and
+    say which checks are on, in which mode, which tools are strict and which fields leave the machine."""
+    from .checks import FILE_CHECKS, default_checks_file
+    from .checks_runtime import checks_path
+
+    path = checks_path(rec.state.root)
+    if path is None:
+        print("tool-call checks: off (SIGNAFAIDE_CHECKS=0)")
+        return
+    how = (f'tool-call checks: change it in {path}: "mode": "enforce" blocks instead of noting, "strict": true on a tool asks the witness for a ruling, "disclose" lists the fields of its '
+           "arguments that may leave the machine; `signafaide checks status` shows what is on, which tools are strict and which fields leave")
+    if not path.exists():
+        path.write_text(json.dumps(default_checks_file(), indent=2) + "\n")
+        print(f"tool-call checks: on in watch mode ({path.name}, commit it with the code): {', '.join(FILE_CHECKS)} and your rules note what they find and never block. "
+              "No tool is strict and no field of a tool's arguments leaves the machine; only tool fingerprints do.")
+    else:
+        lines, _ = rec.checks.status()
+        print("tool-call checks: " + lines[0].removeprefix("checks: "))
+        # Which tools are strict and which fields leave the machine, as the file says.
+        for line in lines[1:]:
+            if line.startswith(("strict tool ", "PROBLEM")):
+                print("tool-call checks: " + line)
+        if not any(line.startswith("strict tool ") for line in lines):
+            print("tool-call checks: no tool is strict; only tool fingerprints leave the machine unless a tool lists fields in disclose")
+    print(how)
 
 
 @command("status", "key and env, agents, last receipt, outbox size, quota; BLOCKED chains (exit 1 when any)")
@@ -442,6 +471,66 @@ def cmd_flush(a: argparse.Namespace) -> int:
         print(f"BLOCKED {b['chain']}: {plural(b['records'], 'record')} cannot ship as they are. Next: {b['next']}")
     _upgrade_at_limit(rec, r["errors"].values())
     return 1 if r["errors"] else 0
+
+
+def _checks_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("action", choices=["status", "approve"], help="status: what is on, the strict tools, the held rule set and list, any problem; "
+                   "approve <tool>: re-approve a changed tool (local approvals)")
+    p.add_argument("tool", nargs="?", help="approve: the tool's declared name")
+    p.add_argument("--agent", help="approve: only this agent's approvals (default: every agent's)")
+
+
+@command("checks", "tool-call checks: `checks status` (exit 1 on a problem), `checks approve <tool>`", _checks_args)
+def cmd_checks(a: argparse.Namespace) -> int:
+    rec = _recorder()
+    if a.action == "approve":
+        if not a.tool:
+            print("signafaide checks approve: name the tool", file=sys.stderr)
+            return 2
+        agents = rec.checks.approve(a.tool, a.agent)
+        held = rec.checks.held_rules()
+        if held is not None and held["approved"] is not None:
+            print(f"{a.tool}: the rule set approves tools (version {held['version']}); re-approve it in the console, which publishes a new version")
+            return 1
+        if not agents:
+            print(f"{a.tool}: no local approval held; its next call approves the description and schema it has then")
+        else:
+            print(f"{a.tool}: approval dropped for {', '.join(agents)}; its next call approves the description and schema it has then")
+        return 0
+    lines, problem = rec.checks.status()
+    for line in lines:
+        print(line)
+    return 1 if problem else 0
+
+
+def _rules_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("action", choices=["pull", "show", "test"], help="pull: fetch the project's rule set now; show: print the held one; "
+                   "test <tool> <arguments JSON>: evaluate a call as the client does")
+    p.add_argument("tool", nargs="?", help="test: the tool's name")
+    p.add_argument("arguments", nargs="?", help="test: the call's arguments, as JSON")
+    p.add_argument("--agent", help="test: the agent (default: the project's default agent)")
+
+
+@command("rules", "the project's rule set: `rules pull`, `rules show`, `rules test <tool> <arguments JSON>`", _rules_args)
+def cmd_rules(a: argparse.Namespace) -> int:
+    rec = _recorder()
+    if a.action == "pull":
+        print(rec.checks.pull_rules())
+        return 1 if "rules" in rec.checks.problems else 0
+    if a.action == "show":
+        item = rec.checks.held_rules_item()
+        if item is None:
+            print("no rule set held" + ("" if rec.api_key else " (no API key)") + "; `signafaide rules pull` fetches it")
+            return 1
+        print(json.dumps(item["rules"], indent=2, ensure_ascii=False))
+        return 0
+    if not a.tool or a.arguments is None:
+        print("signafaide rules test: give the tool and its arguments as JSON", file=sys.stderr)
+        return 2
+    args = json.loads(a.arguments)
+    for line in rec.checks.test_call(a.tool, args, a.agent or rec.default_agent):
+        print(line)
+    return 0
 
 
 def parser() -> argparse.ArgumentParser:

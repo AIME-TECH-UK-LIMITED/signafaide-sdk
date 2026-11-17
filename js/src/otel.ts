@@ -23,9 +23,10 @@
 import * as fs from "node:fs";
 import { trace } from "@opentelemetry/api";
 import { declaredName, samplingNote, telemetryNoteName } from "./coverage.js";
-import { declareBeforeCall, rememberTool, toJsonable } from "./record.js";
-import { AGENT_RE, agentName, recordHash, type Kind, type SignedRecord } from "./records.js";
-import { getRecorder, recording, recordingDisabled, telemetryHooks, type Recorder } from "./runtime.js";
+import { declareBeforeCall, rememberTool, toJsonable, wrapperRecords } from "./record.js";
+import { AGENT_RE, agentName, recordHash, type SignedRecord } from "./records.js";
+import { getRecorder, recording, recordingDisabled, telemetryHooks, type Recorder, type RunItem } from "./runtime.js";
+import { outcomeChecks } from "./checks-runtime.js";
 import { ADAPTERS } from "./telemetry.js";
 import { VERSION } from "./version.js";
 
@@ -171,6 +172,8 @@ let tick = 0;
  * decision and when the call ended, in ms (`end` undefined while it runs). */
 interface Claim {
   tool: string;
+  /** A framework tool's own name, when the wrapper names the tool otherwise. */
+  alias?: string;
   id?: string;
   tick: number;
   begin: number;
@@ -200,7 +203,7 @@ function claimed(tool: string, by: { id?: string; running?: boolean; began?: num
   const now = clock();
   for (let i = claims.length - 1; i >= 0; i--) {
     const c = claims[i];
-    if (c.tool !== tool) continue;
+    if (c.tool !== tool && c.alias !== tool) continue;
     if (by.id && c.id) {
       if (c.id !== by.id) continue;
     } else if (by.running) {
@@ -216,6 +219,15 @@ function claimed(tool: string, by: { id?: string; running?: boolean; began?: num
     return true;
   }
   return false;
+}
+
+/** Whether tool-call checks are on for `rec` (a checks file is in place); never throws. */
+function checksOnFor(rec: Recorder): boolean {
+  try {
+    return rec.checks.enabled();
+  } catch {
+    return false;
+  }
 }
 
 /** Write signafAIde records for the tool-call spans of a tracer provider. */
@@ -236,6 +248,7 @@ export class SignafaideSpanProcessor {
   /** recorder -> `<agent> <tool>` -> the telemetry note last written for the tool. */
   private readonly noted = new WeakMap<Recorder, Map<string, "start" | "end">>();
   private readonly samplingNoted = new WeakMap<Recorder, Set<string>>();
+  private toldChecks = false;
   /** agent -> the tools a gateway on this machine records, and the file stamp they were read at. */
   private readonly gateway = new Map<string, { stamp: string; names: Set<string> }>();
   private warned = false;
@@ -354,6 +367,14 @@ export class SignafaideSpanProcessor {
       this.keep(this.skipped, spanId, true);
       return;
     }
+    // With tool-call checks on, a wrapper of the SDK that records this tool writes the call's
+    // decision itself, with its checks and, when strict, the witness's ruling (§8). The span is
+    // left to it: when it ends, the wrapper's call is matched to it as for a span that says only
+    // at its end that it is a tool call, and recorded here only when no wrapper ran.
+    if (wrapperRecords(call.tool) && checksOnFor(rec)) {
+      this.keep(this.began, spanId, ++tick);
+      return;
+    }
     const decision = this.decide(rec, agent, span, call, true);
     this.keep(this.open, spanId, { rec, decision, tool: call.tool, id: callId(call), input: call.input !== undefined });
   }
@@ -390,7 +411,10 @@ export class SignafaideSpanProcessor {
     }
     if (!held.input && call?.input !== undefined) content.input = value(call.input); // the span named its arguments only after it started
     const d = held.decision;
-    held.rec.write("outcome", d.envelope.name, content, { agent: d.envelope.agent, ref: recordHash(d), storeContent: this.storeContent });
+    // Tool-call checks (§8): the result checks on what the span says the tool returned, in watch
+    // mode; the plug-in never blocks and never asks for a ruling, so the call ran, not asked.
+    const checks = d.envelope.checks ? outcomeChecks(true, "not_asked", "output" in content ? held.rec.checks.resultEntries(content.output, true) : []) : undefined;
+    held.rec.write("outcome", d.envelope.name, content, { agent: d.envelope.agent, ref: recordHash(d), storeContent: this.storeContent, checks });
   }
 
   private marker(span: TelemetrySpan, call: ToolCall | null): Record<string, unknown> {
@@ -434,7 +458,7 @@ export class SignafaideSpanProcessor {
     const tool = call.tool;
     rememberTool(agent, tool, this.declare);
     declareBeforeCall(rec, agent);
-    const items: { kind: Kind; name: string; content: Record<string, unknown> }[] = [];
+    const items: RunItem[] = [];
     const sampled = this.samplingNoted.get(rec) ?? new Set<string>();
     this.samplingNoted.set(rec, sampled);
     if (!sampled.has(agent)) {
@@ -457,11 +481,28 @@ export class SignafaideSpanProcessor {
     const meta: Record<string, unknown> = { sdk: `signafaide-js/${VERSION}`, telemetry: marker };
     const name = declaredName(tool);
     if (name !== tool) meta.tool = tool;
-    items.push({ kind: "decision", name, content: { input: call.input === undefined ? null : value(call.input), meta } });
+    const input = call.input === undefined ? null : value(call.input);
+    items.push({ kind: "decision", name, content: { input, meta }, checks: this.checksOf(rec, agent, tool, input, call.id) });
     const written = rec.writeRun(items, { agent, storeContent: this.storeContent });
     sampled.add(agent);
     notedBy.set(key, when);
     return written[written.length - 1];
+  }
+
+  /** The `checks` of a decision written from a span (§8): every entry in watch mode, never
+   * strict, since the tool runs whatever they find. Undefined when checks are off, and when they
+   * cannot run (an invalid checks file is said once; the plug-in never raises into the program). */
+  private checksOf(rec: Recorder, agent: string, tool: string, input: unknown, id: unknown): Record<string, unknown> | undefined {
+    try {
+      if (!rec.checks.enabled()) return undefined;
+      return rec.checks.plan({ name: tool }, agent, input, { telemetry: true, callId: id })?.checks;
+    } catch (e) {
+      if (!this.toldChecks) {
+        this.toldChecks = true;
+        console.error(`signafaide: tool-call checks of telemetry spans are off: ${(e as Error).message}`);
+      }
+      return undefined;
+    }
   }
 
   // --- one call, one decision (with the SDK's wrappers) ----------------------------------
@@ -494,8 +535,9 @@ function adopt(name: string, id?: string): [Recorder, SignedRecord] | null {
 
 /** A wrapper of the SDK has just written the decision of a call of the tool `name`: that call's
  * own span is not recorded again (see `claimed`). */
-function claim(name: string, id?: string): Claim {
+function claim(name: string, id?: string, alias?: string): Claim {
   const c: Claim = { tool: name, id, tick: ++tick, begin: clock() };
+  if (alias && alias !== name) c.alias = alias;
   claims.push(c);
   if (claims.length > MAX_OPEN) claims.splice(0, claims.length - MAX_OPEN);
   return c;

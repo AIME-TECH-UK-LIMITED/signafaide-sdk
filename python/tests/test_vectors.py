@@ -251,6 +251,9 @@ def test_variants(v, bls):
         assert r.to_dict()["telemetry"] == case["expect"]["telemetry"], case["name"]
         assert r.telemetry_lines() == case["expect"]["telemetry_lines"], case["name"]
         assert all(f"telemetry: {line}" in str(r).splitlines() for line in case["expect"]["telemetry_lines"]), case["name"]
+        assert r.to_dict()["tool_call_checks"] == case["expect"]["tool_call_checks"], case["name"]
+        assert r.tool_checks_lines() == case["expect"]["tool_call_checks_lines"], case["name"]
+        assert all(f"tool-call checks: {line}" in str(r).splitlines() for line in case["expect"]["tool_call_checks_lines"]), case["name"]
         for line in case["expect"]["coverage_lines"]:
             assert f"coverage: {line}" in str(r).split("\n"), (case["name"], str(r))
     assert sum(1 for c in v["variants"] if any(x["declared_at_seq"] is not None for x in c["expect"]["coverage"].values())) == 7
@@ -265,7 +268,7 @@ def test_pack_without_bls_says_not_checked(v):
 
 
 def test_tampered_packs(v, bls):
-    assert len(v["tampered"]) == 49
+    assert len(v["tampered"]) == 57
     for case in v["tampered"]:
         keys, o = options(case, v, drand=bls)
         r = verify_pack(case["pack"], keys, **o)

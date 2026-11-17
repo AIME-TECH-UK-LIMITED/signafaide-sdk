@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import ots
 from ._plural import plural
+from .checks import accept_rules, agent_checks, asks_for_ruling, checks_lines, disclosed_errors, ruling_errors
 from .coverage import coverage as tool_coverage, coverage_lines, telemetry as tool_telemetry, telemetry_lines
 from .bitcoin import check_header
 from .crypto import HEX64, b64url, b64url_decode, check_content, hash_json, key_id, sha256_hex, verify_inclusion, verify_sig
@@ -205,6 +206,9 @@ class Report:
     #: tools recorded from telemetry spans, when their decisions were written, and whether the
     #: telemetry is sampled. A note, never a failure.
     telemetry: Dict[str, dict] = field(default_factory=dict)
+    #: Tool-call checks per agent (§7; per chain for local state), for agents with a line: what
+    #: the checks of the agent's records found and the rulings on their receipts. A report, never a failure.
+    tool_checks: Dict[str, dict] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -231,6 +235,10 @@ class Report:
         """The telemetry notes in words (§7), agent by agent."""
         return [line for agent, t in self.telemetry.items() for line in telemetry_lines(agent, t)]
 
+    def tool_checks_lines(self) -> List[str]:
+        """The tool-call checks report in words (§7), agent by agent."""
+        return [line for agent, j in self.tool_checks.items() for line in checks_lines(agent, j)]
+
     def lines(self) -> List[str]:
         out = list(self.notes)
         if self.project and self.env:
@@ -248,6 +256,7 @@ class Report:
             out.append(PENDING_MEANS)
         out += [f"coverage: {line}" for line in self.coverage_lines()]
         out += [f"telemetry: {line}" for line in self.telemetry_lines()]
+        out += [f"tool-call checks: {line}" for line in self.tool_checks_lines()]
         out += self.after
         out += [f"BLOCKED {b}" for b in self.blocked]
         out.append(self.result_line)
@@ -280,6 +289,7 @@ class Report:
             "checks": checks,
             "coverage": self.coverage,
             "telemetry": self.telemetry,
+            "tool_call_checks": self.tool_checks,
             **({"not_yet": self.after} if self.after else {}),
             **({"blocked": self.blocked} if self.blocked else {}),
         }
@@ -478,10 +488,12 @@ def verify_pack(
                   filter=pack["filter"], export_heads=pack["heads"], client_heads=heads, bitcoin=bitcoin, not_independent=not_independent,
                   generated=pack["generated"], export_sig=pack["export_sig"])
     v.project_name = pack.get("project_name")
+    v.rule_sets = pack.get("rule_sets")
     checks = v.run(pack["records"], pack["anchors"])
     return Report(checks, pack["project"], pack["env"], len(pack["records"]), warnings, independent=independent, generated=pack["generated"],
                   filter=pack["filter"], sources=(service_src, agent_src), by_service=by_service,
-                  project_name=pack.get("project_name") if isinstance(pack.get("project_name"), str) else None, coverage=v.coverage, telemetry=v.telemetry)
+                  project_name=pack.get("project_name") if isinstance(pack.get("project_name"), str) else None, coverage=v.coverage, telemetry=v.telemetry,
+                  tool_checks=v.tool_checks)
 
 
 def _earliest(a: Optional[str], b: Optional[str]) -> Optional[str]:
@@ -503,9 +515,15 @@ def records_hash(records: list) -> str:
 
 def export_statement(pack: dict) -> dict:
     """The export statement the service signs (§7, domain ``export``)."""
-    return {"project": pack["project"], **({"project_name": pack["project_name"]} if "project_name" in pack else {}),
-            "env": pack["env"], "generated": pack["generated"], "filter": pack["filter"],
-            "heads": [sh["head"] for sh in pack["heads"]], "records_hash": records_hash(pack["records"])}
+    out = {"project": pack["project"], **({"project_name": pack["project_name"]} if "project_name" in pack else {}),
+           "env": pack["env"], "generated": pack["generated"], "filter": pack["filter"],
+           "heads": [sh["head"] for sh in pack["heads"]], "records_hash": records_hash(pack["records"])}
+    if pack.get("rule_sets") is not None:
+        try:
+            out["rule_sets"] = [hash_json(e["rules"]) for e in pack["rule_sets"]]
+        except (KeyError, TypeError) as e:
+            raise ValueError("a rule_sets entry has no rules") from e
+    return out
 
 
 def verify_local(
@@ -531,7 +549,7 @@ def verify_local(
     checks = v.run(records, [], chain_ids)
     return Report(checks, records=len(records), independent={"service_keys": not service_keys_plain_http, "agent_keys": True},
                   sources=(PLAIN_HTTP if service_keys_plain_http else INDEPENDENT, INDEPENDENT), nothing_cosigned=v.nothing_cosigned,
-                  coverage=v.coverage, telemetry=v.telemetry)
+                  coverage=v.coverage, telemetry=v.telemetry, tool_checks=v.tool_checks)
 
 
 def _signed_head_errors(sh: Any) -> str:
@@ -559,7 +577,7 @@ def _pack_errors(pack: Any) -> Optional[str]:
     for k in fields:
         if k not in pack:
             return f"missing field `{k}`"
-    extra = sorted(set(pack) - set(fields) - {"project_name"})
+    extra = sorted(set(pack) - set(fields) - {"project_name", "rule_sets"})
     if extra:
         return f"unknown field `{extra[0]}`"
     if "project_name" in pack:
@@ -571,6 +589,8 @@ def _pack_errors(pack: Any) -> Optional[str]:
             return f"`{k}` must be a list"
     if not isinstance(pack["export_sig"], str):
         return "`export_sig` must be a string"
+    if "rule_sets" in pack and not isinstance(pack["rule_sets"], list):
+        return "`rule_sets` must be a list"
     if pack["env"] not in ("test", "live"):
         return "env must be test or live"
     if not valid_project_id(pack["project"]):
@@ -677,6 +697,7 @@ class _Acc:
 
 class _Verifier:
     project_name: Optional[str] = None
+    rule_sets: Optional[list] = None
 
     def __init__(self, service_keys, agent_keys, contents, *, project, env, local, local_heads=None, drand=None,
                  filter=None, export_heads=None, client_heads=None, bitcoin=None, not_independent=False, generated=None, export_sig=None,
@@ -708,6 +729,7 @@ class _Verifier:
         self.nothing_cosigned = False
         self.coverage: Dict[str, dict] = {}  # tool coverage per chain (§7), filled by run
         self.telemetry: Dict[str, dict] = {}  # telemetry notes per chain (§7), filled by run
+        self.tool_checks: Dict[str, dict] = {}  # tool-call checks per chain (§7), filled by run
         self.drafts = 0  # local drafts waiting for the project (§8): not a reason for "no records"
         self.chain_of: Dict[int, str] = {}  # id(record) -> chain id (local state)
         self.acc = [_Acc() for _ in CHECKS]
@@ -769,6 +791,7 @@ class _Verifier:
         self.drand(batches)
         self.anchors(anchors, batches)
         self.content(recs)
+        self.tool_checks = self.report_checks(chains)
         if self.local and not shipped and recs:
             self.nothing_cosigned = True
             # Local records no witness has co-signed yet: the checks of the witness's part are not passes.
@@ -937,6 +960,22 @@ class _Verifier:
         }
         return chains
 
+    def report_checks(self, chains: dict) -> Dict[str, dict]:
+        """The tool-call checks report (§7), per agent (per chain locally), in chain order."""
+        out: Dict[str, dict] = {}
+        for agent, chain in sorted(chains.items()):
+            seq_of = {x[2]: seq for seq, x in chain.items()}
+            items = []
+            for seq in sorted(chain):
+                r = chain[seq][1]
+                e = r["envelope"]
+                items.append({"seq": seq, "kind": e["kind"], "checks": e.get("checks"), "decision_seq": seq_of.get(e["ref"]) if e.get("ref") else None,
+                              "ruling": (r.get("receipt") or {}).get("ruling")})
+            j = agent_checks(items)
+            if j is not None:
+                out[agent] = j
+        return out
+
     # 5
     def merkle(self, shipped: list) -> None:
         for label, r, h in shipped:
@@ -968,6 +1007,42 @@ class _Verifier:
             except ValueError as e:
                 acc.fail(item, f"batch_sig: {e}")
             batches[(rc["batch"]["seq"], computed)] = rc
+        # Rulings on receipts (§3.5): signed over domain `ruling` by a service key active at its
+        # server_time, naming this receipt's record, batch and time, and only on a decision that asked.
+        rulings: Dict[str, str] = {}
+        for label, r, h in shipped:
+            rc = r["receipt"]
+            item = f"ruling on {label}"
+            asked = r["envelope"]["kind"] == "decision" and asks_for_ruling(r["envelope"].get("checks"))
+            g, sig = rc.get("ruling"), rc.get("ruling_sig")
+            if g is None and sig is None:
+                if "ruling_error" in rc and (rc["ruling_error"] != "rules_unavailable" or not asked):
+                    acc.fail(item, "ruling_error is only rules_unavailable, on the receipt of a decision that asked for a ruling")
+                continue
+            if g is None or sig is None:
+                acc.fail(item, "ruling and ruling_sig come together")
+                continue
+            acc.checked += 1
+            if "ruling_error" in rc:
+                acc.fail(item, "a receipt with a ruling has no ruling_error")
+            err = ruling_errors(g)
+            if err:
+                acc.fail(item, err)
+                continue
+            gh = hash_json(g)
+            try:
+                k = self.service_key(rc["service_key_id"], g["server_time"])
+                if not verify_sig(k["public_key"], "ruling", gh, sig):
+                    raise ValueError("signature does not verify")
+            except ValueError as e:
+                acc.fail(item, f"ruling_sig: {e}")
+            if (g["record_hash"], g["batch_hash"], g["server_time"]) != (rc["record_hash"], rc["batch_hash"], rc["batch"]["server_time"]):
+                acc.fail(item, "the ruling names another record, batch or time than its receipt")
+            if not asked:
+                acc.fail(item, "a ruling on a record that did not ask for one (only a strict decision not blocked on the client asks)")
+            if h in rulings and rulings[h] != gh:
+                acc.fail(item, "two different rulings for one record")
+            rulings.setdefault(h, gh)
         return batches
 
     # 7
@@ -1032,7 +1107,8 @@ class _Verifier:
         if not self.local:
             try:
                 stmt = {"project": self.project, "env": self.env, "generated": self.generated, "filter": self.filter, "heads": self.export_heads,
-                        "records": self.raw_records, **({"project_name": self.project_name} if self.project_name is not None else {})}
+                        "records": self.raw_records, **({"project_name": self.project_name} if self.project_name is not None else {}),
+                        **({"rule_sets": self.rule_sets} if self.rule_sets is not None else {})}
                 ok = self.any_key("export", hash_json(export_statement(stmt)),
                                   self.export_sig, self.generated)
                 if not ok:
@@ -1040,6 +1116,7 @@ class _Verifier:
                              "generated time or records were changed after the service signed it")
             except ValueError as e:
                 acc.fail("export statement", str(e))
+            self.check_rule_sets()
             agents = self.filter["agents"]
             in_filter = (lambda a: agents is None or a in agents)
             for label, r, _ in self.recs:
@@ -1275,6 +1352,39 @@ class _Verifier:
             a11.pending = True
             a11.notes.append(f"waiting for the public timestamp to confirm (usually within a few hours): {sum(1 for p in proofs if p[0] == 'pending')} of {len(proofs)}")
 
+    def check_rule_sets(self) -> None:
+        """Check 8 (§7): each ``rule_sets`` entry is a valid document of the pack's project and env,
+        signed over domain ``rules`` by a service key active at its ``issued`` (§10.2 steps 1 to 3);
+        no two share a version; no record or ruling names a held version with another hash."""
+        acc = self.acc[7]
+        held: Dict[Tuple[str, int], str] = {}
+        for i, e in enumerate(self.rule_sets or []):
+            item = f"rule_sets[{i}]"
+            acc.checked += 1
+            if not isinstance(e, dict) or set(e) != {"rules", "sig", "service_key_id"}:
+                acc.fail(item, "a rule_sets entry is {rules, sig, service_key_id}")
+                continue
+            step = accept_rules(None, e, self.service_keys or [], self.project, self.env)
+            if step is not None:
+                acc.fail(item, {"schema": "not a valid rule set", "project": "the rule set belongs to another project or env",
+                                "signature": "the rule set's sig does not verify with a service key active at its issued"}.get(step, step))
+                continue
+            doc = e["rules"]
+            if any(v == doc["version"] for _, v in held):
+                acc.fail(item, f"two rule_sets entries hold version {doc['version']}")
+            held[(doc["set"], doc["version"])] = hash_json(doc)
+        for label, r, _ in self.recs:
+            named = list((r["envelope"].get("checks") or {}).get("rules") or [])
+            g = (r.get("receipt") or {}).get("ruling")
+            if isinstance(g, dict) and isinstance(g.get("rules"), dict):
+                named.append(g["rules"])
+            for x in named:
+                if not isinstance(x, dict):
+                    continue
+                k = (x.get("set"), x.get("version"))
+                if k in held and held[k] != x.get("hash"):
+                    acc.fail(label, f"names rule set {k[0]} version {k[1]} with a rules_hash other than the version the pack holds")
+
     # 12
     def content(self, recs: list) -> None:
         acc = self.acc[11]
@@ -1283,16 +1393,26 @@ class _Verifier:
             local = self.contents.get(h)
             if c is None and salt is None and local is not None:
                 c, salt = local["content"], local["salt"]
-            if c is None and salt is None:
+            has_disclosed = "disclosed" in r or "disclosed_salt" in r
+            if c is None and salt is None and not has_disclosed:
                 continue
             acc.checked += 1
-            try:
-                ch = check_content(c, salt, r["envelope"]["content_hash"])
-            except (ValueError, TypeError) as e:
-                acc.fail(label, str(e))
-                continue
-            if ch is not None:
-                acc.fail(label, f"content hashes to {ch}, envelope says {r['envelope']['content_hash']}")
+            matched = None
+            if c is not None or salt is not None:
+                try:
+                    ch = check_content(c, salt, r["envelope"]["content_hash"])
+                except (ValueError, TypeError) as e:
+                    acc.fail(label, str(e))
+                    ch = ""
+                if ch is not None:
+                    if ch:
+                        acc.fail(label, f"content hashes to {ch}, envelope says {r['envelope']['content_hash']}")
+                else:
+                    matched = c
+            if has_disclosed:
+                err = disclosed_errors(r, matched)
+                if err:
+                    acc.fail(label, err)
         if not acc.checked:
             acc.not_checked = True
             acc.notes.append("no content supplied (hash-only records)")

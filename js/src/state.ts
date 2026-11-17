@@ -29,7 +29,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { SigningKey, b64url, b64urlDecode } from "./crypto.js";
 import { canonicalize } from "./jcs.js";
-import { AGENT_KEYS_FORMAT, AGENT_RE, INSTANCE_START, instanceStartContent, makeRecord, manifestEntry, now, recordHash, signDraft, validProjectId, validTime, type AgentKeyEntry, type Receipt, type SignedRecord } from "./records.js";
+import { AGENT_KEYS_FORMAT, AGENT_RE, INSTANCE_START, instanceStartContent, makeRecord, manifestEntry, now, recordHash, signDraft, validProjectId, validTime, wireRecord, type AgentKeyEntry, type Receipt, type SignedRecord } from "./records.js";
 
 const MARKERS = [".git", "pyproject.toml", "package.json"];
 /** A shipped chain file larger than this rolls into a sealed segment (SIGNAFAIDE_SEGMENT_BYTES). */
@@ -662,8 +662,8 @@ export class State {
     });
   }
 
-  /** Hold the lock file `p` (§8 chain locks) while `fn` runs. */
-  private lockAt<T>(p: string, fn: () => T): T {
+  /** Hold the lock file `p` (§8 chain locks) while `fn` runs. @internal */
+  lockAt<T>(p: string, fn: () => T): T {
     try {
       fs.mkdirSync(path.dirname(p), { recursive: true });
     } catch (e) {
@@ -1222,10 +1222,5 @@ export function appendEnvFile(p: string, key: string, value: string): void {
 }
 
 function wireOf(rec: SignedRecord, store: boolean): SignedRecord {
-  const out: SignedRecord = { envelope: rec.envelope, key_id: rec.key_id, sig: rec.sig };
-  if (store && rec.content !== undefined) {
-    out.content = rec.content;
-    if (rec.salt !== undefined) out.salt = rec.salt;
-  }
-  return out;
+  return wireRecord(rec, store);
 }

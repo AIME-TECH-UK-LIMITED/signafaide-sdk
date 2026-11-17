@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langchain-signafaide"
-version = "0.1.0"
+version = "0.1.1"
 description = "signafAIde for LangChain: audit evidence of every tool call an agent makes, signed and verifiable offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "AIME TECH UK LIMITED" }]
-dependencies = ["signafaide>=0.3.1,<0.4", "langchain>=1.0,<2"]
+dependencies = ["signafaide>=0.4.0,<0.5", "langchain>=1.0,<2"]
 keywords = ["langchain", "middleware", "ai-agents", "audit-trail", "tamper-evident", "eu-ai-act"]
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
@@ -33,3 +33,4 @@ packages = ["src/langchain_signafaide"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]

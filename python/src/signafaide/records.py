@@ -23,6 +23,10 @@ TIME_RE = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.
 KEY_ID_RE = re.compile(r"\A[0-9a-f]{16}\Z")
 PROJECT_RE = re.compile(r"\Aprj_[0-7][0-9A-HJKMNP-TV-Z]{25}\Z")
 RECEIPT_FIELDS = {"record_hash", "index", "proof", "batch", "batch_hash", "batch_sig", "service_key_id", "head", "head_sig"}
+#: A receipt's optional fields: the witness's ruling on a strict decision (§3.4, §3.5).
+RECEIPT_OPTIONAL = {"ruling", "ruling_sig", "ruling_error"}
+#: A signed record's optional fields besides ``receipt``: the content (§2.3) and the values a strict call disclosed (§2.3, §10.4).
+RECORD_OPTIONAL = ("content", "salt", "disclosed", "disclosed_salt")
 BATCH_FIELDS = {"v", "project", "env", "seq", "prev", "root", "size", "server_time", "drand"}
 HEAD_FIELDS = {"project", "env", "agent", "seq", "record_hash", "server_time"}
 DRAND_FIELDS = {"chain", "round", "randomness", "signature"}
@@ -75,7 +79,7 @@ def envelope_errors(env: Any, fields: tuple = ENVELOPE_FIELDS) -> list:
         return ["envelope is not an object"]
     errs = []
     missing = [f for f in fields if f not in env]
-    extra = sorted(set(env) - set(fields))
+    extra = sorted(set(env) - set(fields) - {"checks"})
     if missing:
         errs.append("missing " + ", ".join(missing))
     if extra:
@@ -117,6 +121,12 @@ def envelope_errors(env: Any, fields: tuple = ENVELOPE_FIELDS) -> list:
             errs.append("ref must be the decision's record hash for an outcome")
     elif env["ref"] is not None:
         errs.append("ref must be null unless kind is outcome")
+    if "checks" in env:
+        from .checks import checks_errors
+
+        err = checks_errors(env)
+        if err:
+            errs.append(err + " (spec §2.8)")
     return errs
 
 
@@ -144,8 +154,8 @@ def _valid_time(x: Any) -> bool:
 def receipt_errors(rc: Any) -> list:
     """Schema problems with a receipt (§3.4): exact fields and types; signatures
     are only checked to be strings (their validity is checks 6 and 8)."""
-    if not isinstance(rc, dict) or set(rc) != RECEIPT_FIELDS:
-        return ["receipt fields are " + ", ".join(sorted(RECEIPT_FIELDS))]
+    if not isinstance(rc, dict) or not RECEIPT_FIELDS <= set(rc) or set(rc) - RECEIPT_FIELDS - RECEIPT_OPTIONAL:
+        return ["receipt fields are " + ", ".join(sorted(RECEIPT_FIELDS)) + ", and ruling, ruling_sig and ruling_error when the witness ruled (or could not)"]
     b, h = rc["batch"], rc["head"]
     errs = []
     if not (_is_hex(rc["record_hash"]) and _is_hex(rc["batch_hash"]) and _is_int(rc["index"]) and rc["index"] >= 0):
@@ -182,9 +192,11 @@ def record_errors(rec: Any) -> list:
     if not isinstance(rec, dict):
         return ["record is not an object"]
     errs = envelope_errors(rec.get("envelope"))
-    extra = sorted(set(rec) - {"envelope", "key_id", "sig", "content", "salt", "receipt"})
+    extra = sorted(set(rec) - {"envelope", "key_id", "sig", "receipt", *RECORD_OPTIONAL})
     if extra:
         errs.append("unknown record field " + ", ".join(extra))
+    if "disclosed_salt" in rec and not (isinstance(rec["disclosed_salt"], str) and SALT_RE.match(rec["disclosed_salt"])):
+        errs.append("disclosed_salt must be 32 lowercase hex")
     if not isinstance(rec.get("key_id"), str) or not KEY_ID_RE.match(rec["key_id"]):
         errs.append("key_id must be 16 lowercase hex")
     try:
@@ -213,6 +225,9 @@ def make_record(
     ref: Optional[str] = None,
     time: Optional[str] = None,
     salt: Optional[str] = None,
+    checks: Optional[dict] = None,
+    disclosed: Optional[dict] = None,
+    disclosed_salt: Optional[str] = None,
 ) -> dict:
     """Build and sign ``{envelope, key_id, sig, content, salt}``: the content hash is salted with
     ``salt``, a fresh random one unless given (SPEC §2.1). Raises ValueError on a bad envelope or
@@ -232,14 +247,26 @@ def make_record(
         "content_hash": content_hash(content, salt),
         "ref": ref,
     }
+    if checks is not None:
+        envelope["checks"] = checks
     errs = envelope_errors(envelope)
     if errs:
         raise ValueError("invalid record: " + "; ".join(errs))
-    return {"envelope": envelope, "key_id": key.key_id, "sig": key.sign("record", hash_json(envelope)), "content": content, "salt": salt}
+    rec = {"envelope": envelope, "key_id": key.key_id, "sig": key.sign("record", hash_json(envelope)), "content": content, "salt": salt}
+    return with_disclosed(rec, disclosed, disclosed_salt)
+
+
+def with_disclosed(rec: dict, disclosed: Optional[dict], disclosed_salt: Optional[str]) -> dict:
+    """*rec* with the values its strict call disclosed and their own salt (§2.3), when any."""
+    if disclosed is not None and disclosed_salt is not None:
+        rec["disclosed"] = disclosed
+        rec["disclosed_salt"] = disclosed_salt
+    return rec
 
 
 def make_draft(key: SigningKey, *, kind: str, agent: str, seq: int, prev: Optional[str], name: str, content: dict, ref: Optional[str] = None,
-               time: Optional[str] = None, store_content: bool = False, salt: Optional[str] = None) -> dict:
+               time: Optional[str] = None, store_content: bool = False, salt: Optional[str] = None, checks: Optional[dict] = None,
+               disclosed: Optional[dict] = None, disclosed_salt: Optional[str] = None) -> dict:
     """A draft (§8) for a chain whose project is not known yet (no API key, or the key's
     project not learned): the envelope without project and env, signed by the agent's key
     over domain ``draft``, so a local chain verifies before anything is sent.
@@ -247,10 +274,13 @@ def make_draft(key: SigningKey, *, kind: str, agent: str, seq: int, prev: Option
     assert_portable_numbers(content)
     salt = salt or new_salt()
     d = {"v": 1, "kind": kind, "agent": agent, "seq": seq, "prev": prev, "time": time or now(), "name": name, "content_hash": content_hash(content, salt), "ref": ref}
+    if checks is not None:
+        d["checks"] = checks  # signed with the draft and carried into the record (§2.8)
     errs = envelope_errors(d, DRAFT_FIELDS)
     if errs:
         raise ValueError("invalid record: " + "; ".join(errs))
-    return {"draft": True, "envelope": d, "key_id": key.key_id, "sig": key.sign("draft", hash_json(d)), "content": content, "salt": salt, "store_content": store_content}
+    draft = {"draft": True, "envelope": d, "key_id": key.key_id, "sig": key.sign("draft", hash_json(d)), "content": content, "salt": salt, "store_content": store_content}
+    return with_disclosed(draft, disclosed, disclosed_salt)
 
 
 def draft_errors(rec: Any) -> list:
@@ -258,7 +288,7 @@ def draft_errors(rec: Any) -> list:
     if not isinstance(rec, dict):
         return ["draft is not an object"]
     errs = envelope_errors(rec.get("envelope"), DRAFT_FIELDS)
-    extra = sorted(set(rec) - {"draft", "envelope", "key_id", "sig", "content", "salt", "store_content"})
+    extra = sorted(set(rec) - {"draft", "envelope", "key_id", "sig", "content", "salt", "store_content", "disclosed", "disclosed_salt"})
     if extra:
         errs.append("unknown draft field " + ", ".join(extra))
     if rec.get("draft") is not True:
@@ -317,7 +347,8 @@ def sign_draft(key: SigningKey, draft: dict, *, project: str, env: str, prev: Op
     """The signed record for a draft once its project is known (§8)."""
     d = draft["envelope"]
     return make_record(key, kind=d["kind"], project=project, env=env, agent=d["agent"], seq=d["seq"] if seq is None else seq, prev=prev, name=d["name"],
-                       content=draft["content"], ref=ref, time=d["time"], salt=draft.get("salt"))
+                       content=draft["content"], ref=ref, time=d["time"], salt=draft.get("salt"), checks=d.get("checks"),
+                       disclosed=draft.get("disclosed"), disclosed_salt=draft.get("disclosed_salt"))
 
 
 # --- keys (§2.4, §2.5) ------------------------------------------------------------

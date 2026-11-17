@@ -3,7 +3,9 @@ import * as path from "node:path";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ERRORS } from "../src/errors.js";
+import { parseJson } from "../src/jcs.js";
 import { note, record } from "../src/index.js";
+import { defaultChecksFile } from "../src/checks.js";
 import { createServer } from "../src/mcp.js";
 import { FRAMEWORKS, LANGUAGES, installCommand, pythonInstall, snippet, steps } from "../src/project.js";
 import { SKILL_BODY } from "../src/skill.js";
@@ -47,7 +49,7 @@ describe("mcp server", () => {
     expect(process.cwd()).toBe(fs.realpathSync(ctx.root));
   });
 
-  it("lists the nine tools, each with a description and annotations", async () => {
+  it("lists the eleven tools, each with a description and annotations", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([
       "signafaide_setup",
@@ -59,6 +61,8 @@ describe("mcp server", () => {
       "signafaide_claim_link",
       "signafaide_records",
       "signafaide_flush",
+      "signafaide_explain_ruling",
+      "signafaide_show_rules",
     ]);
     const hints = Object.fromEntries(tools.map((t) => [t.name.replace("signafaide_", ""), t.annotations]));
     const readOnly = (service: boolean) => ({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: service });
@@ -73,6 +77,8 @@ describe("mcp server", () => {
       claim_link: readOnly(true),
       records: readOnly(true),
       flush: sends,
+      explain_ruling: readOnly(false),
+      show_rules: readOnly(false),
     });
     const by = Object.fromEntries(tools.map((t) => [t.name.replace("signafaide_", ""), t.description!]));
     // Each tool names the sibling to use instead.
@@ -86,6 +92,8 @@ describe("mcp server", () => {
     expect(by.verify).toContain("signafaide_flush");
     expect(by.records).toContain("the inputs and outputs of the tool calls are never returned");
     expect(by.flush).toContain("it never creates a sandbox and never opts in");
+    expect(by.explain_ruling).toContain("never prints a disclosed value");
+    expect(by.show_rules).toContain("Read-only");
     for (const d of Object.values(by)) expect(d).not.toMatch(/[\u2013\u2014]/);
     for (const t of tools) expect(t.description!.length).toBeGreaterThan(60);
     expect(tools[0].description).toContain("audit");
@@ -270,6 +278,69 @@ describe("mcp server", () => {
     [out] = await call("signafaide_verify");
     expect(out).toContain("FAIL");
     expect(out).toContain("Do not edit .signafaide/");
+  });
+
+  it("verify: a pack with tool-call checks, rulings and rule sets is read, and its tool-call checks lines are printed", async () => {
+    const v = parseJson(fs.readFileSync(path.join(__dirname, "../../spec/vectors.json"), "utf8"));
+    ctx.service.keyDoc = v.keys_document.keys[0]; // the witness that signed the vectors
+    for (const c of v.variants.filter((x: any) => x.name.startsWith("tool-call checks:"))) {
+      write("pack.json", JSON.stringify(c.pack));
+      const [out, err] = await call("signafaide_verify", { pack: "pack.json" });
+      expect(err, c.name).toBe(false);
+      for (const title of ["Envelope schema", "Batch hashes and signatures", "Signed heads"]) expect(out, c.name).toMatch(new RegExp(`${title} +PASS`));
+      expect(out, c.name).not.toMatch(/Content hashes +FAIL/);
+      expect(c.expect.tool_call_checks_lines.length, c.name).toBeGreaterThan(0);
+      for (const line of c.expect.tool_call_checks_lines) expect(out.split("\n"), c.name).toContain(`tool-call checks: ${line}`);
+    }
+  });
+
+  it("explain_ruling and show_rules: a pack's ruling, never a disclosed value", async () => {
+    const v = parseJson(fs.readFileSync(path.join(__dirname, "../../spec/vectors.json"), "utf8"));
+    const c = v.variants.find((x: any) => x.name.startsWith("tool-call checks: a strict call ruled allow"));
+    write("pack.json", JSON.stringify(c.pack));
+    const hash: string = c.pack.records[0].receipt.record_hash;
+    for (const id of [hash, hash.slice(0, 10), c.pack.records[1].receipt.record_hash]) {
+      const [out, err] = await call("signafaide_explain_ruling", { record: id, pack: "pack.json" });
+      expect(err, id).toBe(false);
+      expect(out).toContain("ruling: allow (enforce mode)");
+      expect(out).toContain("basis: rule; matched rules: known-payee");
+      expect(out).toContain("rule set: rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 2");
+      expect(out).toContain("disclosed fields: /amount, /currency, /payee/country, /payee/id (values are not shown)");
+      expect(out).toContain("rule known-payee: allow");
+      for (const value of ["acct_7", "GBP", "\"amount\""]) expect(out).not.toContain(value);
+    }
+    let [out, err] = await call("signafaide_explain_ruling", { record: "0".repeat(16), pack: "pack.json" });
+    expect(err).toBe(true);
+    expect(out).toContain("no record matches");
+    [out, err] = await call("signafaide_explain_ruling", { record: "abc" });
+    expect(err).toBe(true);
+    [out, err] = await call("signafaide_explain_ruling", { record: hash, pack: "/etc/passwd" });
+    expect(err).toBe(true);
+    expect(out).toContain("outside");
+  });
+
+  it("explain_ruling and show_rules: a local blocked call names the field to add; a client block names its check", async () => {
+    await ctx.rec.createSandbox();
+    ctx.service.publishRules(ctx.rec.apiKey!, [{ id: "limit", about: "Big payouts.", action: "block", tools: ["pay"], agents: null, when: [{ field: "/amount", op: "gt", value: 1000 }] }]);
+    write("signafaide.checks.json", JSON.stringify({ ...defaultChecksFile(), mode: "enforce", tools: { pay: { strict: true } } }));
+    let [out] = await call("signafaide_show_rules");
+    expect(out).toContain("rule set: none held");
+    await ctx.rec.checks.pullRules();
+    [out] = await call("signafaide_show_rules");
+    expect(out).toContain("version 1, enforce mode, default allow");
+    expect(out).toContain("limit: block (tools pay; every agent) when /amount gt 1000: Big payouts.");
+    expect(out).toContain("strict tool pay: fail closed; discloses no field; the rule set needs /amount");
+    expect(out).toContain("Read-only");
+    const pay = record(async (_a: { amount: number }) => "paid", { name: "pay" });
+    await expect(pay({ amount: 5 })).rejects.toThrow();
+    await ctx.rec.flush();
+    const d = ctx.rec.state.readAll(ctx.rec.state.chains()[0]).find((r) => r.envelope.kind === "decision")!;
+    [out] = await call("signafaide_explain_ruling", { record: d.receipt!.record_hash });
+    expect(out).toContain("ruling: block (");
+    expect(out).toContain("basis: fields_missing; matched rules: none; missing fields: /amount");
+    expect(out).toContain("to allow it: add /amount to the disclose list of pay in the checks file");
+    expect(out).not.toMatch(/\b5\b.*value/);
+    expect(ctx.service.calls.filter((x: any) => /explain|show/.test(JSON.stringify(x)))).toEqual([]);
   });
 
   it("status and claim link", async () => {

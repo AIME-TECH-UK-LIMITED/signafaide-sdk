@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "signafaide"
-version = "0.3.5"
+version = "0.4.0"
 description = "Audit evidence for AI agents: signed, independently co-signed records of every tool call, verifiable offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2."
 readme = "README.md"
 requires-python = ">=3.9"

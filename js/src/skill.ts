@@ -13,8 +13,23 @@ export const PRODUCTION_DOC = "https://signafaide.co.uk/docs/production";
 
 const LOCAL_TOOLS = `## MCP tools
 
-\`signafaide_setup\` previews the install command and code edit and changes nothing. \`signafaide_verify\` runs the checks, \`signafaide_status\` shows chains and keys, \`signafaide_records\` lists the records on this machine (metadata only, never inputs or outputs), \`signafaide_flush\` sends the waiting records once an API key exists and does nothing without one, \`signafaide_explain_error\` explains an error code. \`signafaide_init\` creates the external sandbox: call it only after the user has agreed, with \`confirm_user_agreed: true\` and \`user_words\` set to what the user wrote when they agreed. Without both it creates nothing.
+\`signafaide_setup\` previews the install command and code edit and changes nothing. \`signafaide_verify\` runs the checks, \`signafaide_status\` shows chains and keys, \`signafaide_records\` lists the records on this machine (metadata only, never inputs or outputs), \`signafaide_flush\` sends the waiting records once an API key exists and does nothing without one, \`signafaide_explain_error\` explains an error code, \`signafaide_explain_ruling\` and \`signafaide_show_rules\` read a tool-call ruling and the rules held (read-only). \`signafaide_init\` creates the external sandbox: call it only after the user has agreed, with \`confirm_user_agreed: true\` and \`user_words\` set to what the user wrote when they agreed. Without both it creates nothing.
 `;
+
+/** The tool-call checks section (spec §8); the plugin has no local MCP server, so it names commands. */
+function checksSection(plugin: boolean): string {
+  const read = plugin
+    ? "`signafaide verify` prints a `tool-call checks:` line for each agent, `signafaide checks status` shows the mode and the strict tools, `signafaide rules show` the rule set held, and `signafaide rules test <tool> '<arguments JSON>'` what a call would meet. One record's ruling is explained by the `signafaide_explain_ruling` tool of the local MCP server (`signafaide agent setup`)."
+    : "`signafaide_explain_ruling` with a record hash from `signafaide_records` gives the ruling, its basis, the rules that matched, the rule set version, the fields not disclosed and how to allow the call; `signafaide_show_rules` shows the rules held.";
+  return `## Tool-call checks
+
+\`signafaide agent setup\` writes \`signafaide.checks.json\` in watch mode (\`signafaide init\` does too, and is the user's to run, see below): checks for secrets, internal addresses, changed tools and known-bad tools, and the user's rules, note what they find and never block a call. Commit the file. Enforce mode, which blocks, is the user's choice: say so, do not set it.
+
+Strict tools (payments, deletes, outbound messages) also ask the witness for a ruling, allow or block, before they run, and do not run without one. By default only tool fingerprints leave the machine. A rule can need a field of the call's arguments: the user lists it in that tool's \`disclose\` to opt in. Name the fields and ask; never add one yourself.
+
+Reading a ruling: ${read} A ruling is the witness's decision on what the client disclosed, not a statement that the call was right. In watch mode a block is only a note: enforce mode would have blocked it.
+`;
+}
 
 const PLUGIN_TOOLS = `## Commands
 
@@ -69,6 +84,7 @@ Use it when the user asks for an audit trail, tamper-evident records or complian
 3. Record what you did not wrap. MCP servers the agent uses: start each one through the gateway in the agent's MCP configuration, \`{"command": "npx", "args": ["-y", "signafaide", "gateway", "--agent", "claims-bot", "--", <the server's command and arguments>]}\`; it records every tool call that passes through it and forwards none it cannot record. Then give the full list of the tools your code hands the agent, once at start-up: \`signafaide.declare_tools(["approve_payout", "escalate", "web_search"], agent="claims-bot")\` (Python) or \`declareTools([...], { agent: "claims-bot" })\` (TypeScript). A tool you did not wrap is declared as not recorded, and \`signafaide verify\` names it. The gateway records only the calls that go through it, so make it the only route to those tools.
 4. Run the agent once, then \`signafaide verify\` (\`uv run signafaide verify\`, \`.venv/bin/signafaide verify\` or \`npx signafaide verify\`). It checks signatures, chain links and content hashes on this machine, and ends with a line such as \`PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)\`. The other checks need the witness.
 
+${checksSection(plugin)}
 ## Sending records to the witness
 
 This is the user's decision. Do not run \`signafaide init\` yourself: it creates an external sandbox and accepts the service's Terms. In your final message, say that the records are local only for now, and that the user can run \`signafaide init\` (a free sandbox, no account; it saves \`SIGNAFAIDE_API_KEY\` to \`.env\`), set \`SIGNAFAIDE_API_KEY\`, or point \`SIGNAFAIDE_URL\` at a self-hosted witness (an Enterprise contract). Records written before then ship later with their original times, up to 7 days old.

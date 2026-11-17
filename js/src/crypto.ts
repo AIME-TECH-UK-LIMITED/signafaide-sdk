@@ -7,7 +7,7 @@ import { canonicalBytes } from "./jcs.js";
 
 ed.etc.sha512Sync = (...m: Uint8Array[]) => sha512(concatBytes(...m));
 
-export const DOMAINS = ["record", "batch", "head", "anchor", "register", "rotate", "agent_key", "export", "draft"] as const;
+export const DOMAINS = ["record", "batch", "head", "anchor", "register", "rotate", "agent_key", "export", "draft", "ruling", "rules", "fingerprints"] as const;
 export type Domain = (typeof DOMAINS)[number];
 export const HEX64 = /^[0-9a-f]{64}$/;
 export const SALT_RE = /^[0-9a-f]{32}$/;

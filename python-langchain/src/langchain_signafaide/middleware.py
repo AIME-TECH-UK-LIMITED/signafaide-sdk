@@ -66,14 +66,15 @@ class SignafaideMiddleware(AgentMiddleware):
         return spec
 
     @staticmethod
-    def _call(request: Any) -> tuple[str, Any]:
+    def _call(request: Any) -> tuple[str, Any, Optional[str]]:
         call = request.tool_call
-        return call["name"], call.get("args", {})
+        cid = call.get("id")  # the model's tool call id
+        return call["name"], call.get("args", {}), cid if isinstance(cid, str) and cid else None
 
     def wrap_tool_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
-        name, args = self._call(request)
-        return self._spec(name).call(args, lambda: handler(request), _tool_output)
+        name, args, call_id = self._call(request)
+        return self._spec(name).call(args, lambda: handler(request), _tool_output, call_id=call_id)
 
     async def awrap_tool_call(self, request: Any, handler: Callable[[Any], Awaitable[Any]]) -> Any:
-        name, args = self._call(request)
-        return await self._spec(name).acall(args, lambda: handler(request), _tool_output)
+        name, args, call_id = self._call(request)
+        return await self._spec(name).acall(args, lambda: handler(request), _tool_output, call_id=call_id)

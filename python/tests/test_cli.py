@@ -29,13 +29,13 @@ def cli(project, service, monkeypatch, capsys):
 
 
 def test_commands_registered():
-    assert list(COMMANDS) == ["init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush"]
+    assert list(COMMANDS) == ["init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush", "checks", "rules"]
 
 
 def test_init_then_claim(cli, project, service):
     code, out, _ = cli("init")
-    # ready + claim link, why claim, time left, terms, what is sent
-    assert code == 0 and out.count("\n") == 5 and "claim it at " + service.url in out
+    # ready + claim link, why claim, time left, terms, what is sent, which tool-call checks are on, how to change them
+    assert code == 0 and out.count("\n") == 7 and "claim it at " + service.url in out and "tool-call checks: on in watch mode" in out
     assert f"By creating a sandbox you agree to the signafAIde Terms ({service.url}/legal/terms) and Privacy notice ({service.url}/legal/privacy)." in out
     assert "records written before now ship with their original times" in out
     claim = out.splitlines()[0].rsplit(" ", 1)[1]

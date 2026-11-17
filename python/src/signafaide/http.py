@@ -55,13 +55,18 @@ class Client:
         # The coding agent is detected only at set-up time (init, agent setup), never per request.
         self.client_id = client_id or client_header()
 
-    def request(self, method: str, path: str, body: Any = None, auth: bool = True, query: Optional[dict] = None) -> Any:
+    def request(self, method: str, path: str, body: Any = None, auth: bool = True, query: Optional[dict] = None, headers: Optional[dict] = None) -> Any:
+        """One request. Returns the JSON answer, or None for 304 Not Modified (a request with
+        ``If-None-Match``)."""
+        return self._request(method, path, body, auth, query, headers or {})
+
+    def _request(self, method: str, path: str, body: Any, auth: bool, query: Optional[dict], extra: dict) -> Any:
         url = self.url + path
         if query:
             q = {k: v for k, v in query.items() if v is not None}
             if q:
                 url += "?" + urllib.parse.urlencode(q)
-        headers = {"Accept": "application/json", "User-Agent": f"signafaide-python/{__version__}", HEADER: self.client_id}
+        headers = {"Accept": "application/json", "User-Agent": f"signafaide-python/{__version__}", HEADER: self.client_id, **extra}
         data = None
         if body is not None:
             data = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode()
@@ -76,6 +81,8 @@ class Client:
                 raw = resp.read()
                 ctype = resp.headers.get("Content-Type", "")
         except urllib.error.HTTPError as e:
+            if e.code == 304:
+                return None
             raise _service_error(e.code, e.read()) from None
         except (urllib.error.URLError, OSError) as e:
             reason = getattr(e, "reason", e)
@@ -128,6 +135,15 @@ class Client:
 
     def service_keys(self) -> dict:
         return self.request("GET", "/.well-known/signafaide-keys.json", auth=False)
+
+    def rules(self, etag: Optional[str] = None, version: Optional[int] = None) -> Optional[dict]:
+        """The project's signed rule set (§6, §10.2): ``{rules, sig, service_key_id}``,
+        ``{"rules": null}`` without one, or None when *etag* (its ``rules_hash``) is still current."""
+        return self.request("GET", "/v1/rules", query={"version": version}, headers={"If-None-Match": f'"{etag}"'} if etag else None)
+
+    def fingerprints(self, since: Optional[int] = None) -> dict:
+        """The shared fingerprint list (§6, §11.2): ``{snapshot, updates}``."""
+        return self.request("GET", "/v1/fingerprints", query={"since": since})
 
 
 def _service_error(status: int, raw: bytes) -> SignafaideError:

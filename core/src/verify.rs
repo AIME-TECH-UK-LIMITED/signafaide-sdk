@@ -1,6 +1,7 @@
 //! The §7 verification-pack verifier. Pure: no I/O, so it also runs in a browser (wasm32).
 
 use crate::bitcoin::{check_header, BlockHeader};
+use crate::checks::report::{self as checks_report, AgentChecks};
 use crate::coverage::{coverage, coverage_lines, telemetry, telemetry_lines, Coverage, Telemetry};
 use crate::drand::{check_round_time, verify_beacon, BeaconCheck};
 use crate::merkle::verify_path;
@@ -100,6 +101,10 @@ pub struct Report {
     /// telemetry spans, when their decisions were written, and whether the telemetry is
     /// sampled. A note, never a failure.
     pub telemetry: BTreeMap<String, Telemetry>,
+    /// Tool-call checks per agent (§7), for agents that have a line: what the checks of the
+    /// agent's records found and the rulings on their receipts. A report, never a failure.
+    #[serde(rename = "tool_call_checks")]
+    pub tool_checks: BTreeMap<String, AgentChecks>,
 }
 
 impl Report {
@@ -155,6 +160,9 @@ impl Report {
         for line in self.telemetry_lines() {
             out += &format!("telemetry: {line}\n");
         }
+        for line in self.tool_checks_lines() {
+            out += &format!("tool-call checks: {line}\n");
+        }
         out += &self.result_line();
         out.push('\n');
         out
@@ -169,6 +177,11 @@ impl Report {
     /// The telemetry notes in words (§7), agent by agent.
     pub fn telemetry_lines(&self) -> Vec<String> {
         self.telemetry.iter().flat_map(|(agent, t)| telemetry_lines(agent, t)).collect()
+    }
+
+    /// The tool-call checks report in words (§7), agent by agent.
+    pub fn tool_checks_lines(&self) -> Vec<String> {
+        self.tool_checks.iter().flat_map(|(agent, c)| checks_report::lines(agent, c)).collect()
     }
 
     /// For example `PASS: export of every agent, all records, generated 2026-11-13T12:00:00.000Z`,
@@ -615,6 +628,60 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         }
         batches.insert((rc.batch.seq, computed), rc);
     }
+    // Rulings on receipts (§3.5): signed over domain `ruling` by a service key active at its
+    // server_time, naming this receipt's record, batch and time, and only on a decision that asked.
+    let mut rulings: BTreeMap<Hash, Hash> = BTreeMap::new();
+    for x in &recs {
+        let rc = &x.r.receipt;
+        let item = format!("ruling on {}", x.label);
+        match (&rc.ruling, &rc.ruling_sig) {
+            (None, None) => {
+                if let Some(e) = &rc.ruling_error {
+                    if e != "rules_unavailable" || !asks_for_ruling(&x.r.envelope) {
+                        acc[5].fail(&item, "ruling_error is only rules_unavailable, on the receipt of a decision that asked for a ruling");
+                    }
+                }
+                continue;
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                acc[5].fail(&item, "ruling and ruling_sig come together");
+                continue;
+            }
+            (Some(g), Some(sig)) => {
+                acc[5].checked += 1;
+                if rc.ruling_error.is_some() {
+                    acc[5].fail(&item, "a receipt with a ruling has no ruling_error");
+                }
+                if let Err(e) = crate::checks::ruling::validate(g) {
+                    acc[5].fail(&item, e);
+                    continue;
+                }
+                let Ok(gh) = crate::hash::hash_json(g) else {
+                    acc[5].fail(&item, "the ruling cannot be hashed");
+                    continue;
+                };
+                let at = g["server_time"].as_str().unwrap_or_default();
+                if let Err(e) = keys.active(&rc.service_key_id, at).and_then(|k| sign::verify(&k.public_key, Domain::Ruling, &gh, sig)) {
+                    acc[5].fail(&item, format!("ruling_sig: {e}"));
+                }
+                if g["record_hash"].as_str() != Some(rc.record_hash.hex().as_str())
+                    || g["batch_hash"].as_str() != Some(rc.batch_hash.hex().as_str())
+                    || g["server_time"].as_str() != Some(rc.batch.server_time.as_str())
+                {
+                    acc[5].fail(&item, "the ruling names another record, batch or time than its receipt");
+                }
+                if !asks_for_ruling(&x.r.envelope) {
+                    acc[5].fail(&item, "a ruling on a record that did not ask for one (only a strict decision not blocked on the client asks)");
+                }
+                match rulings.get(&x.hash) {
+                    Some(other) if *other != gh => acc[5].fail(&item, "two different rulings for one record"),
+                    _ => {
+                        rulings.insert(x.hash, gh);
+                    }
+                }
+            }
+        }
+    }
 
     // 7. batch chain: links, and server_time never going back
     let mut by_seq: BTreeMap<u64, (Hash, &Batch)> = BTreeMap::new();
@@ -684,6 +751,32 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
             "export_sig does not verify with any service key active at generated: the pack's filter, heads, generated time or records were changed after the service signed it",
         ),
         Err(e) => acc[7].fail("export statement", e),
+    }
+    // The signed rule set versions in the pack (§7, §10.2 steps 1 to 3), and the versions the
+    // records and rulings name.
+    let mut held_sets: BTreeMap<(String, i64), String> = BTreeMap::new();
+    for (i, entry) in pack.rule_sets.iter().flatten().enumerate() {
+        let item = format!("rule_sets[{i}]");
+        acc[7].checked += 1;
+        match check_rule_set(entry, &pack, &keys) {
+            Err(e) => acc[7].fail(&item, e),
+            Ok((set, version, hash)) => {
+                if held_sets.keys().any(|(_, v)| *v == version) {
+                    acc[7].fail(&item, format!("two rule_sets entries hold version {version}"));
+                }
+                held_sets.insert((set, version), hash);
+            }
+        }
+    }
+    for x in &recs {
+        let named = x.r.envelope.checks.as_ref().and_then(|c| c["rules"].as_array()).into_iter().flatten();
+        let ruled = x.r.receipt.ruling.as_ref().map(|g| &g["rules"]).filter(|r| r.is_object());
+        for r in named.chain(ruled) {
+            let (Some(set), Some(version), Some(hash)) = (r["set"].as_str(), r["version"].as_i64(), r["hash"].as_str()) else { continue };
+            if held_sets.get(&(set.to_string(), version)).is_some_and(|h| h != hash) {
+                acc[7].fail(&x.label, format!("names rule set {set} version {version} with a rules_hash other than the version the pack holds"));
+            }
+        }
     }
     let in_filter = |agent: &str| pack.filter.agents.as_ref().is_none_or(|a| a.iter().any(|x| x == agent));
     for x in &recs {
@@ -915,21 +1008,39 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         acc[10].notes.push(format!("waiting for the public timestamp to confirm (usually within a few hours): {waiting} of {}", proofs.len()));
     }
 
-    // 12. content
+    // 12. content, and disclosed values (§2.3) wherever a record carries them
     for x in &recs {
         let local = opts.contents.get(&x.hash);
         let (content, salt) = match (&x.r.content, &x.r.salt, local) {
             (None, None, Some(l)) => (Some(&l.content), l.salt.as_deref()),
             (c, s, _) => (c.as_ref(), s.as_deref()),
         };
-        if content.is_none() && salt.is_none() {
+        let has_content = content.is_some() || salt.is_some();
+        let has_disclosed = x.r.disclosed.is_some() || x.r.disclosed_salt.is_some();
+        if !has_content && !has_disclosed {
             continue;
         }
         acc[11].checked += 1;
-        match check_content(content, salt, &x.r.envelope.content_hash) {
-            Ok(None) => {}
-            Ok(Some(h)) => acc[11].fail(&x.label, format!("content hashes to {h}, envelope says {}", x.r.envelope.content_hash)),
-            Err(e) => acc[11].fail(&x.label, e),
+        let content_ok = if has_content {
+            match check_content(content, salt, &x.r.envelope.content_hash) {
+                Ok(None) => true,
+                Ok(Some(h)) => {
+                    acc[11].fail(&x.label, format!("content hashes to {h}, envelope says {}", x.r.envelope.content_hash));
+                    false
+                }
+                Err(e) => {
+                    acc[11].fail(&x.label, e);
+                    false
+                }
+            }
+        } else {
+            false
+        };
+        if has_disclosed {
+            let matched_content = if content_ok { content } else { None };
+            if let Err(e) = check_disclosed(&x.r, matched_content) {
+                acc[11].fail(&x.label, e);
+            }
         }
     }
     if acc[11].checked == 0 {
@@ -945,6 +1056,24 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
     let tool_telemetry: BTreeMap<String, Telemetry> = chains
         .iter()
         .filter_map(|(agent, chain)| telemetry(chain.values().map(|x| (x.r.envelope.kind, x.r.envelope.name.as_str()))).map(|t| (agent.to_string(), t)))
+        .collect();
+
+    let tool_checks: BTreeMap<String, AgentChecks> = chains
+        .iter()
+        .filter_map(|(agent, chain)| {
+            let seq_of: HashMap<Hash, u64> = chain.iter().map(|(&seq, x)| (x.hash, seq)).collect();
+            let items: Vec<checks_report::Item> = chain
+                .iter()
+                .map(|(&seq, x)| checks_report::Item {
+                    seq,
+                    kind: x.r.envelope.kind,
+                    checks: x.r.envelope.checks.as_ref(),
+                    decision_seq: x.r.envelope.reference.and_then(|h| seq_of.get(&h).copied()),
+                    ruling: x.r.receipt.ruling.as_ref(),
+                })
+                .collect();
+            checks_report::agent_checks(&items).map(|c| (agent.to_string(), c))
+        })
         .collect();
 
     let units = [("record", "records"), ("record", "records"), ("record", "records"), ("record", "records"), ("record", "records"), ("batch", "batches"), ("batch", "batches"), ("head", "heads"), ("round", "rounds"), ("anchor", "anchors"), ("proof", "proofs"), ("record", "records")];
@@ -986,7 +1115,56 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         checks,
         coverage: tool_coverage,
         telemetry: tool_telemetry,
+        tool_checks,
     })
+}
+
+/// Whether a record is a decision that asked the witness for a ruling (§3.5): its checks are
+/// strict and its checks did not block the call on the client.
+fn asks_for_ruling(e: &Envelope) -> bool {
+    e.kind == Kind::Decision && e.checks.as_ref().is_some_and(crate::checks::envelope::asks_for_ruling)
+}
+
+/// One `rule_sets` entry of a pack (check 8, §10.2 steps 1 to 3): a valid document of the pack's
+/// project and env, signed over domain `rules` by a service key active at its `issued`.
+/// Returns its set, version and `rules_hash`.
+fn check_rule_set(entry: &Value, pack: &Pack, keys: &Keys) -> Result<(String, i64, String)> {
+    let o = entry.as_object().filter(|o| o.len() == 3).ok_or_else(|| Error::new("a rule_sets entry is {rules, sig, service_key_id}"))?;
+    let (Some(doc), Some(sig), Some(kid)) = (o.get("rules"), o.get("sig").and_then(Value::as_str), o.get("service_key_id").and_then(Value::as_str)) else {
+        return Err(Error::new("a rule_sets entry is {rules, sig, service_key_id}"));
+    };
+    let rs = crate::checks::rules::RuleSet::parse(doc).map_err(|e| Error::new(format!("not a valid rule set: {e}")))?;
+    if rs.project != pack.project || rs.env != pack.env.as_str() {
+        return Err(Error::new("the rule set belongs to another project or env"));
+    }
+    let hash = crate::hash::hash_json(doc)?;
+    keys.active(kid, &rs.issued)
+        .and_then(|k| sign::verify(&k.public_key, Domain::Rules, &hash, sig))
+        .map_err(|e| Error::new(format!("rule set version {}: {e}", rs.version)))?;
+    Ok((rs.set, rs.version, hash.hex()))
+}
+
+/// The disclosed values of a record (§2.3, check 12): with their own salt, hashing to
+/// `checks.disclosed_hash`; and, when the record's content was supplied and matched, the same
+/// values as the call's input.
+fn check_disclosed(r: &PackRecord, content: Option<&Value>) -> Result<()> {
+    let (Some(d), Some(salt)) = (&r.disclosed, &r.disclosed_salt) else {
+        return Err(Error::new("disclosed and disclosed_salt come together"));
+    };
+    let checks = r.envelope.checks.as_ref().filter(|c| c["disclosed_hash"].is_string()).ok_or_else(|| Error::new("disclosed values on a record whose checks.disclosed_hash is null"))?;
+    let map = d.as_object().ok_or_else(|| Error::new("disclosed must be an object of {pointer: value}"))?;
+    let listed: Vec<&str> = checks["disclosed"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if let Some(k) = map.keys().find(|k| !listed.contains(&k.as_str())) {
+        return Err(Error::new(format!("disclosed holds {k}, which checks.disclosed does not list")));
+    }
+    let h = crate::checks::disclosed_hash(d, salt)?;
+    if checks["disclosed_hash"].as_str() != Some(h.hex().as_str()) {
+        return Err(Error::new(format!("disclosed values hash to {h}, checks.disclosed_hash says {}", checks["disclosed_hash"].as_str().unwrap_or(""))));
+    }
+    if let Some(c) = content {
+        crate::checks::envelope::disclosed_match_input(checks, map, c).map_err(Error::new)?;
+    }
+    Ok(())
 }
 
 /// The earlier of two optional times (protocol times sort as text).
@@ -1154,6 +1332,7 @@ fn malformed(why: String, independent: Independent) -> Report {
         checks,
         coverage: BTreeMap::new(),
         telemetry: BTreeMap::new(),
+        tool_checks: BTreeMap::new(),
     }
 }
 

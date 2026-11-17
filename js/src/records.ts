@@ -1,6 +1,7 @@
 /** Envelopes and signed records (SPEC §2). */
 
 import { HEX64, SALT_RE, b64url, b64urlDecode, contentHash, hashJson, keyId, newSalt, verifySig, type SigningKey } from "./crypto.js";
+import { checksErrors } from "./checks.js";
 import { assertPortableNumbers } from "./jcs.js";
 
 export type Kind = "decision" | "outcome" | "note";
@@ -19,6 +20,10 @@ const PROJECT_RE = /^prj_[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const sameKeys = (o: unknown, keys: string[]): o is Record<string, any> =>
   !!o && typeof o === "object" && !Array.isArray(o) && Object.keys(o).length === keys.length && keys.every((k) => k in (o as object));
 const RECEIPT_FIELDS = ["record_hash", "index", "proof", "batch", "batch_hash", "batch_sig", "service_key_id", "head", "head_sig"];
+/** A receipt's optional fields: the witness's ruling on a strict decision (§3.4, §3.5). */
+const RECEIPT_OPTIONAL = ["ruling", "ruling_sig", "ruling_error"];
+/** A signed record's optional fields besides `receipt`: the content (§2.3) and the values a strict call disclosed (§2.3, §10.4). */
+const RECORD_OPTIONAL = ["content", "salt", "disclosed", "disclosed_salt"];
 const BATCH_FIELDS = ["v", "project", "env", "seq", "prev", "root", "size", "server_time", "drand"];
 const HEAD_FIELDS = ["project", "env", "agent", "seq", "record_hash", "server_time"];
 const DRAND_FIELDS = ["chain", "round", "randomness", "signature"];
@@ -35,6 +40,8 @@ export interface Envelope {
   name: string;
   content_hash: string;
   ref: string | null;
+  /** What the tool-call checks of this call found (§2.8); absent when no checks ran. */
+  checks?: Record<string, any>;
 }
 
 export interface SignedRecord {
@@ -47,6 +54,9 @@ export interface SignedRecord {
   content?: Record<string, unknown>;
   /** The content's salt (§2.1): kept with the content, sent only with stored content. */
   salt?: string;
+  /** The values a strict call disclosed to the witness, by JSON Pointer, and their own salt (§2.3, §10.4). */
+  disclosed?: Record<string, unknown>;
+  disclosed_salt?: string;
   receipt?: Receipt;
 }
 
@@ -60,6 +70,11 @@ export interface Receipt {
   service_key_id: string;
   head: Record<string, any>;
   head_sig: string;
+  /** The witness's ruling on a strict decision (§3.5), signed over domain `ruling`. */
+  ruling?: Record<string, any>;
+  ruling_sig?: string;
+  /** Why a strict decision has no ruling (`rules_unavailable`); not signed (§3.4). */
+  ruling_error?: string;
 }
 
 /** Current time as RFC 3339 UTC with milliseconds. */
@@ -113,8 +128,11 @@ export function validProjectId(s: unknown): boolean {
 
 /** Schema problems with a receipt (§3.4): exact fields and types; signatures are only
  * checked to be strings (their validity is checks 6 and 8). */
-export function receiptErrors(rc: unknown): string[] {
-  if (!sameKeys(rc, RECEIPT_FIELDS)) return ["receipt fields are " + [...RECEIPT_FIELDS].sort().join(", ")];
+export function receiptErrors(rc: any): string[] {
+  if (!rc || typeof rc !== "object" || Array.isArray(rc) || !RECEIPT_FIELDS.every((k) => k in rc) || Object.keys(rc).some((k) => !RECEIPT_FIELDS.includes(k) && !RECEIPT_OPTIONAL.includes(k))) {
+    return ["receipt fields are " + [...RECEIPT_FIELDS].sort().join(", ") + ", and ruling, ruling_sig and ruling_error when the witness ruled (or could not)"];
+  }
+  rc = rc as Record<string, any>;
   const errs: string[] = [];
   const { batch: b, head: h } = rc;
   if (!(isHex(rc.record_hash) && isHex(rc.batch_hash) && isInt(rc.index) && rc.index >= 0)) errs.push("receipt record_hash, batch_hash or index is invalid");
@@ -156,7 +174,7 @@ export function envelopeErrors(env: unknown, fields: readonly string[] = ENVELOP
   const errs: string[] = [];
   const missing = fields.filter((f) => !(f in e));
   const extra = Object.keys(e)
-    .filter((k) => !fields.includes(k))
+    .filter((k) => !fields.includes(k) && k !== "checks")
     .sort();
   if (missing.length) errs.push("missing " + missing.join(", "));
   if (extra.length) errs.push("unknown field " + extra.join(", "));
@@ -176,6 +194,10 @@ export function envelopeErrors(env: unknown, fields: readonly string[] = ENVELOP
   if (e.kind === "outcome") {
     if (!(typeof e.ref === "string" && HEX64.test(e.ref))) errs.push("ref must be the decision's record hash for an outcome");
   } else if (e.ref !== null) errs.push("ref must be null unless kind is outcome");
+  if ("checks" in e) {
+    const err = checksErrors(e);
+    if (err) errs.push(err + " (spec §2.8)");
+  }
   return errs;
 }
 
@@ -185,9 +207,10 @@ export function recordErrors(rec: unknown): string[] {
   const r = rec as Record<string, unknown>;
   const errs = envelopeErrors(r.envelope);
   const extra = Object.keys(r)
-    .filter((k) => !["envelope", "key_id", "sig", "content", "salt", "receipt"].includes(k))
+    .filter((k) => !["envelope", "key_id", "sig", "receipt", ...RECORD_OPTIONAL].includes(k))
     .sort();
   if (extra.length) errs.push("unknown record field " + extra.join(", "));
+  if ("disclosed_salt" in r && (typeof r.disclosed_salt !== "string" || !SALT_RE.test(r.disclosed_salt))) errs.push("disclosed_salt must be 32 lowercase hex");
   if (typeof r.key_id !== "string" || !KEY_ID_RE.test(r.key_id)) errs.push("key_id must be 16 lowercase hex");
   let sigOk = false;
   try {
@@ -214,6 +237,11 @@ export interface RecordFields {
   time?: string;
   /** The content salt (§2.1); a fresh random one when not given. */
   salt?: string;
+  /** What the tool-call checks found (§2.8), signed in the envelope. */
+  checks?: Record<string, any>;
+  /** The values a strict call discloses to the witness and their own salt (§2.3). */
+  disclosed?: Record<string, unknown>;
+  disclosedSalt?: string;
 }
 
 /** Build and sign `{envelope, key_id, sig, content, salt}`: the content hash is salted (SPEC
@@ -235,9 +263,19 @@ export function makeRecord(key: SigningKey, f: RecordFields): SignedRecord {
     content_hash: contentHash(f.content, salt),
     ref: f.ref ?? null,
   };
+  if (f.checks) envelope.checks = f.checks;
   const errs = envelopeErrors(envelope);
   if (errs.length) throw new Error("invalid record: " + errs.join("; "));
-  return { envelope, key_id: key.keyId, sig: key.sign("record", hashJson(envelope)), content: f.content, salt };
+  return withDisclosed({ envelope, key_id: key.keyId, sig: key.sign("record", hashJson(envelope)), content: f.content, salt }, f.disclosed, f.disclosedSalt);
+}
+
+/** `rec` with the values its strict call disclosed and their own salt (§2.3), when any. */
+export function withDisclosed(rec: SignedRecord, disclosed?: Record<string, unknown>, salt?: string): SignedRecord {
+  if (disclosed !== undefined && salt !== undefined) {
+    rec.disclosed = disclosed;
+    rec.disclosed_salt = salt;
+  }
+  return rec;
 }
 
 /** The name of the note a new instance writes first when it continues a chain it does not hold
@@ -287,7 +325,8 @@ export function wireRecord(rec: SignedRecord, storeContent: boolean): SignedReco
     out.content = rec.content;
     if (rec.salt !== undefined) out.salt = rec.salt;
   }
-  return out;
+  // The values a strict call disclosed to the witness go with it, whatever the content mode (§2.3, §10.4).
+  return withDisclosed(out, rec.disclosed, rec.disclosed_salt);
 }
 
 /** A draft (§8) for a chain whose project is not known yet (no API key, or the key's project
@@ -297,10 +336,12 @@ export function wireRecord(rec: SignedRecord, storeContent: boolean): SignedReco
 export function makeDraft(key: SigningKey, f: Omit<RecordFields, "project" | "env">, storeContent: boolean): SignedRecord {
   assertPortableNumbers(f.content);
   const salt = f.salt ?? newSalt();
-  const d = { v: 1, kind: f.kind, agent: f.agent, seq: f.seq, prev: f.prev, time: f.time ?? now(), name: f.name, content_hash: contentHash(f.content, salt), ref: f.ref ?? null };
+  const d: Record<string, unknown> = { v: 1, kind: f.kind, agent: f.agent, seq: f.seq, prev: f.prev, time: f.time ?? now(), name: f.name, content_hash: contentHash(f.content, salt), ref: f.ref ?? null };
+  if (f.checks) d.checks = f.checks; // signed with the draft and carried into the record (§2.8)
   const errs = envelopeErrors(d, DRAFT_FIELDS);
   if (errs.length) throw new Error("invalid record: " + errs.join("; "));
-  return { draft: true, envelope: d as unknown as Envelope, key_id: key.keyId, sig: key.sign("draft", hashJson(d)), content: f.content, salt, store_content: storeContent };
+  const draft: SignedRecord = { draft: true, envelope: d as unknown as Envelope, key_id: key.keyId, sig: key.sign("draft", hashJson(d)), content: f.content, salt, store_content: storeContent };
+  return withDisclosed(draft, f.disclosed, f.disclosedSalt);
 }
 
 /** Schema problems with a draft line (§8); empty when valid. */
@@ -309,7 +350,7 @@ export function draftErrors(rec: unknown): string[] {
   const r = rec as Record<string, unknown>;
   const errs = envelopeErrors(r.envelope, DRAFT_FIELDS);
   const extra = Object.keys(r)
-    .filter((k) => !["draft", "envelope", "key_id", "sig", "content", "salt", "store_content"].includes(k))
+    .filter((k) => !["draft", "envelope", "key_id", "sig", "content", "salt", "store_content", "disclosed", "disclosed_salt"].includes(k))
     .sort();
   if (extra.length) errs.push("unknown draft field " + extra.join(", "));
   if (r.draft !== true) errs.push("draft must be true");
@@ -330,7 +371,22 @@ export function draftErrors(rec: unknown): string[] {
 /** The signed record for a draft once its project is known (§8). */
 export function signDraft(key: SigningKey, draft: SignedRecord, project: string, env: "test" | "live", prev: string | null, ref: string | null, seq?: number): SignedRecord {
   const d = draft.envelope;
-  return makeRecord(key, { kind: d.kind, project, env, agent: d.agent, seq: seq ?? d.seq, prev, name: d.name, content: draft.content ?? {}, ref, time: d.time, salt: draft.salt });
+  return makeRecord(key, {
+    kind: d.kind,
+    project,
+    env,
+    agent: d.agent,
+    seq: seq ?? d.seq,
+    prev,
+    name: d.name,
+    content: draft.content ?? {},
+    ref,
+    time: d.time,
+    salt: draft.salt,
+    checks: d.checks,
+    disclosed: draft.disclosed,
+    disclosedSalt: draft.disclosed_salt,
+  });
 }
 
 /** A service key (§5) or, with `agent`, a pack's agent key: exact fields, valid times. */

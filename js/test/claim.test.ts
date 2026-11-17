@@ -22,7 +22,8 @@ async function cli(...args: string[]): Promise<[number, string, string]> {
   console.error = (s: string) => err.push(s);
   try {
     const code = await main(args);
-    return [code, out.join("\n"), err.join("\n")];
+    // `init` also says how tool-call checks are set up (tested in checks-runtime.test.ts): not a claim line.
+    return [code, out.filter((l) => !String(l).startsWith("tool-call checks: ")).join("\n"), err.join("\n")];
   } finally {
     [console.log, console.error] = [log, error];
   }

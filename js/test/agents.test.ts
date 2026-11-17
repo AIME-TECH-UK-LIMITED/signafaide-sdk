@@ -208,7 +208,7 @@ describe("skill text", () => {
     expect(head).toContain("agent and tool names must not hold personal data");
     expect(head).toContain("the hosted witness (https://api.signafaide.co.uk)");
     for (const hype of ["revolution", "best-in-class", "seamless", "effortless", "world-class", "Why not", "!\n", "! ", "**"]) expect(SKILL_BODY).not.toContain(hype);
-    expect(SKILL_BODY.split("\n").length).toBeLessThan(50);
+    expect(SKILL_BODY.split("\n").length).toBeLessThan(60); // the tool-call checks section adds 8 lines
   });
 
   it("asks for explicit agent names and leaves the opt-in to the person", () => {

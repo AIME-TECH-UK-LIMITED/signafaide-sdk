@@ -163,14 +163,14 @@
     {
       "code": "bad_response",
       "status": 0,
-      "means": "The service answered with values the SDK refuses to use: an API key, project id or env that is not well formed, or receipts for another project. Nothing was written to `.env` or `.signafaide/`.",
+      "means": "The service answered with values the SDK refuses to use: an API key, project id or env that is not well formed, or receipts for another project. Nothing was written to `.env` or `.signafaide/`. For tool-call checks: a rule set version or a shared fingerprint list update that did not verify (§10.2, §11.2); the SDK keeps the version it holds and says so in `signafaide checks status`, and no call fails for it.",
       "fix": "Check SIGNAFAIDE_URL: it should be your signafAIde service, over https. A wrong URL in a cloned repo's `.env` is the usual cause."
     },
     {
       "code": "state",
       "status": 0,
-      "means": "The local `.signafaide/` state could not be used, for example a folder that cannot be written (a read-only disk), a damaged chain line or a lock held by another process.",
-      "fix": "The message names the file. On a read-only disk, set SIGNAFAIDE_HOME to a writable folder (see the production guide), or SIGNAFAIDE_DISABLED=1 to turn recording off. Do not delete chain files: they are your evidence. Move a damaged line aside, then run `signafaide verify`."
+      "means": "The local `.signafaide/` state could not be used, for example a folder that cannot be written (a read-only disk), a damaged chain line or a lock held by another process, or a `signafaide.checks.json` that breaks its format (every checked call then fails with `state`, naming the file and the key, until it is fixed).",
+      "fix": "The message names the file. On a read-only disk, set SIGNAFAIDE_HOME to a writable folder (see the production guide), or SIGNAFAIDE_DISABLED=1 to turn recording off. Do not delete chain files: they are your evidence. Move a damaged line aside, then run `signafaide verify`. For the checks file: fix the key the message names (`signafaide checks status` shows it), or set SIGNAFAIDE_CHECKS=0 to turn tool-call checks off."
     },
     {
       "code": "key_mismatch",
@@ -195,6 +195,24 @@
       "status": 0,
       "means": "A chain written before the project was known cannot join the project, because that agent already has a chain there. It stays pending, on this machine only.",
       "fix": "Nothing to repair: it still verifies with `signafaide verify`. To ship such records, use a different agent name before opting in."
+    },
+    {
+      "code": "blocked",
+      "status": 0,
+      "means": "A tool-call check on this machine, or the witness's ruling on a strict tool, blocked the call, so the tool did not run. The decision and an outcome saying it did not run are recorded. The message names the check or rule, the rule set version, and what was found (never the value itself).",
+      "fix": "If the call should run: for a rule, change it in the console's Rules page (or in `signafaide.checks.json` for a local rule) and publish; for an internal address, add the host or network to the allowlist; for a changed tool, re-approve it in the console or with `signafaide checks approve <tool>`; for a field the rule set needs that this machine does not disclose, add the pointers the message names to the tool's `disclose` list in `signafaide.checks.json` (nothing leaves the machine unless listed there); for a secret, send it only to the service that issued it. `signafaide rules test <tool> '<arguments JSON>'` shows what a call would get. To see findings without blocking anything, use watch mode."
+    },
+    {
+      "code": "no_ruling",
+      "status": 0,
+      "means": "A strict tool with fail mode closed got no ruling from the witness in time (no receipt, often `network`, or a witness that does not give rulings), so the tool did not run. The decision ships later and the witness still rules on it.",
+      "fix": "Fix the cause in the message, then call again. `signafaide checks status` shows each strict tool and its fail mode. `ruling_timeout_ms` in `signafaide.checks.json` sets how long a strict call waits (10 s by default). If the tool should run without a ruling when the witness cannot be reached, set its fail mode to open in `signafaide.checks.json`, or in the console when the rule set sets the tool's fail mode (the rule set's wins); such calls are recorded as having had no ruling."
+    },
+    {
+      "code": "rules_unavailable",
+      "status": 0,
+      "means": "The witness accepted the decision of a strict tool but could not load or sign the project's rule set, so it gave no ruling. With fail mode closed the tool did not run; with fail mode open it ran and is recorded as having had no ruling.",
+      "fix": "Nothing to change on this machine: call again shortly. If it persists, report it with the output of `signafaide checks status`."
     }
   ]
 }

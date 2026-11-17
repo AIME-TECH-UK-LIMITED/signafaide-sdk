@@ -1,6 +1,8 @@
 /** `record`, `note`, `wrapTools` and `declareTools`: the decision -> run -> outcome cycle, and
  * the agent's tool list (SPEC §2.6). Node only. */
 
+import { CheckError, outcomeChecks, refusedContent, registerSyncTool, resetSyncTools, type Plan, type ToolInfo } from "./checks-runtime.js";
+import { declaredName } from "./coverage.js";
 import { canonicalize, isUnsafeInteger } from "./jcs.js";
 import { SignafaideError } from "./http.js";
 import { recordHash, type SignedRecord } from "./records.js";
@@ -37,6 +39,17 @@ const WRAPPED = new Map<string, Set<string>>();
 const LISTED = new Map<string, Set<string>>();
 /** The full tool list given to `declareTools`, by agent. */
 const EXPLICIT = new Map<string, { names: string[]; unrecorded: Set<string> }>();
+/** Tool names a wrapper of the SDK records in this process (`record`, `wrapTools`, `wrapTool`),
+ * with a framework tool's own name when the wrapper names it otherwise. With tool-call checks on,
+ * the telemetry plug-in leaves a span of such a tool to the wrapper (§8): the wrapper's decision
+ * carries the checks, and a span's decision written at its start would not. */
+const BY_WRAPPER = new Set<string>();
+
+/** @internal Whether a wrapper of the SDK in this process records tool calls named `name`. */
+export function wrapperRecords(name: string): boolean {
+  return BY_WRAPPER.has(name);
+}
+
 /** Bumped whenever one of the three changes, so a recorder looks again only then. */
 let toolsVersion = 0;
 /** recorder -> agent -> the `toolsVersion` its declaration was last checked at. */
@@ -151,6 +164,8 @@ export function resetToolRegistry(): void {
   WRAPPED.clear();
   LISTED.clear();
   EXPLICIT.clear();
+  BY_WRAPPER.clear();
+  resetSyncTools();
   toolsVersion++;
   toldDeclare = false;
 }
@@ -161,18 +176,98 @@ class Spec {
     readonly opts: RecordOptions,
     /** Wrapped by `wrapTools` / `wrapTool`: part of the tool list it declares. */
     listed = false,
+    /** What the agent is shown of the tool, for its fingerprints (§11.1): a framework tool's
+     * description and input schema; a plain function has none. */
+    readonly tool?: ToolInfo,
+    /** A plain synchronous function, not strict in code: its return type never changes, so the
+     * checks file cannot make it strict (§8, JS). */
+    readonly syncOnly = false,
   ) {
     if (!name) throw new TypeError('record(fn) needs a name: record(fn, { name: "approve_payout" })');
+    if (syncOnly) registerSyncTool(name);
+    BY_WRAPPER.add(name);
+    if (tool?.name) BY_WRAPPER.add(tool.name);
     remember(WRAPPED, opts.agent, name);
     if (listed) remember(LISTED, opts.agent, name);
   }
 
-  private decide(input: unknown): [Recorder, SignedRecord] {
+  private decide(input: unknown, plan?: Plan | null): [Recorder, SignedRecord] {
     const rec = getRecorder();
     declareBeforeCall(rec, this.opts.agent);
     const meta = { sdk: `signafaide-js/${VERSION}`, ...(this.opts.meta ?? {}) };
     const content = { input: toJsonable(input) ?? null, meta: toJsonable(meta) } as Record<string, unknown>;
-    return [rec, rec.write("decision", this.name, content, { agent: this.opts.agent, storeContent: this.opts.storeContent })];
+    const extra = plan ? { checks: plan.checks, disclosed: plan.disclosed, disclosedSalt: plan.disclosedSalt } : {};
+    return [rec, rec.write("decision", this.name, content, { agent: this.opts.agent, storeContent: this.opts.storeContent, ...extra })];
+  }
+
+  /** The tool-call checks of this call (§8 steps 1 and 2) when a checks file is in place, else
+   * null. The checks name the tool as the envelope does (the wrapper's name, declared, §2.6); the
+   * fingerprints cover what the agent is shown of it (§11.1). */
+  private plan(input: unknown, callId?: string): Plan | null {
+    const rec = getRecorder();
+    if (!rec.checks.enabled()) return null;
+    return rec.checks.plan(this.tool ?? { name: this.name }, this.opts.agent || rec.defaultAgent, toJsonable(input) ?? null, {
+      strictCode: !!this.opts.strict,
+      callId,
+      syncOnly: this.syncOnly,
+      declared: declaredName(this.name),
+    });
+  }
+
+  private outcomeChecked(rec: Recorder, d: SignedRecord, content: Record<string, unknown>, checks: Record<string, unknown>): void {
+    try {
+      rec.write("outcome", this.name, content, { agent: d.envelope.agent, ref: recordHash(d), storeContent: this.opts.storeContent, checks });
+    } catch (e) {
+      console.error(`signafaide: could not write the outcome of ${this.name}: ${(e as Error).message}`);
+    }
+  }
+
+  /** The outcome of a call that did not run (§8 steps 3 and 4), and the error to throw. */
+  private refused(rec: Recorder, d: SignedRecord, err: CheckError, ruling: string): CheckError {
+    this.outcomeChecked(rec, d, refusedContent(err), outcomeChecks(false, ruling));
+    if (err.code !== "blocked") rec.noteStrictRefused(this.name, err);
+    return err;
+  }
+
+  /** A checked call (§8): blocked here, or ruled by the witness when strict, then run with the
+   * result checks on what it returned. Sync stays sync unless the call is strict. */
+  private checked(rec: Recorder, d: SignedRecord, plan: Plan, body: () => unknown, ended: () => void): unknown {
+    const async = plan.strict || !!this.opts.strict;
+    if (plan.blocked) {
+      ended();
+      const err = this.refused(rec, d, plan.blocked, "not_asked");
+      if (async) return Promise.reject(err);
+      throw err;
+    }
+    if (!plan.strict) return async ? Promise.resolve().then(() => this.runChecked(rec, d, body, "not_asked")) : this.runChecked(rec, d, body, "not_asked");
+    rec.strictUsed = true;
+    return rec.checks.ruling(d, plan, this.name).then(([ruling, err]) => {
+      if (err) {
+        ended();
+        throw this.refused(rec, d, err, ruling);
+      }
+      return this.runChecked(rec, d, body, ruling);
+    });
+  }
+
+  private runChecked(rec: Recorder, d: SignedRecord, fn: () => unknown, ruling: string): unknown {
+    const failed = (e: unknown): never => {
+      this.outcomeChecked(rec, d, errorContent(e), outcomeChecks(true, ruling));
+      throw e;
+    };
+    const done = (v: unknown): unknown => {
+      const value = toJsonable(v) ?? null;
+      this.outcomeChecked(rec, d, { output: value }, outcomeChecks(true, ruling, rec.checks.resultEntries(value)));
+      return v;
+    };
+    let out: unknown;
+    try {
+      out = fn();
+    } catch (e) {
+      return failed(e);
+    }
+    if (out && typeof (out as PromiseLike<unknown>).then === "function") return (out as Promise<unknown>).then(done, failed);
+    return done(out);
   }
 
   private outcome(rec: Recorder, d: SignedRecord, content: Record<string, unknown>): void {
@@ -192,7 +287,7 @@ class Spec {
       const err = e instanceof SignafaideError ? e : new SignafaideError((e as Error).message);
       // Agent frameworks often swallow a tool's error (the model just sees a failed tool): say
       // once, on stderr, that a strict tool did not run and how to fix it.
-      rec.warnStrictRefused(this.name, err);
+      rec.noteStrictRefused(this.name, err);
       throw new NotRecorded(`${err.message} (strict mode: ${this.name} did not run)`, { code: err.code, status: err.status, docs: err.docs, body: err.body });
     }
   }
@@ -203,11 +298,21 @@ class Spec {
   call(input: unknown, fn: () => unknown, callId?: string): unknown {
     if (recordingDisabled()) return this.opts.strict ? Promise.resolve().then(fn) : fn();
     // The telemetry plug-in has already written the decision of the tool span that is running
-    // now (it then writes the outcome too): one call, one decision.
-    const held = telemetryHooks.adopt?.(this.name, callId);
+    // now (it then writes the outcome too): one call, one decision. Not with tool-call checks on:
+    // the wrapper then always writes its own decision with the checks, and asks for the ruling of
+    // a strict call (§8); the plug-in leaves spans of the tools a wrapper records to it.
+    const held = telemetryHooks.adopt && !checksOn() ? telemetryHooks.adopt(this.name, callId) : null;
     if (held) return this.opts.strict ? this.strictCheck(held[0], held[1]).then(fn) : fn();
-    const [rec, d] = this.decide(input);
-    const claim = telemetryHooks.claim?.(this.name, callId);
+    let plan: Plan | null;
+    try {
+      plan = this.plan(input, callId);
+    } catch (e) {
+      // An invalid checks file with no good version in force: every checked call fails with `state`.
+      if (this.opts.strict) return Promise.reject(e);
+      throw e;
+    }
+    const [rec, d] = this.decide(input, plan);
+    const claim = telemetryHooks.claim?.(this.name, callId, this.tool?.name);
     const ended = () => {
       if (claim !== undefined) telemetryHooks.done?.(claim);
     };
@@ -234,6 +339,7 @@ class Spec {
       ended();
       return out;
     };
+    if (plan) return this.checked(rec, d, plan, body, ended);
     const run = () => this.run(rec, d, body);
     if (this.opts.strict) return this.strictCheck(rec, d).then(run);
     return run();
@@ -273,7 +379,7 @@ class Spec {
 export function record<F extends AnyFn>(fn: F, opts: RecordOptions & { strict: true }): (...args: Parameters<F>) => Promise<Awaited<ReturnType<F>>>;
 export function record<F extends AnyFn>(fn: F, opts?: RecordOptions): F;
 export function record<F extends AnyFn>(fn: F, opts: RecordOptions = {}): AnyFn {
-  return recordWith(new Spec(opts.name ?? fn.name, opts), fn);
+  return recordWith(new Spec(opts.name ?? fn.name, opts, false, undefined, syncFunction(fn, opts)), fn);
 }
 
 function recordWith(spec: Spec, fn: AnyFn): AnyFn {
@@ -321,40 +427,84 @@ const isLangChainTool = (t: any): boolean => Array.isArray(t?.lc_namespace) && t
 export function wrapTool<T>(tool: T, opts: WrapOptions & { name?: string } = {}): T {
   const t = tool as any;
   const { declareTools: declare = true, ...ropts } = opts;
-  const spec = (name: string) => new Spec(ropts.name ?? name, ropts, declare);
+  const spec = (name: string, info?: ToolInfo) => new Spec(ropts.name ?? name, ropts, declare, info);
   if (isOpenAIAgentsTool(t)) {
-    const s = spec(t.name);
+    const s = spec(t.name, { name: t.name, description: str(t.description), inputSchema: jsonSchemaOf(t.parameters) });
     ADAPTERS.add("openai-agents");
     return {
       ...t,
-      invoke: (runContext: unknown, input: string, details?: unknown) =>
-        Promise.resolve(s.call(parseJson(input), () => t.invoke(runContext, input, details))),
+      invoke: (runContext: unknown, input: string, details?: unknown) => {
+        // The model's tool call id: the runner passes the call item in the details.
+        const id = (details as { toolCall?: { callId?: unknown } } | undefined)?.toolCall?.callId;
+        return promised(() => s.call(parseJson(input), () => t.invoke(runContext, input, details), typeof id === "string" && id ? id : undefined));
+      },
     } as T;
   }
   if (isLangChainTool(t)) {
-    const s = spec(t.name);
+    const s = spec(t.name, { name: t.name, description: str(t.description), inputSchema: jsonSchemaOf(t.schema) });
     ADAPTERS.add("langchain");
     const proxy = Object.create(t);
     proxy._call = function (arg: unknown, runManager?: unknown, config?: unknown) {
       // The model's tool call id: LangChain passes it in the config when the tool is called with a tool call.
       const id = (config as { toolCall?: { id?: unknown } } | undefined)?.toolCall?.id;
-      return s.call(arg, () => t._call.call(proxy, arg, runManager, config), typeof id === "string" && id ? id : undefined);
+      return promised(() => s.call(arg, () => t._call.call(proxy, arg, runManager, config), typeof id === "string" && id ? id : undefined));
     };
     return proxy;
   }
-  if (typeof t === "function") return recordWith(spec(t.name), t) as T;
+  if (typeof t === "function") return recordWith(new Spec(ropts.name ?? t.name, ropts, declare, undefined, syncFunction(t, ropts)), t) as T;
   if (typeof t?.execute === "function") {
-    const s = spec(t.name ?? "");
+    const n = ropts.name ?? t.name ?? "";
+    const s = spec(t.name ?? "", { name: n, description: str(t.description), inputSchema: jsonSchemaOf(t.inputSchema ?? t.parameters) });
     ADAPTERS.add("vercel-ai");
     return {
       ...t,
       execute: (input: unknown, options?: unknown) => {
         const id = (options as { toolCallId?: unknown } | undefined)?.toolCallId;
-        return s.call(input, () => t.execute(input, options), typeof id === "string" && id ? id : undefined);
+        return promised(() => s.call(input, () => t.execute(input, options), typeof id === "string" && id ? id : undefined));
       },
     } as T;
   }
   throw new TypeError(`wrapTools cannot record ${t === null ? "null" : typeof t}: pass a function, a tool with execute(), an OpenAI Agents tool or a LangChain tool`);
+}
+
+/** Whether tool-call checks are on for the recorder in use (a checks file is in place). */
+function checksOn(): boolean {
+  try {
+    return getRecorder().checks.enabled();
+  } catch {
+    return false;
+  }
+}
+
+/** A framework's async tool API: a call refused before it runs rejects, never throws. */
+function promised(fn: () => unknown): Promise<unknown> {
+  try {
+    return Promise.resolve(fn());
+  } catch (e) {
+    return Promise.reject(e);
+  }
+}
+
+/** A plain function that is not async and not strict in code: its callers get its value
+ * synchronously, so its return type must never become a Promise. */
+function syncFunction(fn: AnyFn, opts: RecordOptions): boolean {
+  return !opts.strict && fn.constructor?.name !== "AsyncFunction";
+}
+
+const str = (x: unknown): string => (typeof x === "string" ? x : "");
+
+/** A tool's input schema as JSON Schema, when the framework holds one: a plain JSON Schema
+ * object, or the Vercel AI SDK's `jsonSchema()` wrapper. A schema only a validation library
+ * can describe (Zod) gives null: the fingerprints then cover the name and description. */
+function jsonSchemaOf(x: any): unknown {
+  try {
+    if (!x || typeof x !== "object") return null;
+    if (x.jsonSchema && typeof x.jsonSchema === "object") return JSON.parse(JSON.stringify(x.jsonSchema));
+    if (Object.getPrototypeOf(x) === Object.prototype && ("type" in x || "properties" in x || "$schema" in x)) return JSON.parse(JSON.stringify(x));
+  } catch {
+    /* not JSON: no schema */
+  }
+  return null;
 }
 
 function parseJson(s: string): unknown {

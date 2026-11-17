@@ -27,7 +27,8 @@ def cli(project, service, monkeypatch, capsys):
     def run(*args):
         code = main(list(args))
         out = capsys.readouterr()
-        return code, out.out.splitlines(), out.err.splitlines()
+        # `init` also says how tool-call checks are set up (tested in test_checks): not a claim line.
+        return code, [x for x in out.out.splitlines() if not x.startswith("tool-call checks: ")], out.err.splitlines()
 
     yield run
     runtime._default = None
