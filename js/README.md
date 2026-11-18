@@ -1,6 +1,10 @@
 # signafaide
 
-Audit evidence of what your AI agents did, for EU AI Act record-keeping, ISO/IEC 42001 and SOC 2. Each record is signed with the agent's own key and chained on your machine; once you opt in, a witness (the signafAIde service, or one you host) co-signs and publicly timestamps it, so neither side can forge or edit a record alone.
+signafAIde checks each risky AI agent tool call before it runs, and proves what your agents did.
+
+- **Record:** every tool call is signed with the agent's own key and chained on the machine that made it.
+- **Protect:** an independent witness allows or blocks risky calls (pay, delete, send, run a command, push code) under your published rules; protect a tool with `npx signafaide protect` or one click in the console.
+- **Prove:** share a link your auditor checks offline, without trusting you or us.
 
 - Nothing is sent until a person says yes to the sandbox in `npx signafaide protect` (or runs `npx signafaide init`), or sets `SIGNAFAIDE_API_KEY`. After that each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them. Each content hash is salted with 16 random bytes that stay on your machine with the content, so the hash alone cannot be used to guess the content, even when it has only a few possible values.
 - The sandbox needs no account, email or card.
