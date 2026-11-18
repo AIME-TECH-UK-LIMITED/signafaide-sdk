@@ -9,7 +9,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from . import checks as C
 from ._plural import plural
@@ -18,7 +18,7 @@ from .checks_runtime import site_of
 from .coverage import coverage, declared_name
 from .crypto import hash_json
 from .http import SignafaideError
-from .protect_cli import Prompter, field_uses, to_version2, write_checks_file
+from .protect_cli import Prompter, field_uses, find_tools, to_version2, write_checks_file
 from .records import record_hash
 from .words import field_words, number_words, rule_words, state_word
 
@@ -57,10 +57,33 @@ def chains_by_agent(rec: Any) -> Dict[str, Tuple[str, List[dict]]]:
     return out
 
 
-def protection_words(rec: Any, f: Optional[dict], agent: str, tool: str) -> str:
-    """What ``status`` says of a tool's protection: ``1 of 3 rules On, 2 Calibrating``, ``Off``..."""
+def protected_in_code(rec: Any) -> Set[str]:
+    """The declared names of the tools the project's code protects (``@signafaide.protect``, or
+    ``record(strict=True)``): protected whatever the checks file says (§8)."""
+    try:
+        return {declared_name(t.name) for t in find_tools(Path(rec.state.root)).tools if t.wrapped == "protect"}
+    except Exception:  # noqa: BLE001 - code that cannot be read protects nothing here
+        return set()
+
+
+def protected_names(rec: Any, f: Optional[dict], records: List[dict]) -> Set[str]:
+    """The tools that are protected: by the checks file, by the code, or whose last call was strict."""
+    out = {n for n in (f or {}).get("tools", {}) if C.tool_settings(f, n)["strict"]} if f else set()
+    last: Dict[str, bool] = {}
+    for r in records:
+        e = r["envelope"]
+        if e["kind"] == "decision" and isinstance(e.get("checks"), dict):
+            last[e["name"]] = e["checks"].get("strict") is True
+    return out | protected_in_code(rec) | {n for n, x in last.items() if x}
+
+
+def protection_words(rec: Any, f: Optional[dict], agent: str, tool: str, in_code: bool = False) -> str:
+    """What ``status`` says of a tool's protection: ``1 of 3 rules On, 2 Calibrating``, ``Off``...
+    *in_code*: the code protects it (its decorator, or its last call was strict)."""
     decl = declared_name(tool)
     ts = C.tool_settings(f, decl) if f else None
+    if in_code:
+        ts = {**(ts or {"mode": "enforce", "disclose": []}), "strict": True}
     rs = rec.checks.held_rules()
     if ts and not ts["strict"] and ts["mode"] == "enforce" and f.get("rules"):
         n = sum(1 for r in f["rules"]["rules"] if C.applies(r, agent, decl))
@@ -106,17 +129,21 @@ def status_table(rec: Any) -> List[str]:
     chains = chains_by_agent(rec)
     agents = set(chains) | set(rec.state.agents())
     proof = proof_by_agent(rec)
+    code = protected_in_code(rec)
     rows: List[Tuple[str, str, int, Optional[str], str, str]] = []
     for agent in sorted(agents):
         names = set()
         for tools in rec.state.tool_sources(agent).values():
             names.update(declared_name(t) for t in tools)
         calls: Dict[str, List[Any]] = {}
+        strict: Dict[str, bool] = {}  # the last call of each tool: strict (protected in code) or not
         for r in chains.get(agent, ("", []))[1]:
             e = r["envelope"]
             if e["kind"] != "decision" or e["name"].startswith("signafaide."):
                 continue
             names.add(e["name"])
+            if isinstance(e.get("checks"), dict):
+                strict[e["name"]] = e["checks"].get("strict") is True
             c = calls.setdefault(e["name"], [0, e["time"]])
             c[0] += 1
             c[1] = e["time"]
@@ -127,7 +154,7 @@ def status_table(rec: Any) -> List[str]:
         p = proof(agent)
         for tool in sorted(names):
             n, last = calls.get(tool, [0, None])
-            rows.append((agent, tool, n, last, protection_words(rec, f, agent, tool), p))
+            rows.append((agent, tool, n, last, protection_words(rec, f, agent, tool, tool in code or strict.get(tool, False)), p))
     if not rows:
         return []
     many = len({r[0] for r in rows}) > 1
@@ -503,7 +530,7 @@ def run_prove(rec: Any, prompt: Prompter, out: Out, tool: Optional[str] = None, 
             for n, r in tools.items():
                 declared[declared_name(n)] = declared.get(declared_name(n), False) or bool(r)
     f = _file(rec)
-    prot = sum(1 for n in (f or {}).get("tools", {}) if C.tool_settings(f, n)["strict"]) if f else 0
+    prot = len(protected_names(rec, f, chains[agent][1]))
     if declared:
         rcd = sum(1 for x in declared.values() if x)
         out(f"  Tools      {agent} has {plural(len(declared), 'tool')}, {'all ' + str(rcd) if rcd == len(declared) else rcd} recorded, {prot} protected")

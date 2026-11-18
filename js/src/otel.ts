@@ -23,7 +23,7 @@
 import * as fs from "node:fs";
 import { trace } from "@opentelemetry/api";
 import { declaredName, samplingNote, telemetryNoteName } from "./coverage.js";
-import { declareBeforeCall, rememberTool, toJsonable, wrapperRecords } from "./record.js";
+import { declareBeforeCall, rememberTool, toJsonable, wrapperProtects, wrapperRecords } from "./record.js";
 import { AGENT_RE, agentName, recordHash, type SignedRecord } from "./records.js";
 import { getRecorder, recording, recordingDisabled, telemetryHooks, type Recorder, type RunItem } from "./runtime.js";
 import { outcomeChecks } from "./checks-runtime.js";
@@ -222,9 +222,9 @@ function claimed(tool: string, by: { id?: string; running?: boolean; began?: num
 }
 
 /** Whether tool-call checks are on for `rec` (a checks file is in place); never throws. */
-function checksOnFor(rec: Recorder): boolean {
+function checksOnFor(rec: Recorder, protect = false): boolean {
   try {
-    return rec.checks.enabled();
+    return rec.checks.enabled(protect);
   } catch {
     return false;
   }
@@ -371,7 +371,7 @@ export class SignafaideSpanProcessor {
     // decision itself, with its checks and, when strict, the witness's ruling (§8). The span is
     // left to it: when it ends, the wrapper's call is matched to it as for a span that says only
     // at its end that it is a tool call, and recorded here only when no wrapper ran.
-    if (wrapperRecords(call.tool) && checksOnFor(rec)) {
+    if (wrapperRecords(call.tool) && checksOnFor(rec, wrapperProtects(call.tool))) {
       this.keep(this.began, spanId, ++tick);
       return;
     }

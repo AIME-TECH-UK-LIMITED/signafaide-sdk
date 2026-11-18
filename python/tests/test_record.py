@@ -182,7 +182,8 @@ def test_strict_without_a_key_refuses_and_sends_nothing(local_recorder, service)
     def pay():
         ran.append(1)
 
-    with pytest.raises(signafaide.NotRecorded, match="until a person runs `signafaide protect`.*no signafAIde key or sandbox"):
+    # Protected in code: checked and ruled as with a checks file (patch 0.5.1), so it is refused here as no_key.
+    with pytest.raises(signafaide.SignafaideBlocked, match="until a person runs `signafaide protect`.*no signafAIde key or sandbox"):
         pay()
     assert ran == [] and service.calls == []
 
@@ -244,7 +245,7 @@ def test_strict_refuses_to_run_when_unrecorded(recorder, dead_url):
     def pay():
         ran.append(1)
 
-    with pytest.raises(signafaide.NotRecorded, match="did not run"):
+    with pytest.raises(signafaide.SignafaideBlocked, match="pay did not run: signafAIde did not rule on it .*this tool is set to stop"):
         pay()
     assert ran == []
 
@@ -256,7 +257,7 @@ def test_strict_async(recorder, dead_url):
 
     assert asyncio.run(pay()) == 1
     recorder._url = dead_url
-    with pytest.raises(signafaide.NotRecorded):
+    with pytest.raises(signafaide.SignafaideBlocked):
         asyncio.run(pay())
 
 

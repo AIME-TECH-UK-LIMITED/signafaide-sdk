@@ -56,11 +56,18 @@ _EXPLICIT: Dict[str, Tuple[list, Set[str]]] = {}
 #: tool-call checks on, the telemetry plug-in leaves a span of such a tool to the wrapper (§8):
 #: the wrapper's decision carries the checks, and a span's decision written at its start would not.
 _BY_WRAPPER: Set[str] = set()
+#: Of those, the names a wrapper protects (strict in code): checked even without a checks file.
+_STRICT_BY_WRAPPER: Set[str] = set()
 
 
 def wrapper_records(name: str) -> bool:
     """Whether a wrapper of the SDK in this process records tool calls named *name*."""
     return name in _BY_WRAPPER
+
+
+def wrapper_protects(name: str) -> bool:
+    """Whether a wrapper of the SDK in this process protects tool calls named *name* (strict in code)."""
+    return name in _STRICT_BY_WRAPPER
 
 
 #: Bumped whenever one of the three changes, so a recorder looks again only then.
@@ -167,6 +174,7 @@ def _reset_tool_registry() -> None:
         _LISTED.clear()
         _EXPLICIT.clear()
         _BY_WRAPPER.clear()
+        _STRICT_BY_WRAPPER.clear()
         _tools_version += 1
         _told_declare = False
 
@@ -194,6 +202,8 @@ class _Spec:
         _BY_WRAPPER.add(self.name)
         if self.tool is not None and self.tool.name:
             _BY_WRAPPER.add(self.tool.name)
+        if self.strict:
+            _STRICT_BY_WRAPPER.update(n for n in (self.name, self.tool.name if self.tool is not None else None) if n)
         _remember(_WRAPPED, self.agent, self.name)
         if self.listed:
             _remember(_LISTED, self.agent, self.name)
@@ -201,7 +211,7 @@ class _Spec:
         if self.tool is not None and not runtime.recording_disabled():
             try:
                 rec = runtime.get()
-                rec.checks.seen(self.tool, self.agent or rec.default_agent, declared_name(self.name))
+                rec.checks.seen(self.tool, self.agent or rec.default_agent, declared_name(self.name), protect=bool(self.strict))
             except Exception:  # the first call reports what is wrong
                 pass
 
@@ -220,7 +230,8 @@ class _Spec:
         """:meth:`_begin` with the tool-call checks (§8 steps 1 and 2) when a checks file is in
         place: the plan of the call, and its decision written with ``checks``."""
         rec = runtime.get()
-        if not rec.checks.enabled():
+        # A tool protected in code is checked even without a checks file (every check On, §8).
+        if not rec.checks.enabled(protect=bool(self.strict)):
             return self._begin(args, call_id), None
         # The checks name the tool as the envelope does (the wrapper's name, declared, §2.6); the
         # fingerprints cover what the agent is shown of it (§11.1).
@@ -260,7 +271,7 @@ class _Spec:
         _notes.deliver(found, own=self.on_note, development=_notes.development(rec), result=result, has_result=has_result)
 
     def _ran(self, rec: runtime.Recorder, d: dict, ruling: str, value: Any, plan: Optional[Plan] = None, returned: Any = None) -> None:
-        results = rec.checks.result_entries(value, tool=declared_name(self.name))
+        results = rec.checks.result_entries(value, tool=declared_name(self.name), protect=bool(self.strict))
         withheld = rec.checks.withheld(self.name, results)
         found = (plan.notes if plan is not None else []) + rec.checks.result_notes(declared_name(self.name), results)
         self._notify(rec, found, returned, has_result=withheld is None)

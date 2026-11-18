@@ -9,6 +9,19 @@ The record format changed between v0.1.1 and v0.1.2 (salted content hashes) and 
 (packs name their project), before any public release. Records and packs written by a version
 verify with that version and later ones unless an entry below says otherwise.
 
+## v0.5.1 (2026-11-18)
+
+A patch from two real runs of v0.5.0: the console's coding-agent prompt in a cloud coding agent, and a TypeScript project with its tools wrapped by hand (issue #65).
+
+- `protect --yes` saves rules. Without a terminal, `--yes` gives each risky tool a default rule and saves it (in an unclaimed sandbox, or kept in the checks file as a local Calibrating rule when there is no key): a tool that pays is blocked above 1000 when it has an amount field (else above 5 calls a minute), a tool that deletes, runs commands, pushes code or edits secrets or config above 5 calls a minute, a tool that sends above 20 calls a minute. Every one starts Calibrating, so it blocks nothing until a person turns it On, and the output lists each rule saved and says so. It no longer ends with "no rule was chosen". A field a rule needs is still sent only after a person approves it with `signafaide pull` at a terminal.
+- Every risky tool. Without a terminal `protect` protects every tool that pays, deletes, sends, runs commands, pushes code or edits secrets or config (as `check --ci` reads them), not only the first; at a terminal the question is as before.
+- `declare_tools` / `declareTools` where it runs. `protect` writes the declaration right after the imports and tool definitions (Python) or before the program's run call (TypeScript), never after an `if __name__ == "__main__":` block or a top-level `main()`; one already written after them is moved up (with its `import signafaide` in Python).
+- A network that blocks the witness. When a proxy or network policy refuses the witness (HTTP 403 or 407 from a proxy, a refused CONNECT tunnel, blocked DNS, a refused connection to a proxy), errors, a protected call's `no_ruling` and `signafaide flush` say so in one sentence: allow `signafaide.co.uk` and `api.signafaide.co.uk` in the environment's network settings, or run from a machine that can reach them; records stay signed on this machine meanwhile. A protected call stops retrying at once in that case. `spec/guidance.json` says the same for `network` and `no_ruling`.
+- Git. `protect` runs no git command, so it prints nothing from git in a folder that is not a repository; a test keeps it so.
+- Protected in code means protected. A tool wrapped with `protect()` (or `@signafaide.protect`, or strict in code) runs every local check in On even without `signafaide.checks.json` (as `init` writes them, in enforce mode), asks the witness for a ruling, and its records carry `checks` with `strict: true`, so `status`, `prove`, `verify` and the console count it as protected. `record()`-only tools are unchanged, and `SIGNAFAIDE_CHECKS=0` still turns checks off. Spec §8 says so.
+- Keys next to delimiters. A token holding `_` or `-` that matches no format is also read in parts, so an AWS access key glued to a name (`aws_access_key_id_AKIA...`, `prod-AKIA...-old`) is found; `=`, `:`, quotes, brackets and URL delimiters already end a token. Seven new `local_checks` vectors cover these shapes, built from parts.
+- Version 0.5.1 everywhere the release check looks; the Claude Code plugin is 0.5.1. `langchain-signafaide` is unchanged (0.1.2).
+
 ## v0.5.0 (2026-11-18)
 
 Record, Protect, Prove. This release adds the second and third steps to the first: `signafaide protect` finds the tools that pay, delete or send and makes them run only when a rule a person chose allows it, and `signafaide prove` gives an auditor a link to the proof. The spec is 1.1 (SPEC sections 2.8, 6, 8 and 10); the record envelope is unchanged, and every change below is additive unless the compatibility notes say otherwise.

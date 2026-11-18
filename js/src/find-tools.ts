@@ -818,6 +818,88 @@ export function agentInCode(found: Found, root: string): string | null {
   return null;
 }
 
+const DECLARE_COMMENT = "// The agent's full tool list, so a proof shows every tool is recorded.";
+const NOT_CALLS = new Set(["const", "let", "var", "function", "class", "export", "import", "if", "for", "while", "do", "return", "type", "interface", "enum", "switch", "try", "throw", "new", "declare", "namespace", "module", "abstract", "async", "default"]);
+/** Tokens after which a line break does not end a statement. */
+const GOES_ON = new Set([",", ".", "(", "[", "{", "=", "+", "-", "*", "/", "%", "&&", "||", "??", "?", ":", "=>", "!", "|", "&", "<", ">", "?.", "...", "==", "===", "!=", "!==", "+=", "-="]);
+
+/** The top-level statements of `toks` that run the program: a main guard (`if (import.meta.url
+ * === ...)`, `if (require.main === module)`) or a call (`main();`, `await main()`, `main().catch(...)`,
+ * `app.listen(...)`), never `declareTools` itself; as [start index, token index of the statement's start]. */
+function runStatements(text: string, toks: Token[]): { at: number; i: number; declare: boolean }[] {
+  const out: { at: number; i: number; declare: boolean }[] = [];
+  let depth = 0;
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    const prev = toks[i - 1];
+    const starts =
+      depth === 0 &&
+      (!prev || isP(prev, ";") || isP(prev, "}") || (text.slice(prev.e, t.s).includes("\n") && !(prev.t === "p" && GOES_ON.has(prev.v)) && !(t.t === "p" && GOES_ON.has(t.v))));
+    if (starts) {
+      if (isId(t, "if") && isP(toks[i + 1], "(")) {
+        const c = closing(toks, i + 1);
+        const cond = c > 0 ? text.slice(toks[i + 1].s, toks[c].e) : "";
+        if (/require\.main|import\.meta\.(url|main|filename)|process\.argv/.test(cond)) out.push({ at: t.s, i, declare: false });
+      } else {
+        let j = i;
+        if (isId(toks[j], "await") || isId(toks[j], "void")) j++;
+        if (isId(toks[j]) && !NOT_CALLS.has(toks[j].v)) {
+          let last = toks[j].v;
+          while (isP(toks[j + 1], ".") && isId(toks[j + 2])) {
+            j += 2;
+            last = toks[j].v;
+          }
+          if (isP(toks[j + 1], "(")) out.push({ at: t.s, i, declare: last === "declareTools" });
+        }
+      }
+    }
+    if (t.t === "p") {
+      if (t.v === "(" || t.v === "[" || t.v === "{") depth++;
+      else if (t.v === ")" || t.v === "]" || t.v === "}") depth = Math.max(0, depth - 1);
+    }
+  }
+  return out;
+}
+
+/** Put the `declareTools` call where it always runs: before the first top-level statement after
+ * the tools (from offset `from`) that runs the program, else at the end. `line` adds a new call;
+ * with none, a top-level call already there after the program's run is moved up before it (a
+ * program that exits early never reaches a line after its run). */
+export function placeDeclaration(text: string, from: number, line: string | null): string {
+  const toks = tokenize(text);
+  const stmts = runStatements(text, toks);
+  const run = stmts.find((x) => !x.declare && x.at >= from);
+  const lineStart = (at: number): number => text.lastIndexOf("\n", at - 1) + 1;
+  if (line !== null) {
+    if (!run) return `${text.replace(/\s*$/, "")}\n\n${DECLARE_COMMENT}\n${line}\n`;
+    let at = lineStart(run.at);
+    // Comments right above the run statement stay with it.
+    while (at > 0 && /^\s*\/\//.test(text.slice(lineStart(at - 1), at))) at = lineStart(at - 1);
+    const pre = text.slice(0, at);
+    return `${pre}${!pre || /\n[ \t]*\n$/.test(pre) ? "" : "\n"}${DECLARE_COMMENT}\n${line}\n\n${text.slice(at)}`;
+  }
+  const decl = stmts.find((x) => x.declare);
+  const first = stmts.find((x) => !x.declare);
+  if (!decl || !first || decl.at < first.at) return text;
+  // The statement: to its closing parenthesis, and a `;` after it.
+  let j = decl.i;
+  while (j < toks.length && !isP(toks[j], "(")) j++;
+  const c = closing(toks, j);
+  if (c < 0) return text;
+  let end = isP(toks[c + 1], ";") ? toks[c + 1].e : toks[c].e;
+  if (text[end] === "\n") end++;
+  let start = lineStart(decl.at);
+  const block = text.slice(start, end).replace(/\s*$/, "");
+  const above = lineStart(start - 1);
+  if (start > 0 && text.slice(above, start).trim() === DECLARE_COMMENT) start = above;
+  const rest = text.slice(0, start).replace(/\n{3,}$/, "\n\n") + text.slice(end);
+  // The run statement comes before the call, so its offset is the same in what is left.
+  let target = lineStart(first.at);
+  while (target > 0 && /^\s*\/\//.test(rest.slice(lineStart(target - 1), target))) target = lineStart(target - 1);
+  const pre = rest.slice(0, target);
+  return `${pre}${!pre || /\n[ \t]*\n$/.test(pre) ? "" : "\n"}${DECLARE_COMMENT}\n${block}\n\n${rest.slice(target)}`;
+}
+
 /** The changes that record every tool found and protect the ones in `protectSet`, with `agent`
  * in every call written, and the agent's tool list declared once. Tools that cannot be written
  * (MCP servers, class methods) are left out; `declareTools` lists them too, except MCP tools,
@@ -907,7 +989,13 @@ export function codeChanges(found: Found, protectSet: Set<string>, agent: string
     if (!declared && tools.length) {
       const objName = found.object && found.object.file === f ? found.object.name : null;
       const list = objName && all.tools.every((t) => t.shape !== "mcp" && t.file === f) ? `Object.keys(${objName})` : `[${declareNames.map((n) => JSON.stringify(n)).join(", ")}]`;
-      const line = `// The agent's full tool list, so a proof shows every tool is recorded.\ndeclareTools(${list}, { agent: ${JSON.stringify(agent)} });`;
+      const call = `declareTools(${list}, { agent: ${JSON.stringify(agent)} });`;
+      const line = `${DECLARE_COMMENT}\n${call}`;
+      // Where the last tool ends in the changed text: the edits before it moved it.
+      const toolsEnd = (): number => {
+        const end = Math.max(...tools.map((t) => t.site!.end));
+        return end + edits.filter((e) => e.end <= end).reduce((n, e) => n + e.text.length - (e.end - e.start), 0);
+      };
       if (objName) {
         const toks = tokenize(after);
         let at = -1;
@@ -920,11 +1008,12 @@ export function codeChanges(found: Found, protectSet: Set<string>, agent: string
             break;
           }
         }
-        after = at >= 0 ? `${after.slice(0, at)}\n\n${line}${after.slice(at)}` : `${after.replace(/\s*$/, "")}\n\n${line}\n`;
-      } else after = `${after.replace(/\s*$/, "")}\n\n${line}\n`;
+        after = at >= 0 ? `${after.slice(0, at)}\n\n${line}${after.slice(at)}` : placeDeclaration(after, toolsEnd(), call);
+      } else after = placeDeclaration(after, toolsEnd(), call);
       imports.add("declareTools");
       declared = true;
     }
+    else if (declaredIn.includes(f)) after = placeDeclaration(after, 0, null);
     if (imports.size && after !== before) after = addImport(after, ["protect", "record", "wrapTool", "declareTools"].filter((n) => imports.has(n)));
     if (after !== before) out.push({ file: f, before, after, tools });
   }

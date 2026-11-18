@@ -48,14 +48,14 @@ The MCP server (`signafaide-mcp`, Node.js 20 or later) lets a coding agent previ
 ```json
 {
   "mcpServers": {
-    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.5.0"] }
+    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.5.1"] }
   }
 }
 ```
 
-- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.5.0`
+- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.5.1`
 - Gemini CLI: `gemini extensions install https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk`
-- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.5.0%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
+- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.5.1%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
 
 There are no API keys or other settings. To check it works, ask the agent to call `signafaide_status`.
 

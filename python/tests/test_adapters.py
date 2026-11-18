@@ -153,6 +153,6 @@ def test_openai_agents_strict_refuses(recorder, dead_url, agents):
     recorder._url = dead_url
     wrapped = signafaide.wrap_tool(pay, strict=True)
     ctx = ToolContext(context=None, tool_name="pay", tool_call_id="c1", tool_arguments='{"amount": 1}')
-    with pytest.raises(signafaide.NotRecorded):
+    with pytest.raises(signafaide.SignafaideBlocked):  # protected in code: ruled as with a checks file (patch 0.5.1)
         asyncio.run(wrapped.on_invoke_tool(ctx, '{"amount": 1}'))
     assert ran == []

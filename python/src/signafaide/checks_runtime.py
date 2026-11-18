@@ -338,10 +338,22 @@ class ChecksState:
             self._file_error = msg + " (spec §8); fix it, or set SIGNAFAIDE_CHECKS=0 to turn checks off"
             raise CheckError(self._file_error, "state")
 
-    def enabled(self) -> bool:
-        """Whether checks are on: a checks file exists (valid or not)."""
+    def enabled(self, protect: bool = False) -> bool:
+        """Whether checks are on: a checks file exists (valid or not). With *protect* (a tool
+        protected in code) they are on unless ``SIGNAFAIDE_CHECKS=0`` turns them off: without a
+        checks file such a tool runs every check in On, as ``init`` would write them (§8)."""
         p = self.path()
-        return p is not None and p.exists()
+        return p is not None and (protect or p.exists())
+
+    def file_for(self, protect: bool) -> Optional[dict]:
+        """The checks file in force; for a tool protected in code with no checks file, the one
+        ``init`` writes with every check On (enforce): its calls are checked here and ruled by the
+        witness all the same (§8)."""
+        f = self.file()
+        if f is None and protect and self.path() is not None:
+            f = C.default_checks_file()
+            f["mode"] = "enforce"
+        return f
 
     # --- held state ---------------------------------------------------------------------
 
@@ -702,7 +714,7 @@ class ChecksState:
         the OpenTelemetry plug-in, which never blocks (every entry in watch mode, not strict).
         *declared*: the declared name (§2.6) the checks use, when it is not the tool's own name
         cut (a wrapper's name for a framework tool named otherwise)."""
-        f = self.file()
+        f = self.file_for(bool(strict_code or protect) and not telemetry)
         if f is None:
             return None
         self.start()
@@ -856,6 +868,7 @@ class ChecksState:
         # a new attempt can fix is sent again, with backoff, until the ruling timeout.
         receipt = None
         refused: Optional[SignafaideError] = None
+        blocked: Optional[SignafaideError] = None  # the network here blocks the witness
         pause = RETRY_FIRST_MS / 1000
         attempt = 0
         while True:
@@ -870,9 +883,10 @@ class ChecksState:
                         refused = e
                     why = f"no receipt came ({e.message})"
                     break
+                blocked = e if e.blocked else None
                 why = f"no receipt came within {plan.timeout_ms} ms, {'1 attempt' if attempt == 1 else f'{attempt} attempts'} ({e.message})"
                 left = deadline - time.monotonic()
-                if left <= pause:
+                if left <= pause or blocked is not None:  # a network that blocks the witness does not open by waiting
                     break
                 time.sleep(pause)
                 pause = min(pause * 2, RETRY_MAX_MS / 1000)
@@ -908,6 +922,9 @@ class ChecksState:
         # the tool's If unreachable setting (Stop by default) decides.
         if plan.held_block is not None:
             return "none", plan.held_block
+        if blocked is not None and receipt is None:
+            err = SignafaideBlocked(f"{tool} did not run: signafAIde did not rule on it, and this tool is set to stop. {blocked.message}", code, tool=tool, ruled_by="client")
+            return "none", (err if closed else None)
         err = SignafaideBlocked(f"{tool} did not run: signafAIde did not rule on it ({why}), and this tool is set to stop. Check the network and "
                                 "`signafaide checks status`; the console sets whether it stops or runs.", code, tool=tool, ruled_by="client")
         return "none", (err if closed else None)
@@ -976,10 +993,11 @@ class ChecksState:
         return SignafaideBlocked(msg, "blocked", check="rule" if basis in ("rule", "error", "default") else basis, rule=rule, rules_version=v,
                                  missing=g["missing"], tool=tool, rule_text=text, ruled_by="witness")
 
-    def result_entries(self, output: Any, telemetry: bool = False, tool: Optional[str] = None) -> List[dict]:
+    def result_entries(self, output: Any, telemetry: bool = False, tool: Optional[str] = None, protect: bool = False) -> List[dict]:
         """Step 5 (§8): the result checks of a call that ran (``secret``, ``hidden_instruction``),
-        in the mode the checks file sets for *tool* (its declared name)."""
-        f = self.file()
+        in the mode the checks file sets for *tool* (its declared name); *protect*: a tool
+        protected in code, checked in On without a checks file."""
+        f = self.file_for(protect and not telemetry)
         if f is None:
             return []
         if telemetry:
@@ -1012,11 +1030,11 @@ class ChecksState:
             f"If the agent should see such results, set the tool's `mode` to `\"watch\"` in {file} (Calibrating: the result goes through and the finding is noted).",
             "withheld", check=e["check"], tool=tool, ruled_by="client")
 
-    def seen(self, tool: ToolInfo, agent: str, declared: str) -> None:
+    def seen(self, tool: ToolInfo, agent: str, declared: str, protect: bool = False) -> None:
         """A wrapper is shown a tool's definition (§8 changed_tool): approve its fingerprints the
         first time, so a change before its first call is still a change."""
         try:
-            f = self.file()
+            f = self.file_for(protect)
             if f is None or not f["checks"]["changed_tool"] or not tool.name:
                 return
             rs = self.held_rules()
@@ -1045,7 +1063,7 @@ class ChecksState:
         except CheckError as e:
             return [f"checks: PROBLEM {e.message}"], True
         if f is None:
-            return [f"checks: off (no {path}; `signafaide protect` or `signafaide init` writes one)"], False
+            return [f"checks: off for tools not protected in code (no {path}; `signafaide protect` or `signafaide init` writes one); a tool protected in code runs every check in On"], False
         on = [k for k in C.FILE_CHECKS if f["checks"][k]]
         v2 = C.checks_file_version(f) == 2
         if v2:

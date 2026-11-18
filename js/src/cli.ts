@@ -141,7 +141,9 @@ export async function statusLines(rec: Recorder): Promise<string[]> {
  * `errors` has one line per chain (or API key) that could not ship. With no API key nothing is sent. */
 export async function flushReport(rec: Recorder): Promise<{ lines: string[]; errors: string[]; codes: string[]; failed: boolean; sent: boolean }> {
   const r = await rec.flush();
-  const errors = Object.entries(r.errors).map(([agent, e]) => `${agent}: ${e.message}`);
+  // The network here blocks the witness: one sentence for every chain, not one line each.
+  const blocked = Object.values(r.errors).find((e) => (e as SignafaideError).blocked);
+  const errors = [...(blocked ? [blocked.message] : []), ...Object.entries(r.errors).filter(([, e]) => !(blocked && (e as SignafaideError).blocked)).map(([agent, e]) => `${agent}: ${e.message}`)];
   const codes = [...new Set(Object.values(r.errors).map((e) => e.code))];
   if (!rec.apiKey) {
     return { lines: [`no API key: nothing was sent; ${plural(r.left, "record")} stay local. Run \`signafaide init\` (or set SIGNAFAIDE_API_KEY) to send hashes`], errors, codes, failed: false, sent: false };

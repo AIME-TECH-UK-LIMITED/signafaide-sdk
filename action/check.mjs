@@ -26,7 +26,7 @@ const python = (env.SFA_PYTHON || "auto").trim().toLowerCase();
 const cwd = path.resolve(env.GITHUB_WORKSPACE || process.cwd(), dir);
 
 if (!version && !(env.SIGNAFAIDE_CI_JS_CLI && env.SIGNAFAIDE_CI_PY_CLI)) {
-  console.error("signafaide action: the version input is empty; set it to a released version, e.g. version: 0.5.0");
+  console.error("signafaide action: the version input is empty; set it to a released version, e.g. version: 0.5.1");
   process.exit(2);
 }
 if (!["auto", "true", "false"].includes(python)) {

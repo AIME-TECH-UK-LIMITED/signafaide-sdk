@@ -967,7 +967,10 @@ function formatsIn(text: string, label: string, hosts: string[], witnessHost: st
   for (const m of text.matchAll(TOKEN)) {
     const tok = m[0];
     if (tok.length < MIN_TOKEN) continue;
+    const n = found.size;
     tableFormat(tok, hosts, witnessHost, found);
+    // A key glued to a name by "_" or "-" (aws_key_AKIA..., id-AKIA...): its parts are tokens too.
+    if (found.size === n && /[_-]/.test(tok)) for (const part of tok.split(/[_-]+/)) tableFormat(part, hosts, witnessHost, found);
     if (tok.length >= 51 && isWif(tok)) found.add("wallet_private_key");
     else if (tok.length >= 64 && isHexKey(tok, `${label} ${text.slice(Math.max(0, m.index! - 32), m.index!)}`)) found.add("wallet_private_key");
   }

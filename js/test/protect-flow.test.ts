@@ -290,10 +290,11 @@ describe("protect, then the first blocked payout", () => {
   it("without a person: every rule starts Calibrating and no field is approved", async () => {
     setPrompter(() => flagPrompter({ yes: true }));
     const [c, out] = await cli("protect", "approve_payout");
-    expect(c, out).toBe(0); // nothing to block was chosen: "Nothing yet" is the default without a person
+    expect(c, out).toBe(1); // --yes adds the default rule, Calibrating; with no key it is not saved yet (patch 0.5.1)
     expect(out).toContain("Changed");
+    expect(out).toContain("  Rule: Block approve_payout when amount is above 1,000");
     const file = JSON.parse(fs.readFileSync(path.join(ctx.root, "signafaide.checks.json"), "utf8"));
-    expect(file.tools.approve_payout).toEqual({ protect: true });
+    expect(file.tools.approve_payout).toEqual({ protect: true, mode: "watch" }); // no field approved without a person; the kept rule blocks nothing
     expect(out).toContain("Sandbox    not made: only a person at a terminal opts in.");
     expect(fs.existsSync(path.join(ctx.root, ".env"))).toBe(false);
     expect(ctx.service.calls).not.toContain("POST /v1/sandbox");

@@ -399,9 +399,21 @@ export class ChecksState {
   }
 
   /** Whether checks are on: a checks file exists (valid or not). */
-  enabled(): boolean {
+  /** Whether checks are on: a checks file exists (valid or not). With `protect` (a tool protected
+   * in code) they are on unless `SIGNAFAIDE_CHECKS=0` turns them off: without a checks file such a
+   * tool runs every check in On, as `init` would write them (§8). */
+  enabled(protect = false): boolean {
     const p = this.path();
-    return p !== null && fs.existsSync(p);
+    return p !== null && (protect || fs.existsSync(p));
+  }
+
+  /** The checks file in force; for a tool protected in code with no checks file, the one `init`
+   * writes with every check On (enforce): its calls are checked here and ruled by the witness all
+   * the same (§8). */
+  fileFor(protect: boolean): Json | null {
+    const f = this.file();
+    if (f === null && protect && this.path() !== null) return { ...C.defaultChecksFile(), mode: "enforce" };
+    return f;
   }
 
   // --- held state ---------------------------------------------------------------------
@@ -801,7 +813,7 @@ export class ChecksState {
    * carries, and the values a strict call discloses. Null when checks are off. Throws
    * `CheckError` (`state`) when the checks file is invalid and no good version is in force. */
   plan(tool: ToolInfo, agent: string, args: unknown, opts: PlanOptions = {}): Plan | null {
-    const f = this.file();
+    const f = this.fileFor(!opts.telemetry && !!(opts.strictCode || opts.protect));
     if (!f) return null;
     this.start();
     const telemetry = !!opts.telemetry;
@@ -1013,6 +1025,7 @@ export class ChecksState {
     const deadline = Date.now() + plan.timeoutMs;
     let pause = RETRY_FIRST_MS;
     let refused: SignafaideError | null = null;
+    let blocked: SignafaideError | null = null; // the network here blocks the witness
     for (let attempt = 1; ; attempt++) {
       try {
         receipt = await Promise.race([rec.ensureReceipt(d, Math.max(1, deadline - Date.now())), late]);
@@ -1025,8 +1038,9 @@ export class ChecksState {
           why = `no receipt came (${se.message})`;
           break;
         }
+        blocked = se?.blocked ? se : null;
         why = `no receipt came within ${plan.timeoutMs} ms, ${attempt === 1 ? "1 attempt" : `${attempt} attempts`} (${(e as Error).message})`;
-        if (left <= pause || /^no answer within/.test((e as Error).message)) break;
+        if (left <= pause || blocked || /^no answer within/.test((e as Error).message)) break; // a network that blocks the witness does not open by waiting
         await new Promise((r) => setTimeout(r, pause));
         pause = Math.min(pause * 2, RETRY_MAX_MS);
       }
@@ -1061,6 +1075,10 @@ export class ChecksState {
     // No ruling: the client decides alone. The rules it holds still block what they block; else
     // the tool's If unreachable setting (Stop by default) decides.
     if (plan.heldBlock) return ["none", plan.heldBlock];
+    if (blocked && !receipt) {
+      const b = new SignafaideBlocked(`${tool} did not run: signafAIde did not rule on it, and this tool is set to stop. ${blocked.message}`, code, { tool, ruledBy: "client" });
+      return ["none", closed ? b : null];
+    }
     const err = new SignafaideBlocked(
       `${tool} did not run: signafAIde did not rule on it (${why}), and this tool is set to stop. Check the network and \`npx signafaide checks status\`; the console sets whether it stops or runs.`,
       code,
@@ -1138,10 +1156,10 @@ export class ChecksState {
 
   /** Step 5 (§8): the result checks of a call that ran (`hidden_instruction`), in the mode the
    * checks file sets for `tool` (its declared name). */
-  resultEntries(output: unknown, telemetry = false, tool?: string): Json[] {
+  resultEntries(output: unknown, telemetry = false, tool?: string, protect = false): Json[] {
     let f: Json | null;
     try {
-      f = this.file();
+      f = this.fileFor(protect && !telemetry);
     } catch {
       return [];
     }
@@ -1235,9 +1253,9 @@ export class ChecksState {
 
   /** A wrapper is shown a tool's definition (§8 changed_tool): approve its fingerprints the first
    * time, so a change before its first call is still a change. */
-  seen(tool: ToolInfo, agent: string, declared: string): void {
+  seen(tool: ToolInfo, agent: string, declared: string, protect = false): void {
     try {
-      const f = this.file();
+      const f = this.fileFor(protect);
       if (!f || !f.checks.changed_tool || !tool.name) return;
       const rs = this.heldRules();
       if (rs && rs.approved !== null) return;
@@ -1268,7 +1286,7 @@ export class ChecksState {
     } catch (e) {
       return [[`checks: PROBLEM ${(e as Error).message}`], true];
     }
-    if (!f) return [[`checks: off (no ${p}; \`signafaide protect\` or \`signafaide init\` writes one)`], false];
+    if (!f) return [[`checks: off for tools not protected in code (no ${p}; \`signafaide protect\` or \`signafaide init\` writes one); a tool protected in code runs every check in On`], false];
     const on = C.FILE_CHECKS.filter((k) => f!.checks[k]);
     const v2 = C.checksFileVersion(f) === 2;
     lines.push(

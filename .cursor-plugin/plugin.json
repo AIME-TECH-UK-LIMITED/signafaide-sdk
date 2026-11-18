@@ -1,6 +1,6 @@
 {
   "name": "signafaide",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Use when adding or changing a tool that pays, deletes, sends messages, runs commands, pushes code, or edits secrets or config. signafAIde's protect() checks each call against the rules a person set before it runs and signs a record of it; records stay on this machine until a person opts in. An MCP server to set it up and verify it, and a skill that says when to use it.",
   "author": { "name": "AIMETECH" },
   "homepage": "https://signafaide.co.uk",

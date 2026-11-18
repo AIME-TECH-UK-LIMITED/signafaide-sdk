@@ -14,7 +14,7 @@ with the rest: it previews the setup, explains errors, verifies records and show
 the SDK's version:
 
 ```json
-{"command": "npx", "args": ["-y", "signafaide-mcp@0.5.0"]}
+{"command": "npx", "args": ["-y", "signafaide-mcp@0.5.1"]}
 ```
 
 ## Tools

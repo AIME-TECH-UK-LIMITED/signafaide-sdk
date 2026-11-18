@@ -1053,6 +1053,7 @@ _TOKEN = re.compile(r"[A-Za-z0-9_-]+")
 _TOKEN_TABLE = str.maketrans({chr(i): (chr(i) if re.match(r"[A-Za-z0-9_-]", chr(i)) else " ") for i in range(128)})
 #: The shortest token any format can match (``xox?-`` and 10 more).
 _MIN_TOKEN = 15
+_GLUE = re.compile(r"[_-]+")
 
 
 def _table_format(tok: str, hosts: List[str], witness_host: Optional[str], found: set) -> None:
@@ -1105,7 +1106,13 @@ def _formats_in(text: str, label: str, hosts: List[str], witness_host: Optional[
         for tok in scan.lookalike_tokens(text):
             _table_format(tok, hosts, witness_host, found)
     for tok in toks:
+        n = len(found)
         _table_format(tok, hosts, witness_host, found)
+        if len(found) == n and ("_" in tok or "-" in tok):
+            # A key glued to a name by "_" or "-" (aws_key_AKIA..., id-AKIA...): its parts are tokens too.
+            for part in _GLUE.split(tok):
+                if len(part) >= _MIN_TOKEN:
+                    _table_format(part, hosts, witness_host, found)
         if len(tok) >= 51 and scan.is_wif(tok):
             found.add("wallet_private_key")
         elif len(tok) >= 64 and any(scan.is_hex_key(tok, label + " " + text[max(0, m.start() - 32):m.start()])

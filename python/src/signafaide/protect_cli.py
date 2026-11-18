@@ -39,6 +39,8 @@ class Prompter:
     environment)."""
 
     person = False
+    #: ``--yes`` without a terminal: protect then saves default rules, all Calibrating.
+    yes = False
 
     def confirm(self, question: str, default: bool) -> bool:
         raise NotImplementedError
@@ -483,6 +485,36 @@ def limit_choice(t: FoundTool, field_name: str) -> Optional[Choice]:
                                         "when": [{"field": fp, "op": "gt", "value": _num(v)}]})
 
 
+#: The calls a minute of each default rule (``protect --yes``), by what the tool does.
+DEFAULT_RATE = {"pays money": 5, "deletes data": 5, "sends messages": 20, "runs commands": 5, "pushes code": 5, "edits secrets": 5, "edits config": 5}
+
+
+def risk(t: FoundTool) -> Optional[str]:
+    """What makes a tool risky, in words (``check --ci`` reads tools the same way); None when it is not."""
+    from .ci_check import risk_of
+
+    return risk_of(t.name, t.kind)
+
+
+def default_rule(t: FoundTool, decl: str, taken: Set[str]) -> Optional[dict]:
+    """The rule ``protect --yes`` saves for a risky tool, without a person to ask: a tool that pays
+    is blocked above 1000 when it has an amount, every other risky tool (and a payment without an
+    amount) above a number of calls a minute. It starts Calibrating: it blocks nothing until a
+    person turns it On."""
+    why = risk(t)
+    if why is None:
+        return None
+    if why == KIND_WORDS["pays"]:
+        amount = next((f for f in t.fields if f[0].lower() in _AMOUNT), None)
+        if amount:
+            an, ap = amount
+            return {"id": rule_id(decl, "amount", taken), "about": f"{decl}: {an} above 1000.", "action": "block", "tools": [decl], "agents": None,
+                    "when": [{"field": ap, "op": "gt", "value": 1000}]}
+    n = DEFAULT_RATE.get(why, 5)
+    return {"id": rule_id(decl, "rate", taken), "about": f"{decl}: more than {n} calls a minute.", "action": "block", "tools": [decl], "agents": None,
+            "when": [], "limit": {"calls": n, "seconds": 60, "per": "agent_tool"}}
+
+
 #: Said for each rule a run without a person adds.
 CALIBRATING_LINE = ("  Starts Calibrating: it notes the calls it would have blocked and blocks none. Only a person turns it On: "
                     "signafaide protect at a terminal, or the console.")
@@ -582,7 +614,7 @@ def rewrite_file(text: str, tools: List[FoundTool], protect_set: Set[str], agent
     for start, end, new in sorted(edits, key=lambda e: -e[0]):
         out = out[:start] + new + out[end:]
     if out == text and not declare:
-        return text
+        return place_declaration(text, [t.name for t in tools], None)
     if not re.search(r"^import signafaide\b|^from signafaide\b", out, re.M):
         body = out.split("\n")
         k = 0
@@ -598,9 +630,101 @@ def rewrite_file(text: str, tools: List[FoundTool], protect_set: Set[str], agent
             pass
         body.insert(k, "import signafaide")
         out = "\n".join(body)
-    if declare:
-        out = out.rstrip("\n") + f"\n\n# The agent's full tool list, so a proof shows every tool is recorded.\nsignafaide.declare_tools({json.dumps(declare)}, agent={json.dumps(agent)})\n"
-    return out
+    line = f"signafaide.declare_tools({json.dumps(declare)}, agent={json.dumps(agent)})" if declare else None
+    return place_declaration(out, [t.name for t in tools], line)
+
+
+DECLARE_COMMENT = "# The agent's full tool list, so a proof shows every tool is recorded."
+
+
+def _runs_program(n: ast.stmt) -> bool:
+    """A top-level statement that runs the program: ``if __name__ == "__main__":``, or a call
+    (``main()``, ``asyncio.run(main())``, ``app.run()``), never ``declare_tools`` itself."""
+    if isinstance(n, ast.If):
+        try:
+            test = ast.unparse(n.test)
+        except Exception:  # noqa: BLE001 - an odd test is not a main guard
+            return False
+        return "__name__" in test and "__main__" in test
+    if isinstance(n, ast.Expr):
+        v = n.value.value if isinstance(n.value, ast.Await) else n.value
+        return isinstance(v, ast.Call) and not _deco_name(v).endswith("declare_tools")
+    return False
+
+
+def _is_declare(n: ast.stmt) -> bool:
+    return isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and _deco_name(n.value).endswith("declare_tools")
+
+
+def place_declaration(text: str, tool_names: List[str], line: Optional[str]) -> str:
+    """Put the ``declare_tools`` call where it always runs: right after the imports and the tool
+    definitions, before a main guard or a top-level call that runs the program (a program that
+    exits early never reaches a line after it). *line* adds a new call; a top-level call already
+    there after the program's run is moved up."""
+    try:
+        mod = ast.parse(text)
+    except SyntaxError:
+        return text if line is None else text.rstrip("\n") + f"\n\n{DECLARE_COMMENT}\n{line}\n"
+    names = set(tool_names)
+
+    def defines_tools(n: ast.stmt) -> bool:
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            return True
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return n.name in names
+        if isinstance(n, ast.ClassDef):
+            return any(isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name in names for m in n.body)
+        if isinstance(n, (ast.Assign, ast.AnnAssign)):
+            targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+            return any(isinstance(t, ast.Name) and t.id.lower().endswith("tools") for t in targets)
+        return False
+
+    def is_import(n: ast.stmt) -> bool:
+        return isinstance(n, (ast.Import, ast.ImportFrom))
+
+    def signafaide_import(n: ast.stmt) -> bool:
+        return (isinstance(n, ast.ImportFrom) and (n.module or "").split(".")[0] == "signafaide") or (
+            isinstance(n, ast.Import) and any(x.name.split(".")[0] == "signafaide" for x in n.names))
+
+    tools_end = max((n.end_lineno or n.lineno for n in mod.body if defines_tools(n) and not is_import(n)), default=0)
+    run = next((n for n in mod.body if n.lineno > tools_end and _runs_program(n)), None)
+    limit = run.lineno if run is not None else float("inf")
+    last = max((n.end_lineno or n.lineno for n in mod.body if defines_tools(n) and n.lineno < limit), default=0)
+    lines = text.split("\n")
+    if line is None:
+        # One already there: moved only when it comes after the program's run.
+        decl = next((n for n in mod.body if _is_declare(n)), None)
+        if decl is None or run is None or decl.lineno < run.lineno:
+            return text
+        # The import it needs, when that comes after the program's run too, moves with it.
+        moved = [n for n in mod.body if signafaide_import(n) and n.lineno > run.lineno] if not any(
+            signafaide_import(n) and n.lineno < run.lineno for n in mod.body) else []
+        block: List[str] = []
+        for n in moved:
+            block += lines[n.lineno - 1:n.end_lineno or n.lineno]
+        block += [DECLARE_COMMENT] + lines[decl.lineno - 1:decl.end_lineno or decl.lineno]
+        for n in sorted(moved + [decl], key=lambda x: -x.lineno):
+            start, end = n.lineno - 1, n.end_lineno or n.lineno
+            if n is decl and start > 0 and lines[start - 1].strip() == DECLARE_COMMENT:
+                start -= 1
+            del lines[start:end]
+        while len(lines) > 1 and not lines[-1].strip() and not lines[-2].strip():
+            lines.pop()
+        line_block = block
+    else:
+        line_block = [DECLARE_COMMENT, line]
+    if last:
+        # Right after the imports and the tool definitions.
+        lines[last:last] = ["", *line_block] if lines[last:last + 1] == [""] else ["", *line_block, ""]
+        return "\n".join(lines).rstrip("\n") + "\n"
+    if run is None:
+        return "\n".join(lines).rstrip("\n") + "\n\n" + "\n".join(line_block) + "\n"
+    at = run.lineno - 1
+    # Comments right above the run statement stay with it.
+    while at > 0 and lines[at - 1].lstrip().startswith("#"):
+        at -= 1
+    lines[at:at] = line_block + ["", ""]
+    return "\n".join(lines)
 
 
 @dataclass
@@ -972,6 +1096,12 @@ def run_protect(rec: Any, root: Path, prompt: Prompter, out: Callable[[str], Non
     out("")
     if tool:
         chosen = [t for t in found.tools if t.name == tool]
+    elif not prompt.person:
+        # Nobody to ask: every risky tool is protected (and any protected in the code already).
+        chosen = [t for t in found.tools if risk(t) is not None or t.wrapped == "protect"]
+        if chosen:
+            out(f"Protect    {', '.join(t.name for t in chosen)}: without a terminal, every tool that pays, deletes, sends, runs commands, "
+                "pushes code or edits secrets or config is protected")
     else:
         # Every tool is in the question; the first risky one, and any already protected, are ticked.
         first = next((i for i, t in enumerate(found.tools) if t.kind in RISKY), -1)
@@ -1036,6 +1166,9 @@ def run_protect(rec: Any, root: Path, prompt: Prompter, out: Callable[[str], Non
         elif proposed:
             rule = {**proposed[0], "id": rule_id(decl, proposed[0]["id"][len(decl) + 1:] or "limit", taken)}
             out(f"  Rule: {rule_words(rule)}  (proposed by an agent run on {proposed[1]})")
+        elif not prompt.person and prompt.yes and default_rule(t, decl, set(taken)) is not None:
+            # protect --yes: a sensible default for what the tool does, Calibrating (it blocks nothing).
+            rule = default_rule(t, decl, taken)  # type: ignore[assignment]
         else:
             pick = prompt.choose(f"What should we block on {t.name}?", [x.label for x in choices] + ["Nothing yet, record only"], 0 if prompt.person else len(choices))
             if pick >= len(choices):
@@ -1084,6 +1217,7 @@ def run_protect(rec: Any, root: Path, prompt: Prompter, out: Callable[[str], Non
             out(f"Sends to signafAIde when {t.name} runs: nothing yet. Its rules need {', '.join(field_words(f) for f in fields)}: "
                 "run signafaide pull at a terminal to approve sending them.")
             not_done.append(f"sending {', '.join(field_words(f) for f in fields)} for {t.name} is not approved (signafaide pull at a terminal)")
+            finish = finish or "signafaide pull (at a terminal)"
             sends.clear()
         elif not local:
             what = ", ".join(field_words(f) for f in fields) or "nothing but the tool's fingerprints"
@@ -1170,7 +1304,7 @@ def run_protect(rec: Any, root: Path, prompt: Prompter, out: Callable[[str], Non
         doc["proposed"] = [p for p in doc["proposed"] if p["rule"] not in consumed]
     # An agent run with no key cannot save its rule at the witness: it is kept here as a local
     # Calibrating rule (the tool's mode is watch, so it blocks nothing) that a person is offered later.
-    keep_proposal = bool(not local and limit and not prompt.person and not rec.api_key and new_rules)
+    keep_proposal = bool(not local and (limit or prompt.yes) and not prompt.person and not rec.api_key and new_rules)
     if keep_proposal:
         lr = doc["rules"] or {"default": "allow", "rules": []}
         for r in new_rules:
@@ -1241,6 +1375,12 @@ def run_protect(rec: Any, root: Path, prompt: Prompter, out: Callable[[str], Non
                 item = publish_rules(rec, client, new_rules)
                 published = item["rules"]["version"]
                 out(f"Rules      saved {'in your sandbox' if how == 'sandbox_key' else f'by {who}'} as version {published}, signed by signafAIde")
+                if not prompt.person:
+                    out(f"           {'The rule' if len(new_rules) == 1 else f'All {len(new_rules)} rules'} start Calibrating: "
+                        f"{'it notes' if len(new_rules) == 1 else 'they note'} the calls {'it' if len(new_rules) == 1 else 'they'} would have blocked "
+                        "and block none until a person turns them On:")
+                    for r in new_rules:
+                        out(f"             Calibrating  {rule_words(r)}")
                 if how == "sandbox_key":
                     out("           This machine may save rules only while the sandbox is unclaimed. After you keep it,")
                     out("           saving rules needs a person's sign-in (signafaide login); the API key cannot.")
