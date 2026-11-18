@@ -965,7 +965,10 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
     // No key and no sandbox: nothing can save the rules yet, and a sign-in would not help.
     const calibrating = newRules.every((r) => r.state === "calibrating");
     out(`Rules      not saved yet: there is no key.${calibrating ? ` ${newRules.length === 1 ? "It starts" : "They start"} Calibrating once saved.` : ""}`);
-    if (keepProposal) out(`           Kept in ${rel(cp)} as a local Calibrating rule (it blocks nothing); a person who runs npx signafaide protect in a terminal is offered it.`);
+    if (keepProposal) {
+      const one = newRules.length === 1;
+      out(`           Kept in ${rel(cp)} as ${one ? "a local Calibrating rule (it blocks nothing)" : "local Calibrating rules (they block nothing)"}; a person who runs npx signafaide protect in a terminal is offered ${one ? "it" : "them"}.`);
+    }
     out("           A person runs npx signafaide protect in a terminal and answers yes to the free sandbox; it asks for the rules again.");
     notDone.push("the rules are not saved (no key yet)");
     finish ??= "npx signafaide protect (in a terminal)";

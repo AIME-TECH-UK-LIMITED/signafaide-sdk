@@ -29,7 +29,11 @@ def lookup_invoice(invoice_id: str) -> str:
     return invoice_id
 
 
-tools = [approve_payout, lookup_invoice]
+def refund_payout(amount: float) -> str:
+    return str(amount)
+
+
+tools = [approve_payout, lookup_invoice, refund_payout]
 '''
 
 AGENT_RUN = ["protect", "--yes", "--tool", "approve_payout", "--limit-field", "amount", "--above", "1000"]
@@ -293,3 +297,10 @@ def test_in_a_test_runner_it_still_runs(project, monkeypatch):
         assert approve_payout(5) == "paid 5"
     finally:
         _stop(r)
+
+
+def test_several_kept_rules_are_said_in_the_plural(flow, capsys):
+    code, out = run(capsys, "protect", "--yes", prompter=FlagPrompter(yes=True))
+    assert "Kept in signafaide.checks.json as local Calibrating rules (they block nothing)" in out
+    assert "is offered them." in out
+    assert "a local Calibrating rule" not in out

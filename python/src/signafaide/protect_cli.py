@@ -1439,7 +1439,9 @@ def run_protect(rec: Any, root: Path, prompt: Prompter, out: Callable[[str], Non
         tail = f" {'It starts' if len(new_rules) == 1 else 'They start'} Calibrating once saved." if calibrating else ""
         out(f"Rules      not saved yet: there is no key.{tail}")
         if keep_proposal:
-            out(f"           Kept in {rel(cp)} as a local Calibrating rule (it blocks nothing); a person who runs signafaide protect in a terminal is offered it.")
+            one = len(new_rules) == 1
+            what = "a local Calibrating rule (it blocks nothing)" if one else "local Calibrating rules (they block nothing)"
+            out(f"           Kept in {rel(cp)} as {what}; a person who runs signafaide protect in a terminal is offered {'it' if one else 'them'}.")
         out("           A person runs signafaide protect in a terminal and answers yes to the free sandbox; it asks for the rules again.")
         not_done.append("the rules are not saved (no key yet)")
         finish = finish or "signafaide protect (in a terminal)"
