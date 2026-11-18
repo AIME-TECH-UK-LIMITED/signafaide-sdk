@@ -9,7 +9,7 @@ The record format changed between v0.1.1 and v0.1.2 (salted content hashes) and 
 (packs name their project), before any public release. Records and packs written by a version
 verify with that version and later ones unless an entry below says otherwise.
 
-## v0.5.2 (unreleased)
+## v0.5.2 (2026-11-18)
 
 Protect from the console (owner decision, issue #65: "i expect when i press the protect button i activate protect same as the cli command. i can also do the cli command if i want to"). The spec stays 1.1 (SPEC sections 6, 7, 8, 9 and 10); records do not change.
 
