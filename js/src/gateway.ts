@@ -227,7 +227,7 @@ class Gateway {
 
   /** Tool-call checks or strict mode are on: the server must see exactly what was checked. */
   private guarded(): boolean {
-    return !!this.opts.strict || this.strictTools.size > 0 || this.rec.checks.enabled();
+    return !!this.opts.strict || this.strictTools.size > 0 || this.rec.checks.enabled() || this.rec.checks.consoleProtectsAny();
   }
 
   private error(id: unknown, message: string, code: string, extra: Json = {}): Json {
@@ -336,12 +336,17 @@ class Gateway {
     if (typeof tool !== "string" || !tool) return FORWARD;
     const full = this.prefix + tool;
     const name = declaredName(full);
+    // §8 (SDK 0.5.2): while no rule set version is held, the first call waits for the first fetch
+    // (at most RULES_START_WAIT_MS), so a tool protected from the console is protected from it.
+    const wait = this.rec.checks.startWait();
+    if (wait) return wait.then(() => this.call(msg, key));
     // The declaration covers every tool the client has been shown before its first call.
     this.declareShown();
     const meta: Record<string, unknown> = { sdk: `signafaide-js/${VERSION}`, gateway: true };
     if (name !== tool) meta.tool = tool; // the server's own name, when a prefix or a cut changed it
     const strictCode = !!this.opts.strict || this.strictTools.has(tool);
-    const checksOn = this.rec.checks.enabled();
+    const checksOn = this.rec.checks.enabled(false, name);
+    if (!checksOn) this.rec.checks.observeConsole(name, false, this.rec.checks.heldRules()?.version ?? null, strictCode ? ["code"] : []);
     // A strict call needs an id to be answered by: one that is not a string or a number cannot
     // be tracked while it waits for its receipt, so it is refused as an invalid request.
     if (strictCode && !checksOn && key === undefined && "id" in msg) {
@@ -365,6 +370,9 @@ class Gateway {
         return key === undefined ? { drop: true } : { reply: this.checkError(msg.id, err) };
       }
     }
+    // Where a strict call's protection comes from (§8, SDK 0.5.2).
+    if (plan?.strict && plan.protectedBy.length) meta.protected_by = plan.protectedBy;
+    else if (!plan && strictCode) meta.protected_by = ["code"];
     let decision: SignedRecord;
     try {
       const content = { input: toJsonable(params.arguments) ?? null, meta } as Record<string, unknown>;
@@ -558,7 +566,7 @@ class Gateway {
         // What the client is shown of the tool: its fingerprints are taken from these (§11.1).
         const info = { description: typeof t.description === "string" ? t.description : "", inputSchema: isObject(t.inputSchema) ? toJsonable(t.inputSchema) : null, definition: toJsonable(t) };
         if (name) this.toolInfo.set(name, info);
-        if (review) {
+        if (review || (name !== null && this.rec.checks.consoleProtects(declaredName(this.prefix + name)))) {
           const r = this.rec.checks.reviewTool({ name: name ?? "", ...info, serverInfo: this.serverInfo, server: this.serverId(), others: listedNames.filter((n) => n !== name) }, agent, name ? declaredName(this.prefix + name) : "");
           if (r.line) this.diag(r.line);
           if (r.withhold) continue;

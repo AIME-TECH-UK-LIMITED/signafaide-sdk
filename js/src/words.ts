@@ -8,6 +8,7 @@
 import { JsonNumber, canonicalize } from "./jcs.js";
 import { plural } from "./plural.js";
 import { ruleState } from "./checks.js";
+import { byCodePoint } from "./coverage.js";
 
 type Json = Record<string, any>;
 
@@ -142,12 +143,15 @@ export interface RuleSetWords {
   rules: { id: string; state: string | null; sentence: string }[];
   default: { id: "default"; state: string | null; sentence: string };
   exceptions: { rule: string; since: number; sentence: string; reason: string }[];
+  /** SDK 0.5.2: the tools the version protects from the console, in code point order; only for
+   * a version that has `protect`. */
+  protect?: { tool: string; fail: "open" | "closed" }[];
 }
 
 /** A valid rule set version, or local rules (`local`), in words (§7 JSON output `rules`). */
 export function ruleSetWords(doc: Json, hash: string, local: boolean): RuleSetWords {
   const st = (s: string): string | null => (local ? null : s);
-  return {
+  const out: RuleSetWords = {
     set: local ? "local" : doc.set,
     version: local ? null : doc.version,
     hash,
@@ -156,6 +160,12 @@ export function ruleSetWords(doc: Json, hash: string, local: boolean): RuleSetWo
     default: { id: "default", state: st(doc.mode === "watch" ? "calibrating" : "on"), sentence: defaultWords(doc.default) },
     exceptions: local ? [] : doc.rules.flatMap((r: Json) => (r.exceptions ?? []).map((x: Json) => ({ rule: r.id, since: x.since, sentence: exceptionWords(x), reason: x.reason }))),
   };
+  if (!local && doc.protect && typeof doc.protect === "object") {
+    out.protect = Object.keys(doc.protect)
+      .sort(byCodePoint)
+      .map((tool) => ({ tool, fail: doc.protect[tool].fail === "open" ? "open" : "closed" }));
+  }
+  return out;
 }
 
 /** The report lines of one rule set version or local rules (§7), without the `rules: ` prefix. */
@@ -168,5 +178,6 @@ export function ruleSetLines(w: RuleSetWords): string[] {
   for (const r of w.rules) out.push(`${label}: rule ${r.id}: ${r.sentence}${word(r.state)}`);
   out.push(`${label}: ${w.default.sentence}${word(w.default.state)}`);
   for (const x of w.exceptions) out.push(`${label}: exception to rule ${x.rule} since version ${x.since}: ${x.sentence}, reason ${canonicalize(x.reason)}`);
+  for (const p of w.protect ?? []) out.push(`${label}: protected from the console: ${p.tool}, if signafAIde can't be reached: ${failWord(p.fail)}`);
   return out;
 }

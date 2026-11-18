@@ -448,6 +448,15 @@ pub fn generate() -> Value {
         ("an empty exceptions list", Box::new(|d| d["rules"][1]["exceptions"] = json!([]))),
         ("unknown key in an exception", Box::new(|d| d["rules"][1]["exceptions"] = json!([{"field": "/payee/name", "value": "x", "reason": "Reviewed.", "since": 1, "by": "admin"}]))),
         ("an exception's field is not a JSON pointer", Box::new(|d| d["rules"][1]["exceptions"] = json!([{"field": "payee", "value": "x", "reason": "Reviewed.", "since": 1}]))),
+        // SDK 0.5.2: `protect` (§10.1)
+        ("protect is an empty object (left out when no tool is protected)", Box::new(|d| d["protect"] = json!({}))),
+        ("protect is a list", Box::new(|d| d["protect"] = json!(["approve_payout"]))),
+        ("a protect entry without fail", Box::new(|d| d["protect"] = json!({"refund": {}}))),
+        ("a protect entry is a fail mode, not an object", Box::new(|d| d["protect"] = json!({"refund": "closed"}))),
+        ("a protect entry with an unknown key", Box::new(|d| d["protect"] = json!({"refund": {"fail": "closed", "agents": ["agent-a"]}}))),
+        ("a protect entry's fail is not open or closed", Box::new(|d| d["protect"] = json!({"refund": {"fail": "stop"}}))),
+        ("a protect entry names an empty tool name", Box::new(|d| d["protect"] = json!({"": {"fail": "closed"}}))),
+        ("a tool in fail and in protect with different fail modes", Box::new(|d| d["protect"] = json!({"approve_payout": {"fail": "open"}}))),
     ];
     v.insert(
         "rule_sets_invalid".into(),
@@ -1839,6 +1848,100 @@ pub fn spec_1_1(v: &mut Map<String, Value>) {
 
     v.insert("rule_words".into(), rule_words_vectors(&v3, &allowlist));
     v.insert("checks_files".into(), checks_files_vectors(&v3));
+    v.insert("console_protect".into(), console_protect_vectors(&v3));
+}
+
+/// SDK 0.5.2 (§8, §10.1): a tool protected from the console. Version 4 of the 1.1 document with
+/// a `protect` map; what it means for each tool, with no checks file, with a version 1 and a
+/// version 2 file, and with the code protecting a tool too.
+fn console_protect_vectors(v3: &Value) -> Value {
+    use crate::checks::file::{protection, ChecksFile};
+    use crate::checks::words;
+    let mut v4 = with(v3.clone(), json!({"version": 4, "prev": hj(v3), "issued": "2026-11-18T09:00:00.000Z"}));
+    v4["protect"] = json!({"approve_payout": {"fail": "closed"}, "refund": {"fail": "open"}, "send_receipt": {"fail": "closed"}});
+    let rs4 = rule_set(&v4);
+    assert_eq!(rs4.fail_of("approve_payout"), Some("closed"));
+    // the same tool in fail and in protect with the same fail mode is valid
+    let mut v4_both = v4.clone();
+    v4_both["fail"] = json!({"approve_payout": "closed", "refund": "open"});
+    rule_set(&v4_both);
+    let five = json!({"secret": true, "address": true, "changed_tool": true, "fingerprint": true, "hidden_instruction": true});
+    let addr = json!({"hosts": [], "cidrs": [], "resolve": false});
+    let f1 = json!({"format": "signafaide-checks/1", "mode": "watch", "checks": five, "addresses": addr, "rules": null,
+        "tools": {"approve_payout": {"strict": true, "fail": "open", "disclose": ["/amount"]}, "send_receipt": {"strict": false}}});
+    let f2 = json!({"format": "signafaide-checks/2", "checks": five, "addresses": addr, "rules": null,
+        "tools": {"approve_payout": {"protect": true, "disclose": ["/amount", "/payee/id"]},
+                  "send_receipt": {"protect": false, "mode": "watch"},
+                  "refund": {"protect": false},
+                  "lookup_order": {"protect": true}}});
+    let tools = ["approve_payout", "refund", "send_receipt", "lookup_order", "delete_account"];
+    // (name, rule set, file, tools protected in code)
+    let cases: Vec<(&str, Option<&Value>, Option<&Value>, Vec<&str>)> = vec![
+        ("no checks file: the console protects approve_payout, refund and send_receipt", Some(&v4), None, vec![]),
+        ("no checks file, refund also protected in code", Some(&v4), None, vec!["refund"]),
+        ("version 1 file in watch mode: a tool protected only from the console runs its checks On", Some(&v4), Some(&f1), vec![]),
+        ("version 2 file: an explicit mode stays, a listed tool not protected there is protected from the console", Some(&v4), Some(&f2), vec![]),
+        ("version 2 file, a version without protect (1.1): unchanged", Some(v3), Some(&f2), vec![]),
+        ("no checks file, a version without protect (1.1): nothing is checked", Some(v3), None, vec![]),
+        ("no rule set held: only the code and the file protect", None, Some(&f2), vec!["delete_account"]),
+    ];
+    let mut out = Vec::new();
+    for (name, doc, file, code) in cases {
+        let rs = doc.map(rule_set);
+        let f = file.map(|x| ChecksFile::parse(x).unwrap());
+        let mut expect = Map::new();
+        for t in tools {
+            let p = protection(rs.as_ref(), f.as_ref(), code.contains(&t), t);
+            let e = match p {
+                None => Value::Null,
+                Some(p) => {
+                    let mut e = json!({"strict": p.strict, "fail": p.fail, "mode": p.mode.as_str(), "protected_by": p.sources, "disclose": p.disclose});
+                    if let (true, Some(rs)) = (p.strict, rs.as_ref()) {
+                        let (sent, missing, unsent) = checks::file::disclosure(rs, "agent-a", t, &p.disclose);
+                        e["sent"] = json!(sent);
+                        e["missing"] = json!(missing);
+                        e["unsent"] = json!(unsent);
+                    }
+                    e
+                }
+            };
+            expect.insert(t.into(), e);
+        }
+        out.push(json!({"name": name, "rule_set": doc.map(|d| if d == &v4 { "v4" } else { "rule_states.rule_sets.v3" }), "file": file, "code": code, "expect": expect}));
+    }
+    // A few expectations stated outright, so the generator cannot drift from the spec.
+    let e0 = &out[0]["expect"];
+    assert_eq!(e0["approve_payout"], json!({"strict": true, "fail": "closed", "mode": "enforce", "protected_by": ["console"], "disclose": [], "sent": [], "missing": ["/amount", "/payee/id"], "unsent": ["/currency", "/payee/country", "/payee/name"]}));
+    assert_eq!(e0["refund"]["fail"], json!("open"));
+    assert_eq!(e0["lookup_order"], Value::Null);
+    assert_eq!(out[1]["expect"]["refund"]["protected_by"], json!(["code", "console"]));
+    assert_eq!(out[2]["expect"]["approve_payout"]["fail"], json!("closed"), "the rule set's fail mode wins over the file's");
+    assert_eq!(out[2]["expect"]["approve_payout"]["mode"], json!("watch"), "a tool the file protects keeps the file's mode");
+    assert_eq!(out[2]["expect"]["send_receipt"]["mode"], json!("enforce"));
+    assert_eq!(out[3]["expect"]["send_receipt"]["mode"], json!("watch"));
+    assert_eq!(out[3]["expect"]["refund"]["mode"], json!("enforce"));
+    assert_eq!(out[3]["expect"]["approve_payout"]["protected_by"], json!(["checks_file", "console"]));
+    assert_eq!(out[4]["expect"]["send_receipt"]["strict"], json!(false));
+    assert_eq!(out[5]["expect"]["approve_payout"], Value::Null);
+    let w = words::rule_set(&rs4, &hj(&v4), false);
+    let lines = words::lines(&w);
+    let label = format!("{SET_ID} version 4");
+    let want_tail: Vec<String> = [
+        "{L}: protected from the console: approve_payout, if signafAIde can't be reached: Stop",
+        "{L}: protected from the console: refund, if signafAIde can't be reached: Let it run",
+        "{L}: protected from the console: send_receipt, if signafAIde can't be reached: Stop",
+    ]
+    .iter()
+    .map(|l| l.replace("{L}", &label))
+    .collect();
+    assert_eq!(lines[lines.len() - 3..], want_tail[..], "protect lines");
+    json!({
+        "about": "SDK 0.5.2 (SPEC 8, 10.1): a tool a person protected from the console with the rule set's protect map. For each case (the held rule set, the checks file or null, the tools protected in code) and each tool: null when its calls are not checked at all, else strict, the fail mode (null when not strict), the mode of the client's own checks and local rules, protected_by (meta.protected_by of a strict decision), the fields the developer approved (the console approves none), and for a strict call under a held version the fields sent, missing (an On rule's call is ruled fields_missing) and unsent (§10.4). words: the version in words with its protect lines (§7). v4_both: valid, a tool in fail and protect with the same fail mode.",
+        "v4": {"rules": v4, "hash": hj(&v4)},
+        "v4_both": v4_both,
+        "cases": out,
+        "words": {"words": w, "lines": lines},
+    })
 }
 
 fn rule_words_vectors(v3: &Value, allowlist: &Value) -> Value {

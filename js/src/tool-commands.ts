@@ -78,6 +78,9 @@ export function protectedInCode(rec: Recorder): Set<string> {
 /** The tools that are protected: by the checks file, by the code, or whose last call was strict. */
 export function protectedNames(rec: Recorder, f: Json | null, records: SignedRecord[]): Set<string> {
   const out = new Set<string>(f ? Object.keys(f.tools).filter((n) => C.toolSettings(f, n).strict) : []);
+  // §8 (SDK 0.5.2): the tools the held rule set protects from the console, that the program wraps.
+  const rs = rec.checks.path() !== null ? rec.checks.heldRules() : null;
+  if (rs && isObj(rs.protect)) for (const n of Object.keys(rs.protect)) if (rec.checks.wrappedState(n) === "wrapped" || records.some((r) => r.envelope.name === n)) out.add(n);
   const last = new Map<string, boolean>();
   for (const r of records) if (r.envelope.kind === "decision" && isObj(r.envelope.checks)) last.set(r.envelope.name, (r.envelope.checks as Json).strict === true);
   for (const n of protectedInCode(rec)) out.add(n);
@@ -87,21 +90,27 @@ export function protectedNames(rec: Recorder, f: Json | null, records: SignedRec
 
 /** What `status` says of each tool's protection: `1 of 3 rules On, 2 Calibrating`, `Off`, ...
  * `inCode`: the code protects it (its wrapper, or its last call was strict). */
-export function protectionWords(rec: Recorder, f: Json | null, agent: string, tool: string, inCode = false): string {
+export function protectionWords(rec: Recorder, f: Json | null, agent: string, tool: string, inCode = false, seen = true): string {
   const decl = declaredName(tool);
   let ts = f ? C.toolSettings(f, decl) : null;
-  if (inCode) ts = { ...(ts ?? { mode: "enforce", disclose: [], fail: "closed" }), strict: true };
   const rs = rec.checks.heldRules();
+  // §8 (SDK 0.5.2): protected from the console when the held version's `protect` names it and the
+  // program wraps it; a tool the program never shows signafAIde cannot be protected.
+  const console = rec.checks.path() !== null && C.consoleProtects(rs, decl);
+  if (console && !seen) return `Off: protected from the console (rule set version ${rs!.version}), but not wrapped, so signafAIde never sees its calls`;
+  const sources = [...(inCode ? ["code"] : []), ...(ts?.strict ? ["checks_file"] : []), ...(console ? ["console"] : [])];
+  if (inCode || console) ts = { ...(ts ?? { mode: "enforce", disclose: [], fail: "closed" }), strict: true };
+  const from = sources.length ? `, ${C.sourceWords(sources, rs?.version)}` : "";
   if (ts && !ts.strict && ts.mode === "enforce" && f?.rules) {
     const n = f.rules.rules.filter((r: Json) => C.applies(r, agent, decl)).length;
     return `this machine only, ${plural(n, "rule")}`;
   }
   if (!ts?.strict) return "Off";
   const rules = rs ? rs.rules.filter((r: Json) => C.applies(r, agent, decl)) : [];
-  if (!rs || !rules.length) return rs ? "On, no rule for it yet" : "On, rules not fetched yet";
+  if (!rs || !rules.length) return (rs ? "On, no rule for it yet" : "On, rules not fetched yet") + from;
   const on = rs.mode === "enforce" ? rules.filter((r: Json) => C.ruleState(rs, r) === "on").length : 0;
   const cal = rules.length - on;
-  return `${on} of ${plural(rules.length, "rule")} On${cal ? `, ${cal} Calibrating` : ""}`;
+  return `${on} of ${plural(rules.length, "rule")} On${cal ? `, ${cal} Calibrating` : ""}${from}`;
 }
 
 /** The tools `status` shows: the declared ones, the recorded ones and the checks file's. */
@@ -112,6 +121,7 @@ export function toolLines(rec: Recorder, proofOf: (agent: string) => string): To
   for (const a of rec.state.agents()) agents.add(a);
   const out: ToolLine[] = [];
   const code = protectedInCode(rec);
+  const rs = rec.checks.path() !== null ? rec.checks.heldRules() : null;
   for (const agent of [...agents].sort(byCodePoint)) {
     const names = new Set<string>();
     for (const tools of Object.values(rec.state.toolSources(agent))) for (const t of Object.keys(tools)) names.add(declaredName(t));
@@ -129,11 +139,14 @@ export function toolLines(rec: Recorder, proofOf: (agent: string) => string): To
       calls.set(e.name, c);
     }
     if (f && agents.size === 1) for (const t of Object.keys(f.tools)) names.add(t);
+    // The tools the console protects (§8, SDK 0.5.2): listed, so one the program never wraps shows.
+    if (rs && isObj(rs.protect) && agents.size === 1) for (const t of Object.keys(rs.protect)) names.add(t);
     if (!names.size) continue;
     const proof = proofOf(agent);
     for (const tool of [...names].sort(byCodePoint)) {
       const c = calls.get(tool);
-      out.push({ agent, tool, calls: c?.n ?? 0, last: c?.last ?? null, protected: protectionWords(rec, f, agent, tool, code.has(tool) || strict.get(tool) === true), proof });
+      const seen = !!c || rec.checks.wrappedState(tool) === "wrapped";
+      out.push({ agent, tool, calls: c?.n ?? 0, last: c?.last ?? null, protected: protectionWords(rec, f, agent, tool, code.has(tool) || (strict.get(tool) === true && !C.consoleProtects(rs, tool) && !(f && C.toolSettings(f, tool).strict)), seen), proof });
     }
   }
   return out;
@@ -243,17 +256,21 @@ export async function runPull(rec: Recorder, prompt: Prompter, out: (s: string) 
     out(`Checks     ${(e as Error).message}`);
     return 1;
   }
-  if (!f) {
+  // §8 (SDK 0.5.2): the tools the held version protects from the console have fields to approve too.
+  const fromConsole: string[] = rs && isObj(rs.protect) ? Object.keys(rs.protect) : [];
+  if (!f && !fromConsole.length) {
     out(`Checks     no ${path.basename(p)} here: npx signafaide protect writes one`);
     return code;
   }
-  const doc = toVersion2(f);
+  const doc = toVersion2(f ?? C.defaultChecksFile());
   const agent = rec.defaultAgent;
   const changes: string[] = [];
   const wait: string[] = [];
-  for (const name of Object.keys(doc.tools).sort(byCodePoint)) {
-    const t = doc.tools[name];
-    if (!t.protect || !rs) continue;
+  const nowFile: string[] = [];
+  for (const name of [...new Set([...Object.keys(doc.tools), ...fromConsole])].sort(byCodePoint)) {
+    const onlyConsole = !doc.tools[name]?.protect && fromConsole.includes(name);
+    const t = doc.tools[name] ?? { protect: false };
+    if ((!t.protect && !onlyConsole) || !rs) continue;
     const have: string[] = t.disclose ?? [];
     const uses = fieldUses(rs, agent, name);
     const fresh = C.sendableFields(rs, agent, name).filter((x) => !have.includes(x));
@@ -269,14 +286,24 @@ export async function runPull(rec: Recorder, prompt: Prompter, out: (s: string) 
         changes.push(name);
       } else wait.push(`${name}: ${fieldWords(field)}`);
     }
-    if (have.length) t.disclose = have;
+    if (have.length) {
+      t.disclose = have;
+      if (onlyConsole) {
+        // A version 2 file lists fields only on a protected tool, so a client before 0.5.2 still
+        // reads it: the checks file now protects the tool too.
+        t.protect = true;
+        doc.tools[name] = t;
+        nowFile.push(name);
+      }
+    }
   }
-  const v1 = C.checksFileVersion(f) === 1;
+  const v1 = f !== null && C.checksFileVersion(f) === 1;
   if (changes.length || v1) {
     writeChecksFile(p, doc);
     rec.checks.forget();
     const what = [...new Set(changes)].map((n) => `${n} sends ${(doc.tools[n].disclose as string[]).map(fieldWords).join(", ")}`);
     out(`Changed    ${path.basename(p)}     ${[...(v1 ? ["now version 2 (each tool Protected or Not protected, On or Calibrating)"] : []), ...what].join("; ")}`);
+    for (const n of nowFile) out(`           ${n} was protected from the console only; ${path.basename(p)} now protects it too (a checks file lists the fields to send only for a protected tool), so Unprotect in the console no longer unprotects it`);
     out("Commit it. Until then, a call a rule needs one of these fields for is blocked and the error says to run pull.");
   } else out(`Checks     ${path.basename(p)} is up to date`);
   if (wait.length) out(`Not sent   ${wait.join(", ")}${prompt.person ? " (you said no)" : ": run npx signafaide pull at a terminal to approve them"}`);
@@ -474,6 +501,16 @@ export async function runProve(rec: Recorder, o: ProveOptions): Promise<number> 
     const rcd = [...declared.values()].filter(Boolean).length;
     out(`  Tools      ${agent} has ${plural(declared.size, "tool")}, ${rcd === declared.size ? `all ${rcd}` : `${rcd}`} recorded, ${prot} protected`);
   } else out(`  Tools      ${agent} has not declared its tool list (declareTools), so the proof cannot show every tool is recorded`);
+  // Where each protected tool's protection comes from (§8, SDK 0.5.2): never a surprise.
+  const protectedNow = [...protectedNames(rec, f, chain.records)].filter((n) => !tool || n === tool).sort(byCodePoint);
+  if (protectedNow.length) {
+    const inCode = protectedInCode(rec);
+    const words = protectedNow.map((n) => {
+      const src = [...(inCode.has(n) ? ["code"] : []), ...(f && C.toolSettings(f, n).strict ? ["checks_file"] : []), ...(C.consoleProtects(rs, n) ? ["console"] : [])];
+      return `${n} ${C.sourceWords(src.length ? src : ["code"], rs?.version)}`;
+    });
+    out(`  Protected  ${words.join("; ")}`);
+  }
   // The record: the local verify.
   let report: Awaited<ReturnType<typeof verify>> | null = null;
   try {

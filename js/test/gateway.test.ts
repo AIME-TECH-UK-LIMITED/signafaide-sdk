@@ -567,6 +567,25 @@ describe("gateway: tool-call checks (spec §8)", () => {
     expect(calls().at(-1)!.envelope.checks).toEqual({ ran: false, ruling: "none", results: [], result: "allow" });
     await s.close();
   });
+
+  it("SDK 0.5.2: a tool protected from the console is strict through the gateway, with no checks file and no --strict", async () => {
+    await ctx.rec.createSandbox();
+    ctx.service.publishRules(ctx.rec.apiKey!, [], { protect: { echo: { fail: "closed" } } });
+    await ctx.rec.checks.pullRules();
+    ctx.service.noRuling = true;
+    const s = new Session();
+    s.call(1, "echo", { a: 1 });
+    const refused = await s.answer(1);
+    expect(refused.error.data).toEqual({ signafaide: "no_ruling" });
+    s.call(2, "slow", { ms: 1 }); // not protected: forwarded at once
+    expect((await s.answer(2)).result).toBeDefined();
+    await s.settled();
+    expect(s.seen().filter((l) => l.includes("tools/call") && l.includes('"echo"'))).toEqual([]);
+    const decisions = calls().filter((r) => r.envelope.kind === "decision");
+    expect(decisions.map((r) => r.envelope.checks?.strict ?? null)).toEqual([true, null]);
+    expect((decisions[0].content as any).meta.protected_by).toEqual(["console"]);
+    await s.close();
+  });
 });
 
 describe("gateway: what reaches the server is what was checked (release review)", () => {

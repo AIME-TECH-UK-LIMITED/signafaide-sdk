@@ -74,17 +74,28 @@ def protected_names(rec: Any, f: Optional[dict], records: List[dict]) -> Set[str
         e = r["envelope"]
         if e["kind"] == "decision" and isinstance(e.get("checks"), dict):
             last[e["name"]] = e["checks"].get("strict") is True
+    # §8 (SDK 0.5.2): the tools the held rule set protects from the console, that the program wraps.
+    rs = rec.checks.held_rules() if rec.checks.path() is not None else None
+    if rs and isinstance(rs.get("protect"), dict):
+        named = {r["envelope"]["name"] for r in records}
+        out |= {n for n in rs["protect"] if rec.checks.wrapped_state(n) == "wrapped" or n in named}
     return out | protected_in_code(rec) | {n for n, x in last.items() if x}
 
 
-def protection_words(rec: Any, f: Optional[dict], agent: str, tool: str, in_code: bool = False) -> str:
+def protection_words(rec: Any, f: Optional[dict], agent: str, tool: str, in_code: bool = False, seen: bool = True) -> str:
     """What ``status`` says of a tool's protection: ``1 of 3 rules On, 2 Calibrating``, ``Off``...
-    *in_code*: the code protects it (its decorator, or its last call was strict)."""
+    *in_code*: the code protects it (its decorator, or its last call was strict). *seen*: the
+    program has shown the tool to signafAIde (a tool it never wraps cannot be protected, §8)."""
     decl = declared_name(tool)
     ts = C.tool_settings(f, decl) if f else None
-    if in_code:
-        ts = {**(ts or {"mode": "enforce", "disclose": []}), "strict": True}
     rs = rec.checks.held_rules()
+    console = rec.checks.path() is not None and C.console_protects(rs, decl)
+    if console and not seen:
+        return f"Off: protected from the console (rule set version {rs['version']}), but not wrapped, so signafAIde never sees its calls"
+    sources = (["code"] if in_code else []) + (["checks_file"] if ts and ts["strict"] else []) + (["console"] if console else [])
+    if in_code or console:
+        ts = {**(ts or {"mode": "enforce", "disclose": []}), "strict": True}
+    frm = f", {C.source_words(sources, rs['version'] if rs else None)}" if sources else ""
     if ts and not ts["strict"] and ts["mode"] == "enforce" and f.get("rules"):
         n = sum(1 for r in f["rules"]["rules"] if C.applies(r, agent, decl))
         return f"this machine only, {plural(n, 'rule')}"
@@ -92,10 +103,10 @@ def protection_words(rec: Any, f: Optional[dict], agent: str, tool: str, in_code
         return "Off"
     rules = [r for r in rs["rules"] if C.applies(r, agent, decl)] if rs else []
     if not rs or not rules:
-        return "On, no rule for it yet" if rs else "On, rules not fetched yet"
+        return ("On, no rule for it yet" if rs else "On, rules not fetched yet") + frm
     on = sum(1 for r in rules if C.rule_state(rs, r) == "on") if rs["mode"] == "enforce" else 0
     cal = len(rules) - on
-    return f"{on} of {plural(len(rules), 'rule')} On" + (f", {cal} Calibrating" if cal else "")
+    return f"{on} of {plural(len(rules), 'rule')} On" + (f", {cal} Calibrating" if cal else "") + frm
 
 
 def proof_by_agent(rec: Any) -> Callable[[str], str]:
@@ -130,6 +141,7 @@ def status_table(rec: Any) -> List[str]:
     agents = set(chains) | set(rec.state.agents())
     proof = proof_by_agent(rec)
     code = protected_in_code(rec)
+    held = rec.checks.held_rules() if rec.checks.path() is not None else None
     rows: List[Tuple[str, str, int, Optional[str], str, str]] = []
     for agent in sorted(agents):
         names = set()
@@ -149,12 +161,17 @@ def status_table(rec: Any) -> List[str]:
             c[1] = e["time"]
         if f and len(agents) == 1:
             names.update(f["tools"])
+        # The tools the console protects (§8, SDK 0.5.2): listed, so one the program never wraps shows.
+        if held and isinstance(held.get("protect"), dict) and len(agents) == 1:
+            names.update(held["protect"])
         if not names:
             continue
         p = proof(agent)
         for tool in sorted(names):
             n, last = calls.get(tool, [0, None])
-            rows.append((agent, tool, n, last, protection_words(rec, f, agent, tool, tool in code or strict.get(tool, False)), p))
+            seen = n > 0 or rec.checks.wrapped_state(tool) == "wrapped"
+            in_code = tool in code or (strict.get(tool, False) and not C.console_protects(held, tool) and not (f and C.tool_settings(f, tool)["strict"]))
+            rows.append((agent, tool, n, last, protection_words(rec, f, agent, tool, in_code, seen), p))
     if not rows:
         return []
     many = len({r[0] for r in rows}) > 1
@@ -239,16 +256,20 @@ def run_pull(rec: Any, prompt: Prompter, out: Out) -> int:
     except Exception as e:
         out(f"Checks     {e}")
         return 1
-    if f is None:
+    # §8 (SDK 0.5.2): the tools the held version protects from the console have fields to approve too.
+    from_console = list(rs["protect"]) if rs and isinstance(rs.get("protect"), dict) else []
+    if f is None and not from_console:
         out(f"Checks     no {p.name} here: signafaide protect writes one")
         return code
-    doc = to_version2(f)
+    doc = to_version2(f if f is not None else C.default_checks_file())
     agent = rec.default_agent
     changes: List[str] = []
     wait: List[str] = []
-    for name in sorted(doc["tools"]):
-        t = doc["tools"][name]
-        if not t.get("protect") or not rs:
+    now_file: List[str] = []
+    for name in sorted(set(doc["tools"]) | set(from_console)):
+        only_console = not (doc["tools"].get(name) or {}).get("protect") and name in from_console
+        t = doc["tools"].get(name) or {"protect": False}
+        if (not t.get("protect") and not only_console) or not rs:
             continue
         have = list(t.get("disclose") or [])
         uses = field_uses(rs, agent, name)
@@ -265,12 +286,21 @@ def run_pull(rec: Any, prompt: Prompter, out: Out) -> int:
                 wait.append(f"{name}: {field_words(fld)}")
         if have:
             t["disclose"] = have
-    v1 = C.checks_file_version(f) == 1
+            if only_console:
+                # A version 2 file lists fields only on a protected tool, so a client before 0.5.2
+                # still reads it: the checks file now protects the tool too.
+                t["protect"] = True
+                doc["tools"][name] = t
+                now_file.append(name)
+    v1 = f is not None and C.checks_file_version(f) == 1
     if changes or v1:
         write_checks_file(p, doc)
         rec.checks.forget()
         what = [f"{n} sends {', '.join(field_words(x) for x in doc['tools'][n]['disclose'])}" for n in dict.fromkeys(changes)]
         out(f"Changed    {p.name}     " + "; ".join((["now version 2 (each tool Protected or Not protected, On or Calibrating)"] if v1 else []) + what))
+        for n in now_file:
+            out(f"           {n} was protected from the console only; {p.name} now protects it too (a checks file lists the fields to send only for a protected "
+                "tool), so Unprotect in the console no longer unprotects it")
         out("Commit it. Until then, a call a rule needs one of these fields for is blocked and the error says to run pull.")
     else:
         out(f"Checks     {p.name} is up to date")
@@ -556,6 +586,16 @@ def run_prove(rec: Any, prompt: Prompter, out: Out, tool: Optional[str] = None, 
         out(f"  Tools      {agent} has {plural(len(declared), 'tool')}, {'all ' + str(rcd) if rcd == len(declared) else rcd} recorded, {prot} protected")
     else:
         out(f"  Tools      {agent} has not declared its tool list (declare_tools), so the proof cannot show every tool is recorded")
+    # Where each protected tool's protection comes from (§8, SDK 0.5.2): never a surprise.
+    now_protected = sorted(n for n in protected_names(rec, f, chains[agent][1]) if not decl or n == decl)
+    if now_protected:
+        in_code = protected_in_code(rec)
+        held = rec.checks.held_rules()
+
+        def src(n: str) -> List[str]:
+            got = (["code"] if n in in_code else []) + (["checks_file"] if f and C.tool_settings(f, n)["strict"] else []) + (["console"] if C.console_protects(held, n) else [])
+            return got or ["code"]
+        out("  Protected  " + "; ".join(f"{n} {C.source_words(src(n), held['version'] if held else None)}" for n in now_protected))
     from . import verify
 
     try:

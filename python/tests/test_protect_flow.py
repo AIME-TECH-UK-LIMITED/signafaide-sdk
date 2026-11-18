@@ -189,7 +189,7 @@ def test_the_mockup_session(flow, capsys):
     code, out = run(capsys, "status")
     lines = out.splitlines()
     assert re.match(r"^tool\s+recorded\s+protected\s+proof$", lines[0]), out
-    assert re.search(r"approve_payout\s+3 calls, last \d\d:\d\d\s+1 of 2 rules On, 1 Calibrating\s+intact", out), out
+    assert re.search(r"approve_payout\s+3 calls, last \d\d:\d\d\s+1 of 2 rules On, 1 Calibrating, by the code and the checks file\s+intact", out), out
     assert re.search(r"lookup_invoice\s+0 calls\s+Off\s+intact", out), out
 
     # prove: the link first, the calls, the rules in words, Before and the record.

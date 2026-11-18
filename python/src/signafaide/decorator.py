@@ -219,6 +219,11 @@ class _Spec:
         rec = runtime.get()
         _declare_before_call(rec, self.agent)
         meta = {"sdk": f"signafaide-python/{__version__}", **(self.meta or {})}
+        # Where a strict call's protection comes from (§8, SDK 0.5.2): code, checks file, console.
+        if plan is not None and plan.strict and plan.protected_by:
+            meta["protected_by"] = list(plan.protected_by)
+        elif plan is None and self.strict:
+            meta["protected_by"] = ["code"]
         extra = {"checks": plan.checks, "disclosed": plan.disclosed, "disclosed_salt": plan.disclosed_salt} if plan is not None else {}
         d = rec.write("decision", self.name, {"input": to_jsonable(args), "meta": to_jsonable(meta)}, agent=self.agent, store_content=self.store_content, **extra)
         return rec, d
@@ -230,8 +235,12 @@ class _Spec:
         """:meth:`_begin` with the tool-call checks (§8 steps 1 and 2) when a checks file is in
         place: the plan of the call, and its decision written with ``checks``."""
         rec = runtime.get()
-        # A tool protected in code is checked even without a checks file (every check On, §8).
-        if not rec.checks.enabled(protect=bool(self.strict)):
+        decl = declared_name(self.name)
+        # A tool protected in code, or from the console (the held rule set's `protect`, §8), is
+        # checked even without a checks file (every check On).
+        if not rec.checks.enabled(protect=bool(self.strict), tool=decl):
+            held = rec.checks.held_rules()
+            rec.checks.observe_console(decl, False, held["version"] if held else None)
             return self._begin(args, call_id), None
         # The checks name the tool as the envelope does (the wrapper's name, declared, §2.6); the
         # fingerprints cover what the agent is shown of it (§11.1).
@@ -380,6 +389,9 @@ class _Spec:
         call's span by it."""
         if runtime.recording_disabled():
             return fn()
+        # §8 (SDK 0.5.2): the rule set is fetched at start, with or without a checks file; while
+        # no version is held, a call waits for the first fetch (at most RULES_START_WAIT_MS).
+        runtime.get().checks.start_wait()
         begun, plan = self._checked_begin(args, call_id)
         if begun is None:
             return fn()
@@ -405,6 +417,7 @@ class _Spec:
     async def acall(self, args: Any, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]] = None, *, call_id: Optional[str] = None) -> Any:
         if runtime.recording_disabled():
             return await fn()
+        await asyncio.get_running_loop().run_in_executor(None, runtime.get().checks.start_wait)
         begun, plan = self._checked_begin(args, call_id)
         if begun is None:
             return await fn()

@@ -138,7 +138,7 @@ def rule_set_words(doc: dict, hash_: str, local: bool) -> dict:
         return None if local else s
 
     state_doc = {"mode": "enforce"} if local else doc
-    return {
+    out = {
         "set": "local" if local else doc["set"],
         "version": None if local else doc["version"],
         "hash": hash_,
@@ -150,6 +150,10 @@ def rule_set_words(doc: dict, hash_: str, local: bool) -> dict:
             for r in doc["rules"] for x in (r.get("exceptions") or [])
         ],
     }
+    # SDK 0.5.2: the tools the version protects from the console, only for a version that has them.
+    if not local and isinstance(doc.get("protect"), dict):
+        out["protect"] = [{"tool": t, "fail": "open" if doc["protect"][t].get("fail") == "open" else "closed"} for t in sorted(doc["protect"])]
+    return out
 
 
 def rule_set_lines(w: dict) -> List[str]:
@@ -166,4 +170,6 @@ def rule_set_lines(w: dict) -> List[str]:
     out.append(f"{label}: {w['default']['sentence']}{word(w['default']['state'])}")
     for x in w["exceptions"]:
         out.append(f"{label}: exception to rule {x['rule']} since version {x['since']}: {x['sentence']}, reason {canonicalize(x['reason']).decode()}")
+    for p in w.get("protect") or []:
+        out.append(f"{label}: protected from the console: {p['tool']}, if signafAIde can't be reached: {fail_word(p['fail'])}")
     return out

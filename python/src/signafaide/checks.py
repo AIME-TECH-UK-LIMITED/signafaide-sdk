@@ -25,6 +25,8 @@ from .jcs import canonicalize
 DISCLOSED_MAX_BYTES = 16_384
 RULING_TIMEOUT_MS = 10_000
 RULES_REFRESH_MS = 60_000
+#: How long a call waits for the first rule set fetch of a process when no version is held (§8, §9, SDK 0.5.2).
+RULES_START_WAIT_MS = 300
 FINGERPRINTS_REFRESH_MS = 60_000
 RULES_FORMAT = "signafaide-rules/1"
 LIST_FORMAT = "signafaide-fingerprints/1"
@@ -343,7 +345,7 @@ def rule_set_errors(doc: Any) -> Optional[str]:
     """The first problem with a rule set document (§10.1), or None when it is valid."""
     if not isinstance(doc, dict):
         return "a rule set is a JSON object"
-    err = _exact(doc, ("format", "project", "env", "set", "version", "prev", "issued", "mode", "default", "fail", "addresses", "approved", "rules"), ("fingerprint_exceptions",), "the rule set")
+    err = _exact(doc, ("format", "project", "env", "set", "version", "prev", "issued", "mode", "default", "fail", "addresses", "approved", "rules"), ("fingerprint_exceptions", "protect"), "the rule set")
     if err:
         return err
     try:
@@ -372,6 +374,20 @@ def rule_set_errors(doc: Any) -> Optional[str]:
     f = doc["fail"]
     if not isinstance(f, dict) or len(f) > 1000 or not all(_declared_name(k) and v in ("open", "closed") for k, v in f.items()):
         return "fail maps declared tool names to open or closed"
+    if "protect" in doc:
+        p = doc["protect"]
+        if not isinstance(p, dict) or not 1 <= len(p) <= 1000:
+            return "protect must be an object of 1 to 1,000 tools (left out when no tool is protected from the console)"
+        for name, e in p.items():
+            if not isinstance(e, dict):
+                return "protect maps declared tool names to {fail}"
+            err = _exact(e, ("fail",), (), f"protect.{name}")
+            if err:
+                return err
+            if not _declared_name(name) or e["fail"] not in ("open", "closed"):
+                return 'protect maps declared tool names to {"fail": "closed" | "open"}'
+            if name in f and f[name] != e["fail"]:
+                return f"{name} is in fail as {f[name]} and in protect as {e['fail']}: a tool named in both has the same fail mode"
     a = doc["addresses"]
     if not isinstance(a, dict) or set(a) != {"hosts", "cidrs"}:
         return "addresses must be {hosts, cidrs}"
@@ -1788,3 +1804,56 @@ def checks_lines(agent: str, j: dict) -> List[str]:
     if j["rule_sets"]:
         out.append(f"{agent}: rule sets used: " + ", ".join(f"local {x['hash'][:8]}" if x["set"] == "local" else f"{x['set']} version {x['version']}" for x in j["rule_sets"]))
     return out
+
+
+# --- protected from the console (SDK 0.5.2, §8, §10.1) -------------------------------------------
+
+def rule_set_fail(rs: Optional[dict], tool: Optional[str]) -> Optional[str]:
+    """The fail mode the held rule set gives *tool* (its ``fail``, else its ``protect``), when it names it."""
+    if not rs or tool is None:
+        return None
+    fail = rs.get("fail") if isinstance(rs.get("fail"), dict) else {}
+    if tool in fail:
+        return fail[tool]
+    protect = rs.get("protect") if isinstance(rs.get("protect"), dict) else {}
+    if tool in protect:
+        return protect[tool]["fail"]
+    return None
+
+
+def console_protects(rs: Optional[dict], tool: Optional[str]) -> bool:
+    """Whether the held rule set protects *tool* from the console (its ``protect`` names it)."""
+    return bool(rs) and tool is not None and isinstance(rs.get("protect"), dict) and tool in rs["protect"]
+
+
+def protection(rs: Optional[dict], file: Optional[dict], code: bool, tool: str) -> Optional[dict]:
+    """What protects *tool* (a declared name) and how its calls are checked (§8, SDK 0.5.2):
+    ``strict``, ``fail``, ``mode``, ``sources`` (``code``, ``checks_file``, ``console``, in that
+    order: ``meta.protected_by``) and ``disclose``; None when its calls are not checked at all.
+    ``vectors.json`` ``checks.console_protect``."""
+    console = console_protects(rs, tool)
+    if not file and not code and not console:
+        return None
+    ts = tool_settings(file, tool) if file else None
+    in_file = bool(ts and ts["strict"])
+    sources = [n for on, n in ((code, "code"), (in_file, "checks_file"), (console, "console")) if on]
+    strict = bool(sources)
+    if ts is None:
+        mode = "enforce"
+    elif in_file or not console:
+        mode = ts["mode"]
+    else:
+        t = (file.get("tools") or {}).get(tool) if file.get("format") == CHECKS_FORMAT_2 else None
+        mode = t["mode"] if isinstance(t, dict) and t.get("mode") in ("watch", "enforce") else "enforce"
+    fail = (rule_set_fail(rs, tool) or (ts["fail"] if in_file else "closed")) if strict else None
+    return {"strict": strict, "fail": fail, "mode": mode, "sources": sources, "disclose": list(ts["disclose"]) if ts else []}
+
+
+def source_words(sources: List[str], version: Optional[int] = None) -> str:
+    """Where a tool's protection comes from, in words (§8): ``by the code``, ``by the checks file``,
+    ``from the console (rule set version 4)``, joined with ``and`` (``by the code and the checks file``)."""
+    by = ["the code" if s == "code" else "the checks file" for s in sources if s != "console"]
+    parts = [f"by {' and '.join(by)}"] if by else []
+    if "console" in sources:
+        parts.append("from the console" + (f" (rule set version {version})" if version is not None else ""))
+    return " and ".join(parts)

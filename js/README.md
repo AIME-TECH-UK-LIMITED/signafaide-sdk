@@ -27,6 +27,8 @@ A protected tool asks signafAIde before it runs, every call, and signafAIde rule
 
 A tool wrapped with `protect(...)` in code (or `wrapTool(..., { strict: true })`) is protected also without `signafaide.checks.json`: every check on this machine runs On, as `init` writes them, the call asks signafAIde for a ruling, and its records carry `checks` with `strict: true`, so `status`, `prove`, `verify`, `check --ci` and the console count it as protected. A tool that is only recorded (`record(...)`) is unchanged, and `SIGNAFAIDE_CHECKS=0` still turns the checks off.
 
+Protect from the console (0.5.2): a person who presses Protect on a tool in the console protects it as `signafaide protect` does. Every program with an API key picks it up at start and within a minute: the tool's calls ask signafAIde for a ruling, with every local check On, and stop if signafAIde can't be reached unless the console says Let it run. Only a tool the SDK wraps (`record`, `protect`, `wrapTools`, a framework adapter or the gateway) can be protected this way, and no field of its arguments is sent until you approve it with `signafaide pull`. `signafaide status` says where each tool's protection comes from: the code, the checks file or the console.
+
 - `npx signafaide pull` fetches the rules saved in the console and asks before any new field of a protected tool leaves the machine.
 - `npx signafaide prove [tool] [--days N] [--files]` asks for a 30-day link, or the longest your plan allows, reuses an active link for the same tool, and sends the agent's public keys with it, so the auditor's browser check is complete. `--files` writes a pack instead. With `--days N` the witness may give the earlier link back: always on a plan with one active link (Free, or a sandbox nobody has kept), and on Solo and Team when the open link lasts N days or more (a longer request makes a new link). `prove` then says it is the earlier link, until when it is open and why, and how to get a new one: revoke it in the console (Share with an auditor), then run `prove --days N` again.
 - `npx signafaide login` signs you in (a code you approve in the console): after you keep the sandbox, rules are saved by a person, never by the agent's API key.
@@ -349,7 +351,7 @@ The MCP tools: `signafaide_setup` (a preview that changes, creates and sends not
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-js/0.5.1 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
+X-Signafaide-Client: signafaide-js/0.5.2 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
 ```
 
 It holds the SDK and its version, the JavaScript runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `vercel-ai`, `otel` for the OpenTelemetry processor, or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`, `signafaide agent setup`) and kept in `.signafaide/config.json`; it is never guessed per process, so a program started from a terminal inside a coding agent is not labelled as that agent. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.

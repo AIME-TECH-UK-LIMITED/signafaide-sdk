@@ -1,6 +1,6 @@
 [package]
 name = "signafaide-core"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 license = "Apache-2.0"
 description = "signafAIde protocol v1: canonical JSON, hashes, signatures, Merkle proofs, records and the verification-pack verifier"

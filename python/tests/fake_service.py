@@ -357,7 +357,7 @@ class FakeService:
     # --- tool-call checks -----------------------------------------------------
 
     def publish_rules(self, api_key, rules, *, mode="enforce", default="allow", fail=None, addresses=None, approved=None, issued=None, set_id="rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
-                      fingerprint_exceptions=None):
+                      fingerprint_exceptions=None, protect=None):
         """Publish a new rule set version for the key's project (§10)."""
         prj = self.projects[api_key]
         items = self.rule_items.setdefault(prj["project"], [])
@@ -368,6 +368,8 @@ class FakeService:
                "addresses": addresses or {"hosts": [], "cidrs": []}, "approved": approved, "rules": rules}
         if fingerprint_exceptions is not None:
             doc["fingerprint_exceptions"] = fingerprint_exceptions
+        if protect is not None:
+            doc["protect"] = protect
         item = {"rules": doc, "sig": self.key.sign("rules", hash_json(doc)), "service_key_id": self.key.key_id}
         items.append(item)
         return item
@@ -383,7 +385,7 @@ class FakeService:
             return err(400, "bad_request", "Someone published meanwhile: fetch the rule set, merge and try again.")
         d = body.get("draft") or {}
         item = self.publish_rules(api_key, d.get("rules"), mode=d.get("mode"), default=d.get("default"), fail=d.get("fail"), addresses=d.get("addresses"),
-                                  approved=d.get("approved"), fingerprint_exceptions=d.get("fingerprint_exceptions"))
+                                  approved=d.get("approved"), fingerprint_exceptions=d.get("fingerprint_exceptions"), protect=d.get("protect"))
         bad = C.rule_set_errors(item["rules"])
         if bad:
             items.pop()

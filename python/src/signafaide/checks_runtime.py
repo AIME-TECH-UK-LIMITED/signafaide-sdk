@@ -22,6 +22,7 @@ from .http import DEFAULT_URL, SignafaideError
 from .jcs import canonicalize, dumps
 from .state import atomic_write
 from .records import now, parse_time
+from .notes import development
 from .words import fail_word, mode_word, rule_words
 
 log = logging.getLogger("signafaide")
@@ -198,6 +199,9 @@ class Plan:
     held_block: Optional[CheckError] = None
     #: Notes for the caller (§8 notes): a possible hidden instruction in the call's arguments.
     notes: List[dict] = dataclasses.field(default_factory=list)
+    #: What protects a strict call (``meta.protected_by``, §8, SDK 0.5.2): ``code``,
+    #: ``checks_file``, ``console``, in that order; empty when the call is not strict.
+    protected_by: List[str] = dataclasses.field(default_factory=list)
 
 
 #: A protected call retries a failed request within its ruling timeout: first after this many ms,
@@ -280,6 +284,10 @@ class ChecksState:
         self._round_done = threading.Condition()
         self._wake = threading.Event()
         self._stop = threading.Event()
+        #: A call was checked: the shared list is fetched from then on (§8, SDK 0.5.2).
+        self._planned = False
+        #: Per tool, whether the held version protected it at its last call (the stderr line, §8).
+        self._console_seen: Dict[str, bool] = {}
 
     # --- the checks file ----------------------------------------------------------------
 
@@ -335,22 +343,90 @@ class ChecksState:
             self._file_error = msg + " (spec §8); fix it, or set SIGNAFAIDE_CHECKS=0 to turn checks off"
             raise CheckError(self._file_error, "state")
 
-    def enabled(self, protect: bool = False) -> bool:
+    def enabled(self, protect: bool = False, tool: Optional[str] = None) -> bool:
         """Whether checks are on: a checks file exists (valid or not). With *protect* (a tool
         protected in code) they are on unless ``SIGNAFAIDE_CHECKS=0`` turns them off: without a
-        checks file such a tool runs every check in On, as ``init`` would write them (§8)."""
+        checks file such a tool runs every check in On, as ``init`` would write them (§8). The
+        same holds for *tool* when the held rule set protects it from the console (SDK 0.5.2)."""
         p = self.path()
-        return p is not None and (protect or p.exists())
+        return p is not None and (protect or p.exists() or (tool is not None and self.console_protects(tool)))
 
-    def file_for(self, protect: bool) -> Optional[dict]:
-        """The checks file in force; for a tool protected in code with no checks file, the one
-        ``init`` writes with every check On (enforce): its calls are checked here and ruled by the
-        witness all the same (§8)."""
+    def console_protects(self, tool: str) -> bool:
+        """Whether the held rule set protects *tool* (a declared name) from the console (§8, SDK
+        0.5.2). Never while checks are off."""
+        if self.path() is None:
+            return False
+        return C.console_protects(self.held_rules(), tool)
+
+    def console_protects_any(self) -> bool:
+        """Whether the held rule set protects any tool from the console."""
+        if self.path() is None:
+            return False
+        rs = self.held_rules()
+        return bool(rs) and isinstance(rs.get("protect"), dict) and bool(rs["protect"])
+
+    def observe_console(self, tool: str, protected_now: bool, version: Optional[int], others: Optional[List[str]] = None) -> None:
+        """The stderr line of §8 (development only): the first call of a tool after the held
+        version starts or stops protecting it from the console. *others*: what else protects it."""
+        with self._lock:
+            before = self._console_seen.get(tool)
+            self._console_seen[tool] = protected_now
+        if not development(self.rec):
+            return
+        if protected_now and before is not True:
+            print(f"signafaide: {tool} is now protected from the console (rule set version {version})", file=sys.stderr)
+        elif not protected_now and before is True:
+            stays = f"; it stays protected {C.source_words(others)}" if others else ""
+            v = version if version is not None else "none"
+            print(f"signafaide: {tool} is no longer protected from the console (rule set version {v}){stays}", file=sys.stderr)
+
+    def start_wait(self) -> None:
+        """A call that starts while no rule set version is held and the first fetch of this
+        process is running waits for that fetch, at most ``RULES_START_WAIT_MS`` (§8, SDK 0.5.2)."""
+        if self.rec.test or not self.rec.api_key or self.path() is None:
+            return
+        self.start()
+        with self._round_done:
+            if self._rounds > 0 or self.held_rules_item() is not None:
+                return
+            self._round_done.wait_for(lambda: self._rounds > 0, timeout=C.RULES_START_WAIT_MS / 1000)
+
+    def wrapped_state(self, tool: str) -> str:
+        """Whether this program has shown *tool* to signafAIde (§8, SDK 0.5.2): ``wrapped`` (a
+        declaration lists it as recorded, or a call of it was seen in this process),
+        ``unrecorded`` (declared as not recorded), or ``unseen``."""
+        if tool in self._console_seen:
+            return "wrapped"
+        unrecorded = False
+        try:
+            for agent in self.rec.state.agents():
+                for tools in self.rec.state.tool_sources(agent).values():
+                    for n, r in tools.items():
+                        if declared_name(n) != tool:
+                            continue
+                        if r:
+                            return "wrapped"
+                        unrecorded = True
+        except Exception:  # noqa: BLE001 - no tool list held
+            pass
+        return "unrecorded" if unrecorded else "unseen"
+
+    def file_for(self, protect: bool, tool: Optional[str] = None) -> Optional[dict]:
+        """The checks file in force; for a tool protected in code (or from the console, *tool*)
+        with no checks file, the one ``init`` writes with every check On (enforce): its calls are
+        checked here and ruled by the witness all the same (§8)."""
         f = self.file()
-        if f is None and protect and self.path() is not None:
+        if f is None and (protect or (tool is not None and self.console_protects(tool))) and self.path() is not None:
             f = C.default_checks_file()
             f["mode"] = "enforce"
+            f["_default"] = True
         return f
+
+    def _other_sources(self, f: Optional[dict], tool: str, by_code: bool) -> List[str]:
+        out = ["code"] if by_code else []
+        if f is not None and not f.get("_default") and C.tool_settings(f, tool)["strict"]:
+            out.append("checks_file")
+        return out
 
     # --- held state ---------------------------------------------------------------------
 
@@ -553,7 +629,7 @@ class ChecksState:
 
     def start(self) -> None:
         """Fetch the rule set and the list now and every 60 s in the background (with an API key)."""
-        if self.rec.test or not self.rec.api_key:
+        if self.rec.test or not self.rec.api_key or self.path() is None:
             return
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
@@ -562,7 +638,8 @@ class ChecksState:
             self._thread.start()
 
     def _loop(self) -> None:
-        while not self._stop.is_set():
+        # A stopped recorder's fetcher stops too, so it never fetches for a program that ended.
+        while not self._stop.is_set() and not getattr(self.rec, "_stopped", False):
             try:
                 self.refresh()
             except Exception as e:  # noqa: BLE001 - the refresher never stops a program
@@ -580,6 +657,10 @@ class ChecksState:
         if not self.rec.api_key:
             return
         for name, fn in (("rules", self.pull_rules), ("fingerprints", self.pull_list)):
+            # Without a checks file the rule set is fetched for `protect` (§8); the shared list
+            # only once a call is checked (a checks file, a tool protected in code or from the console).
+            if name == "fingerprints" and not self._planned and not self.enabled() and not self.console_protects_any():
+                continue
             try:
                 fn()
             except SignafaideError as e:
@@ -711,17 +792,29 @@ class ChecksState:
         the OpenTelemetry plug-in, which never blocks (every entry in watch mode, not strict).
         *declared*: the declared name (§2.6) the checks use, when it is not the tool's own name
         cut (a wrapper's name for a framework tool named otherwise)."""
-        f = self.file_for(bool(strict_code or protect) and not telemetry)
+        decl = declared if declared is not None else declared_name(tool.name)
+        rs = self.held_rules()
+        # §8 (SDK 0.5.2): the held rule set's `protect` protects a tool the client wraps, as the
+        # checks file's `protect: true` would; never a telemetry span (it never blocks).
+        from_console = not telemetry and self.path() is not None and C.console_protects(rs, decl)
+        by_code = bool(strict_code or protect)
+        f = self.file_for((by_code or from_console) and not telemetry)
+        if not telemetry:
+            self.observe_console(decl, from_console, rs["version"] if rs else None,
+                                 self._other_sources(f, decl, by_code) if f is not None else (["code"] if by_code else []))
         if f is None:
             return None
+        self._planned = True
         self.start()
-        decl = declared if declared is not None else declared_name(tool.name)
         ts = C.tool_settings(f, decl)
         mode = "watch" if telemetry else ts["mode"]
+        if from_console and not ts["strict"]:
+            mode = C.protection(rs, f, False, decl)["mode"]
         file_fail = (f["tools"].get(decl) or {}).get("fail") if C.checks_file_version(f) == 1 and not protect else None
         cfg = {"strict": ts["strict"], "disclose": ts["disclose"], "fail": file_fail}
-        strict = False if telemetry else bool(strict_code or cfg.get("strict"))
-        rs = self.held_rules()
+        strict = False if telemetry else bool(strict_code or cfg.get("strict") or from_console)
+        protected_by = ([] if not strict else
+                        (["code"] if by_code else []) + (["checks_file"] if ts["strict"] and not f.get("_default") else []) + (["console"] if from_console else []))
         held = self.held_list()
         fps = C.tool_fingerprints(tool.name, tool.description or "", tool.input_schema, tool.server_info)
         on = f["checks"]
@@ -765,7 +858,7 @@ class ChecksState:
         result = C.combined(results)
         fail = None
         if strict:
-            fail = (rs["fail"].get(decl) if rs else None) or cfg.get("fail") or "closed"
+            fail = C.rule_set_fail(rs, decl) or cfg.get("fail") or "closed"
         disclose = cfg.get("disclose") or []
         # §10.4: a strict call sends the fields the held rule set can use for it that `disclose`
         # lists; a needed field it does not list makes the ruling fields_missing.
@@ -790,7 +883,8 @@ class ChecksState:
                   "strict": strict, "fail": fail, "disclosed": pointers, "disclosed_hash": C.disclosed_hash(values, salt) if pointers else None,
                   "call_id": cid}
         timeout = f.get("ruling_timeout_ms", C.RULING_TIMEOUT_MS)
-        plan = Plan(checks, strict, fail, timeout, values if pointers else None, salt, None, rs["version"] if rs else None, not_disclosed, decl, cfg.get("fail"), notes=notes)
+        plan = Plan(checks, strict, fail, timeout, values if pointers else None, salt, None, rs["version"] if rs else None, not_disclosed, decl, cfg.get("fail"), notes=notes,
+                    protected_by=protected_by)
         if result == "block":
             plan.blocked = self._block_error(decl, next(e for e in results if e["result"] == "block"), rs, f["rules"])
         elif strict and rs is not None and rs["mode"] == "enforce" and held_entry is not None and held_entry.get("enforce_result") == "block":
@@ -933,7 +1027,7 @@ class ChecksState:
         witness holds may say closed."""
         rs = self.held_rules()
         if rs is not None:
-            return ((rs["fail"].get(plan.declared) if plan.declared is not None else None) or plan.file_fail or plan.fail or "closed") != "open"
+            return (C.rule_set_fail(rs, plan.declared) or plan.file_fail or plan.fail or "closed") != "open"
         if self._no_rule_set:
             return plan.fail != "open"
         return True
@@ -994,13 +1088,16 @@ class ChecksState:
         """Step 5 (§8): the result checks of a call that ran (``secret``, ``hidden_instruction``),
         in the mode the checks file sets for *tool* (its declared name); *protect*: a tool
         protected in code, checked in On without a checks file."""
-        f = self.file_for(protect and not telemetry)
+        f = self.file_for(protect and not telemetry, None if telemetry else tool)
         if f is None:
             return []
         if telemetry:
             mode = "watch"
         elif tool is not None:
             mode = C.tool_settings(f, tool)["mode"]
+            # A tool protected from the console (§8): its checks are On unless the file names its mode.
+            if self.console_protects(tool) and not C.tool_settings(f, tool)["strict"]:
+                mode = C.protection(self.held_rules(), f, False, tool)["mode"]
         else:
             mode = f.get("mode", "watch")
         out: List[dict] = []
@@ -1031,7 +1128,7 @@ class ChecksState:
         """A wrapper is shown a tool's definition (§8 changed_tool): approve its fingerprints the
         first time, so a change before its first call is still a change."""
         try:
-            f = self.file_for(protect)
+            f = self.file_for(protect, declared)
             if f is None or not f["checks"]["changed_tool"] or not tool.name:
                 return
             rs = self.held_rules()
@@ -1059,11 +1156,17 @@ class ChecksState:
             f = self.file()
         except CheckError as e:
             return [f"checks: PROBLEM {e.message}"], True
+        real = f
         if f is None:
-            return [f"checks: off for tools not protected in code (no {path}; `signafaide protect` or `signafaide init` writes one); a tool protected in code runs every check in On"], False
+            if not self.console_protects_any():
+                return [f"checks: off for tools not protected in code or from the console (no {path}; `signafaide protect` or `signafaide init` writes one); "
+                        "a tool protected in code or from the console runs every check in On"], False
+            f = self.file_for(True)
         on = [k for k in C.FILE_CHECKS if f["checks"][k]]
         v2 = C.checks_file_version(f) == 2
-        if v2:
+        if real is None:
+            lines.append(f"checks: no {path}: only tools protected in code or from the console are checked, every check On ({', '.join(on)})")
+        elif v2:
             lines.append(f"checks: on, On or Calibrating per tool ({path}, version 2): protected tools are On, others Calibrating unless the file sets a tool's `mode`; checks on: {', '.join(on) or 'none'}")
         else:
             lines.append(f"checks: on, {mode_word(f['mode'])} ({path}, version 1: `mode` is \"{f['mode']}\"); checks on: {', '.join(on) or 'none'}")
@@ -1081,17 +1184,33 @@ class ChecksState:
         at = (_read(self.home / "fingerprints.at.json") or {}).get("fetched")
         lines.append(f"shared fingerprint list: seq {held['seq']}, {len(held['entries'])} entries ({_age(at)})" if held else "shared fingerprint list: none held")
         lines.append(f"ruling timeout: {f.get('ruling_timeout_ms', C.RULING_TIMEOUT_MS)} ms")
-        strict = self.strict_tools(f)
+        from_console = sorted(rs["protect"]) if rs and isinstance(rs.get("protect"), dict) else []
+        strict = sorted(set((self.strict_tools(real) if real is not None else []) + from_console))
         word = "protected tool"
         for n in strict:
             t = C.tool_settings(f, n)
-            fail = (rs["fail"].get(n) if rs else None) or ("closed" if v2 else (f["tools"][n].get("fail") or "closed"))
-            lines.append(f"{word} {n}: if signafAIde can't be reached: {fail_word(fail)}{', local checks ' + mode_word(t['mode']) if v2 else ''}; discloses {', '.join(t['disclose']) or 'no field'}")
+            pr = C.protection(rs, real, False, n)
+            fail = C.rule_set_fail(rs, n) or (("closed" if v2 else (f["tools"][n].get("fail") or "closed")) if t["strict"] else "closed")
+            show_mode = v2 or real is None or not t["strict"]
+            lines.append(f"{word} {n}: if signafAIde can't be reached: {fail_word(fail)}{', local checks ' + mode_word(pr['mode']) if show_mode else ''}; "
+                         f"discloses {', '.join(t['disclose']) or 'no field'}; protected {C.source_words(pr['sources'], rs['version'] if rs else None)}")
+        # §8 (SDK 0.5.2): a tool the console protects that this program has not shown to signafAIde.
+        for n in from_console:
+            where = self.wrapped_state(n)
+            if where == "wrapped":
+                continue
+            if where == "unrecorded":
+                lines.append(f"{word} {n}: protected from the console (rule set version {rs['version']}), but the program declares it as not recorded: signafAIde never sees "
+                             "its calls, so it cannot protect them. Wrap it with record, protect or wrap_tools, or run it through the gateway")
+            else:
+                lines.append(f"{word} {n}: protected from the console (rule set version {rs['version']}), but no record or declaration of this program names it yet: if the "
+                             "program does not wrap it, signafAIde never sees its calls and cannot protect them (wrap it with record, protect or wrap_tools, or run it through the gateway)")
         if rs:
             for n in strict:
                 d = C.disclosure(rs, self.rec.default_agent, n, C.tool_settings(f, n)["disclose"])
                 if d["missing"]:
-                    lines.append(f"{word} {n}: rule set version {rs['version']} needs {', '.join(d['missing'])}: add them to its disclose list (`signafaide pull`), "
+                    m = ", ".join(d["missing"])
+                    lines.append(f"{word} {n}: rule set version {rs['version']} needs {m}: run `signafaide pull` to approve sending {m} (it adds them to its disclose list), "
                                  "or its protected calls are ruled block (fields_missing)")
                 if d["unsent"]:
                     lines.append(f"{word} {n}: Calibrating rules or exceptions of rule set version {rs['version']} can use {', '.join(d['unsent'])}, which it does not send: "

@@ -9,7 +9,7 @@ inputs:
   version:
     description: The signafaide version to run (npm and PyPI).
     required: false
-    default: "0.5.1"
+    default: "0.5.2"
   working-directory:
     description: The folder to check, relative to the repository (where signafaide.checks.json is).
     required: false
