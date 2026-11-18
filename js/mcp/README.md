@@ -10,6 +10,20 @@ run), `npx signafaide pull` (the console's rules), `npx signafaide prove <tool>`
 and `npx signafaide login` (a person's sign-in for saving rules). This server helps a coding agent
 with the rest: it previews the setup, explains errors, verifies records and shows status.
 
+A coding agent with no terminal runs `npx signafaide protect --yes`: it protects every tool that
+pays, deletes, sends messages, runs commands, pushes code or edits secrets or config, with a
+default rule that starts Calibrating (it blocks nothing until a person turns it On). On a project
+an API key cannot save rules in (made in the console, or a sandbox somebody kept), it keeps the
+rules in `signafaide.checks.json` and prints one console link per tool: pass those links to the
+person, who adds each rule with one click and then runs `npx signafaide pull` at a terminal to
+approve sending the fields it needs. A tool wrapped with `protect()` in code counts as protected
+with or without a checks file.
+
+In a cloud coding agent's sandbox, allow `signafaide.co.uk` and `api.signafaide.co.uk` in the
+environment's network settings; when the network refuses them, the SDK and these tools say so in
+one sentence, and records stay signed on the machine meanwhile. The SDK goes through
+`HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`, and skips the hosts `NO_PROXY` names.
+
 `npx signafaide agent setup` installs it for you in each coding agent's configuration, pinned to
 the SDK's version:
 

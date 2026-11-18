@@ -1,7 +1,8 @@
-"""The agent's tools. approve_payout pays money, so it is protected: it runs only when the rules
-allow it. Here the rule is in signafaide.checks.json, on this machine ("block when amount is above
-1,000", On). lookup_invoice only reads, so it is recorded. Every call is signed and recorded in
-.signafaide/."""
+"""The agent's tools. approve_payout pays money, so it is protected ("protect": true in
+signafaide.checks.json): every call runs the local checks in On, the rule on this machine blocks it
+when the amount is above 1,000, and a call the rule lets through runs only when signafAIde rules
+allow (a key or sandbox: signafaide init). lookup_invoice only reads, so it is recorded. Every call
+is signed and recorded in .signafaide/."""
 
 import signafaide
 from agents import RunContextWrapper, function_tool

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from signafaide.checks import checks_file_errors
+from signafaide.checks import checks_file_errors, tool_settings
 from signafaide.ci_check import ci_check, risk_of
 from signafaide.cli import main
 from signafaide.protect_cli import tool_kind
@@ -222,3 +222,6 @@ def test_the_python_starter_template_passes_as_shipped():
     r = ci_check(Path(__file__).resolve().parents[2] / "templates" / "openai-agents-python")
     assert r.ok, r.unprotected
     assert r.protected == 1
+    f = json.loads((Path(__file__).resolve().parents[2] / "templates" / "openai-agents-python" / "signafaide.checks.json").read_text())
+    assert f["tools"]["approve_payout"] == {"protect": True, "mode": "enforce"}
+    assert tool_settings(f, "approve_payout")["strict"] is True
