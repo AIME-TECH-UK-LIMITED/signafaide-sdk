@@ -1822,6 +1822,1008 @@
         "three": 3.0
       }
     },
+    "console_protect": {
+      "about": "SDK 0.5.2 (SPEC 8, 10.1): a tool a person protected from the console with the rule set's protect map. For each case (the held rule set, the checks file or null, the tools protected in code) and each tool: null when its calls are not checked at all, else strict, the fail mode (null when not strict), the mode of the client's own checks and local rules, protected_by (meta.protected_by of a strict decision), the fields the developer approved (the console approves none), and for a strict call under a held version the fields sent, missing (an On rule's call is ruled fields_missing) and unsent (§10.4). words: the version in words with its protect lines (§7). v4_both: valid, a tool in fail and protect with the same fail mode.",
+      "cases": [
+        {
+          "code": [],
+          "expect": {
+            "approve_payout": {
+              "disclose": [],
+              "fail": "closed",
+              "missing": [
+                "/amount",
+                "/payee/id"
+              ],
+              "mode": "enforce",
+              "protected_by": [
+                "console"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": [
+                "/currency",
+                "/payee/country",
+                "/payee/name"
+              ]
+            },
+            "delete_account": null,
+            "lookup_order": null,
+            "refund": {
+              "disclose": [],
+              "fail": "open",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "console"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": [
+                "/amount"
+              ]
+            },
+            "send_receipt": {
+              "disclose": [],
+              "fail": "closed",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "console"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": []
+            }
+          },
+          "file": null,
+          "name": "no checks file: the console protects approve_payout, refund and send_receipt",
+          "rule_set": "v4"
+        },
+        {
+          "code": [
+            "refund"
+          ],
+          "expect": {
+            "approve_payout": {
+              "disclose": [],
+              "fail": "closed",
+              "missing": [
+                "/amount",
+                "/payee/id"
+              ],
+              "mode": "enforce",
+              "protected_by": [
+                "console"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": [
+                "/currency",
+                "/payee/country",
+                "/payee/name"
+              ]
+            },
+            "delete_account": null,
+            "lookup_order": null,
+            "refund": {
+              "disclose": [],
+              "fail": "open",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "code",
+                "console"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": [
+                "/amount"
+              ]
+            },
+            "send_receipt": {
+              "disclose": [],
+              "fail": "closed",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "console"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": []
+            }
+          },
+          "file": null,
+          "name": "no checks file, refund also protected in code",
+          "rule_set": "v4"
+        },
+        {
+          "code": [],
+          "expect": {
+            "approve_payout": {
+              "disclose": [
+                "/amount"
+              ],
+              "fail": "closed",
+              "missing": [
+                "/payee/id"
+              ],
+              "mode": "watch",
+              "protected_by": [
+                "checks_file",
+                "console"
+              ],
+              "sent": [
+                "/amount"
+              ],
+              "strict": true,
+              "unsent": [
+                "/currency",
+                "/payee/country",
+                "/payee/name"
+              ]
+            },
+            "delete_account": {
+              "disclose": [],
+              "fail": null,
+              "mode": "watch",
+              "protected_by": [],
+              "strict": false
+            },
+            "lookup_order": {
+              "disclose": [],
+              "fail": null,
+              "mode": "watch",
+              "protected_by": [],
+              "strict": false
+            },
+            "refund": {
+              "disclose": [],
+              "fail": "open",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "console"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": [
+                "/amount"
+              ]
+            },
+            "send_receipt": {
+              "disclose": [],
+              "fail": "closed",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "console"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": []
+            }
+          },
+          "file": {
+            "addresses": {
+              "cidrs": [],
+              "hosts": [],
+              "resolve": false
+            },
+            "checks": {
+              "address": true,
+              "changed_tool": true,
+              "fingerprint": true,
+              "hidden_instruction": true,
+              "secret": true
+            },
+            "format": "signafaide-checks/1",
+            "mode": "watch",
+            "rules": null,
+            "tools": {
+              "approve_payout": {
+                "disclose": [
+                  "/amount"
+                ],
+                "fail": "open",
+                "strict": true
+              },
+              "send_receipt": {
+                "strict": false
+              }
+            }
+          },
+          "name": "version 1 file in watch mode: a tool protected only from the console runs its checks On",
+          "rule_set": "v4"
+        },
+        {
+          "code": [],
+          "expect": {
+            "approve_payout": {
+              "disclose": [
+                "/amount",
+                "/payee/id"
+              ],
+              "fail": "closed",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "checks_file",
+                "console"
+              ],
+              "sent": [
+                "/amount",
+                "/payee/id"
+              ],
+              "strict": true,
+              "unsent": [
+                "/currency",
+                "/payee/country",
+                "/payee/name"
+              ]
+            },
+            "delete_account": {
+              "disclose": [],
+              "fail": null,
+              "mode": "watch",
+              "protected_by": [],
+              "strict": false
+            },
+            "lookup_order": {
+              "disclose": [],
+              "fail": "closed",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "checks_file"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": []
+            },
+            "refund": {
+              "disclose": [],
+              "fail": "open",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "console"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": [
+                "/amount"
+              ]
+            },
+            "send_receipt": {
+              "disclose": [],
+              "fail": "closed",
+              "missing": [],
+              "mode": "watch",
+              "protected_by": [
+                "console"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": []
+            }
+          },
+          "file": {
+            "addresses": {
+              "cidrs": [],
+              "hosts": [],
+              "resolve": false
+            },
+            "checks": {
+              "address": true,
+              "changed_tool": true,
+              "fingerprint": true,
+              "hidden_instruction": true,
+              "secret": true
+            },
+            "format": "signafaide-checks/2",
+            "rules": null,
+            "tools": {
+              "approve_payout": {
+                "disclose": [
+                  "/amount",
+                  "/payee/id"
+                ],
+                "protect": true
+              },
+              "lookup_order": {
+                "protect": true
+              },
+              "refund": {
+                "protect": false
+              },
+              "send_receipt": {
+                "mode": "watch",
+                "protect": false
+              }
+            }
+          },
+          "name": "version 2 file: an explicit mode stays, a listed tool not protected there is protected from the console",
+          "rule_set": "v4"
+        },
+        {
+          "code": [],
+          "expect": {
+            "approve_payout": {
+              "disclose": [
+                "/amount",
+                "/payee/id"
+              ],
+              "fail": "closed",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "checks_file"
+              ],
+              "sent": [
+                "/amount",
+                "/payee/id"
+              ],
+              "strict": true,
+              "unsent": [
+                "/currency",
+                "/payee/country",
+                "/payee/name"
+              ]
+            },
+            "delete_account": {
+              "disclose": [],
+              "fail": null,
+              "mode": "watch",
+              "protected_by": [],
+              "strict": false
+            },
+            "lookup_order": {
+              "disclose": [],
+              "fail": "closed",
+              "missing": [],
+              "mode": "enforce",
+              "protected_by": [
+                "checks_file"
+              ],
+              "sent": [],
+              "strict": true,
+              "unsent": []
+            },
+            "refund": {
+              "disclose": [],
+              "fail": null,
+              "mode": "watch",
+              "protected_by": [],
+              "strict": false
+            },
+            "send_receipt": {
+              "disclose": [],
+              "fail": null,
+              "mode": "watch",
+              "protected_by": [],
+              "strict": false
+            }
+          },
+          "file": {
+            "addresses": {
+              "cidrs": [],
+              "hosts": [],
+              "resolve": false
+            },
+            "checks": {
+              "address": true,
+              "changed_tool": true,
+              "fingerprint": true,
+              "hidden_instruction": true,
+              "secret": true
+            },
+            "format": "signafaide-checks/2",
+            "rules": null,
+            "tools": {
+              "approve_payout": {
+                "disclose": [
+                  "/amount",
+                  "/payee/id"
+                ],
+                "protect": true
+              },
+              "lookup_order": {
+                "protect": true
+              },
+              "refund": {
+                "protect": false
+              },
+              "send_receipt": {
+                "mode": "watch",
+                "protect": false
+              }
+            }
+          },
+          "name": "version 2 file, a version without protect (1.1): unchanged",
+          "rule_set": "rule_states.rule_sets.v3"
+        },
+        {
+          "code": [],
+          "expect": {
+            "approve_payout": null,
+            "delete_account": null,
+            "lookup_order": null,
+            "refund": null,
+            "send_receipt": null
+          },
+          "file": null,
+          "name": "no checks file, a version without protect (1.1): nothing is checked",
+          "rule_set": "rule_states.rule_sets.v3"
+        },
+        {
+          "code": [
+            "delete_account"
+          ],
+          "expect": {
+            "approve_payout": {
+              "disclose": [
+                "/amount",
+                "/payee/id"
+              ],
+              "fail": "closed",
+              "mode": "enforce",
+              "protected_by": [
+                "checks_file"
+              ],
+              "strict": true
+            },
+            "delete_account": {
+              "disclose": [],
+              "fail": "closed",
+              "mode": "watch",
+              "protected_by": [
+                "code"
+              ],
+              "strict": true
+            },
+            "lookup_order": {
+              "disclose": [],
+              "fail": "closed",
+              "mode": "enforce",
+              "protected_by": [
+                "checks_file"
+              ],
+              "strict": true
+            },
+            "refund": {
+              "disclose": [],
+              "fail": null,
+              "mode": "watch",
+              "protected_by": [],
+              "strict": false
+            },
+            "send_receipt": {
+              "disclose": [],
+              "fail": null,
+              "mode": "watch",
+              "protected_by": [],
+              "strict": false
+            }
+          },
+          "file": {
+            "addresses": {
+              "cidrs": [],
+              "hosts": [],
+              "resolve": false
+            },
+            "checks": {
+              "address": true,
+              "changed_tool": true,
+              "fingerprint": true,
+              "hidden_instruction": true,
+              "secret": true
+            },
+            "format": "signafaide-checks/2",
+            "rules": null,
+            "tools": {
+              "approve_payout": {
+                "disclose": [
+                  "/amount",
+                  "/payee/id"
+                ],
+                "protect": true
+              },
+              "lookup_order": {
+                "protect": true
+              },
+              "refund": {
+                "protect": false
+              },
+              "send_receipt": {
+                "mode": "watch",
+                "protect": false
+              }
+            }
+          },
+          "name": "no rule set held: only the code and the file protect",
+          "rule_set": null
+        }
+      ],
+      "v4": {
+        "hash": "0f62d3bbee560e7b78f9482b93041bd1d662565ccf0b689b396dc25519ae1c56",
+        "rules": {
+          "addresses": {
+            "cidrs": [
+              "10.20.0.0/16"
+            ],
+            "hosts": [
+              "*.corp.example"
+            ]
+          },
+          "approved": null,
+          "default": "allow",
+          "env": "live",
+          "fail": {
+            "approve_payout": "closed"
+          },
+          "format": "signafaide-rules/1",
+          "issued": "2026-11-18T09:00:00.000Z",
+          "mode": "enforce",
+          "prev": "0706945dd3c6536c64234c96010cfc5b9c011996ba4fd19fb750386d23cbfdbe",
+          "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+          "protect": {
+            "approve_payout": {
+              "fail": "closed"
+            },
+            "refund": {
+              "fail": "open"
+            },
+            "send_receipt": {
+              "fail": "closed"
+            }
+          },
+          "rules": [
+            {
+              "about": "Agents never delete accounts.",
+              "action": "block",
+              "agents": null,
+              "id": "no-delete",
+              "tools": [
+                "delete_account"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payouts over 1000 need a person.",
+              "action": "block",
+              "agents": null,
+              "exceptions": [
+                {
+                  "field": "/payee/name",
+                  "reason": "Quarterly rent, approved by finance.",
+                  "since": 3,
+                  "value": "Harbour Lane Supplies Ltd"
+                }
+              ],
+              "id": "payout-limit",
+              "state": "on",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "gt",
+                  "value": 1000
+                }
+              ]
+            },
+            {
+              "about": "Only GBP and EUR.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-currency",
+              "state": "calibrating",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/currency",
+                  "op": "not_in",
+                  "value": [
+                    "GBP",
+                    "EUR"
+                  ]
+                }
+              ]
+            },
+            {
+              "about": "No payouts to country XX.",
+              "action": "block",
+              "agents": null,
+              "id": "payee-country",
+              "state": "calibrating",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/payee/country",
+                  "op": "eq",
+                  "value": "XX"
+                }
+              ]
+            },
+            {
+              "about": "Payouts of 250 or more, being calibrated.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-review",
+              "state": "calibrating",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "ge",
+                  "value": 250
+                }
+              ]
+            },
+            {
+              "about": "At most 2 payouts a minute per agent.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-rate",
+              "limit": {
+                "calls": 2,
+                "per": "agent_tool",
+                "seconds": 60
+              },
+              "state": "on",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payees with an account id.",
+              "action": "allow",
+              "agents": null,
+              "id": "known-payee",
+              "state": "on",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/payee/id",
+                  "op": "prefix",
+                  "value": "acct_"
+                }
+              ]
+            },
+            {
+              "about": "agent-b does not refund.",
+              "action": "block",
+              "agents": [
+                "agent-b"
+              ],
+              "id": "bot-b-no-refunds",
+              "tools": [
+                "refund"
+              ],
+              "when": []
+            },
+            {
+              "about": "Refunds over 500, being calibrated.",
+              "action": "block",
+              "agents": null,
+              "id": "refund-review",
+              "state": "calibrating",
+              "tools": [
+                "refund"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "gt",
+                  "value": 500
+                }
+              ]
+            }
+          ],
+          "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+          "version": 4
+        }
+      },
+      "v4_both": {
+        "addresses": {
+          "cidrs": [
+            "10.20.0.0/16"
+          ],
+          "hosts": [
+            "*.corp.example"
+          ]
+        },
+        "approved": null,
+        "default": "allow",
+        "env": "live",
+        "fail": {
+          "approve_payout": "closed",
+          "refund": "open"
+        },
+        "format": "signafaide-rules/1",
+        "issued": "2026-11-18T09:00:00.000Z",
+        "mode": "enforce",
+        "prev": "0706945dd3c6536c64234c96010cfc5b9c011996ba4fd19fb750386d23cbfdbe",
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "protect": {
+          "approve_payout": {
+            "fail": "closed"
+          },
+          "refund": {
+            "fail": "open"
+          },
+          "send_receipt": {
+            "fail": "closed"
+          }
+        },
+        "rules": [
+          {
+            "about": "Agents never delete accounts.",
+            "action": "block",
+            "agents": null,
+            "id": "no-delete",
+            "tools": [
+              "delete_account"
+            ],
+            "when": []
+          },
+          {
+            "about": "Payouts over 1000 need a person.",
+            "action": "block",
+            "agents": null,
+            "exceptions": [
+              {
+                "field": "/payee/name",
+                "reason": "Quarterly rent, approved by finance.",
+                "since": 3,
+                "value": "Harbour Lane Supplies Ltd"
+              }
+            ],
+            "id": "payout-limit",
+            "state": "on",
+            "tools": [
+              "approve_payout"
+            ],
+            "when": [
+              {
+                "field": "/amount",
+                "op": "gt",
+                "value": 1000
+              }
+            ]
+          },
+          {
+            "about": "Only GBP and EUR.",
+            "action": "block",
+            "agents": null,
+            "id": "payout-currency",
+            "state": "calibrating",
+            "tools": [
+              "approve_payout"
+            ],
+            "when": [
+              {
+                "field": "/currency",
+                "op": "not_in",
+                "value": [
+                  "GBP",
+                  "EUR"
+                ]
+              }
+            ]
+          },
+          {
+            "about": "No payouts to country XX.",
+            "action": "block",
+            "agents": null,
+            "id": "payee-country",
+            "state": "calibrating",
+            "tools": [
+              "approve_payout"
+            ],
+            "when": [
+              {
+                "field": "/payee/country",
+                "op": "eq",
+                "value": "XX"
+              }
+            ]
+          },
+          {
+            "about": "Payouts of 250 or more, being calibrated.",
+            "action": "block",
+            "agents": null,
+            "id": "payout-review",
+            "state": "calibrating",
+            "tools": [
+              "approve_payout"
+            ],
+            "when": [
+              {
+                "field": "/amount",
+                "op": "ge",
+                "value": 250
+              }
+            ]
+          },
+          {
+            "about": "At most 2 payouts a minute per agent.",
+            "action": "block",
+            "agents": null,
+            "id": "payout-rate",
+            "limit": {
+              "calls": 2,
+              "per": "agent_tool",
+              "seconds": 60
+            },
+            "state": "on",
+            "tools": [
+              "approve_payout"
+            ],
+            "when": []
+          },
+          {
+            "about": "Payees with an account id.",
+            "action": "allow",
+            "agents": null,
+            "id": "known-payee",
+            "state": "on",
+            "tools": [
+              "approve_payout"
+            ],
+            "when": [
+              {
+                "field": "/payee/id",
+                "op": "prefix",
+                "value": "acct_"
+              }
+            ]
+          },
+          {
+            "about": "agent-b does not refund.",
+            "action": "block",
+            "agents": [
+              "agent-b"
+            ],
+            "id": "bot-b-no-refunds",
+            "tools": [
+              "refund"
+            ],
+            "when": []
+          },
+          {
+            "about": "Refunds over 500, being calibrated.",
+            "action": "block",
+            "agents": null,
+            "id": "refund-review",
+            "state": "calibrating",
+            "tools": [
+              "refund"
+            ],
+            "when": [
+              {
+                "field": "/amount",
+                "op": "gt",
+                "value": 500
+              }
+            ]
+          }
+        ],
+        "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+        "version": 4
+      },
+      "words": {
+        "lines": [
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4, issued 2026-11-18T09:00:00.000Z: 9 rules",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: rule no-delete: Block delete_account (On)",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: rule payout-limit: Block approve_payout when amount is above 1,000, except when payee/name is \"Harbour Lane Supplies Ltd\" (On)",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: rule payout-currency: Block approve_payout when currency is not one of \"GBP\" or \"EUR\" (Calibrating)",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: rule payee-country: Block approve_payout when payee/country is \"XX\" (Calibrating)",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: rule payout-review: Block approve_payout when amount is at least 250 (Calibrating)",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: rule payout-rate: Block approve_payout when more than 2 calls in 1 minute by the same agent to the same tool (On)",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: rule known-payee: Allow approve_payout when payee/id starts with \"acct_\" (On)",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: rule bot-b-no-refunds: Block refund for agent agent-b (On)",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: rule refund-review: Block refund when amount is above 500 (Calibrating)",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: Allow every call that no rule matches (On)",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: exception to rule payout-limit since version 3: payee/name is \"Harbour Lane Supplies Ltd\", reason \"Quarterly rent, approved by finance.\"",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: protected from the console: approve_payout, if signafAIde can't be reached: Stop",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: protected from the console: refund, if signafAIde can't be reached: Let it run",
+          "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 4: protected from the console: send_receipt, if signafAIde can't be reached: Stop"
+        ],
+        "words": {
+          "default": {
+            "id": "default",
+            "sentence": "Allow every call that no rule matches",
+            "state": "on"
+          },
+          "exceptions": [
+            {
+              "reason": "Quarterly rent, approved by finance.",
+              "rule": "payout-limit",
+              "sentence": "payee/name is \"Harbour Lane Supplies Ltd\"",
+              "since": 3
+            }
+          ],
+          "hash": "0f62d3bbee560e7b78f9482b93041bd1d662565ccf0b689b396dc25519ae1c56",
+          "issued": "2026-11-18T09:00:00.000Z",
+          "protect": [
+            {
+              "fail": "closed",
+              "tool": "approve_payout"
+            },
+            {
+              "fail": "open",
+              "tool": "refund"
+            },
+            {
+              "fail": "closed",
+              "tool": "send_receipt"
+            }
+          ],
+          "rules": [
+            {
+              "id": "no-delete",
+              "sentence": "Block delete_account",
+              "state": "on"
+            },
+            {
+              "id": "payout-limit",
+              "sentence": "Block approve_payout when amount is above 1,000, except when payee/name is \"Harbour Lane Supplies Ltd\"",
+              "state": "on"
+            },
+            {
+              "id": "payout-currency",
+              "sentence": "Block approve_payout when currency is not one of \"GBP\" or \"EUR\"",
+              "state": "calibrating"
+            },
+            {
+              "id": "payee-country",
+              "sentence": "Block approve_payout when payee/country is \"XX\"",
+              "state": "calibrating"
+            },
+            {
+              "id": "payout-review",
+              "sentence": "Block approve_payout when amount is at least 250",
+              "state": "calibrating"
+            },
+            {
+              "id": "payout-rate",
+              "sentence": "Block approve_payout when more than 2 calls in 1 minute by the same agent to the same tool",
+              "state": "on"
+            },
+            {
+              "id": "known-payee",
+              "sentence": "Allow approve_payout when payee/id starts with \"acct_\"",
+              "state": "on"
+            },
+            {
+              "id": "bot-b-no-refunds",
+              "sentence": "Block refund for agent agent-b",
+              "state": "on"
+            },
+            {
+              "id": "refund-review",
+              "sentence": "Block refund when amount is above 500",
+              "state": "calibrating"
+            }
+          ],
+          "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+          "version": 4
+        }
+      }
+    },
     "cross_domain": [
       {
         "hash": "e93fdbd9ab9e89f30341ad95159b034db0146c5fbe6e3c7bd1556c527ec6d634",
@@ -19552,6 +20554,967 @@
                   "value": "x"
                 }
               ],
+              "id": "payout-limit",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "gt",
+                  "value": 1000
+                }
+              ]
+            },
+            {
+              "about": "Only GBP and EUR.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-currency",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/currency",
+                  "op": "not_in",
+                  "value": [
+                    "GBP",
+                    "EUR"
+                  ]
+                }
+              ]
+            },
+            {
+              "about": "At most 2 payouts a minute per agent.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-rate",
+              "limit": {
+                "calls": 2,
+                "per": "agent_tool",
+                "seconds": 60
+              },
+              "tools": [
+                "approve_payout"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payees with an account id.",
+              "action": "allow",
+              "agents": null,
+              "id": "known-payee",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/payee/id",
+                  "op": "prefix",
+                  "value": "acct_"
+                }
+              ]
+            },
+            {
+              "about": "agent-b does not refund.",
+              "action": "block",
+              "agents": [
+                "agent-b"
+              ],
+              "id": "bot-b-no-refunds",
+              "tools": [
+                "refund"
+              ],
+              "when": []
+            }
+          ],
+          "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+          "version": 1
+        }
+      },
+      {
+        "name": "protect is an empty object (left out when no tool is protected)",
+        "rules": {
+          "addresses": {
+            "cidrs": [
+              "10.20.0.0/16"
+            ],
+            "hosts": [
+              "*.corp.example"
+            ]
+          },
+          "approved": null,
+          "default": "allow",
+          "env": "live",
+          "fail": {
+            "approve_payout": "closed"
+          },
+          "format": "signafaide-rules/1",
+          "issued": "2026-11-17T09:00:00.000Z",
+          "mode": "enforce",
+          "prev": null,
+          "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+          "protect": {},
+          "rules": [
+            {
+              "about": "Agents never delete accounts.",
+              "action": "block",
+              "agents": null,
+              "id": "no-delete",
+              "tools": [
+                "delete_account"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payouts over 1000 need a person.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-limit",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "gt",
+                  "value": 1000
+                }
+              ]
+            },
+            {
+              "about": "Only GBP and EUR.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-currency",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/currency",
+                  "op": "not_in",
+                  "value": [
+                    "GBP",
+                    "EUR"
+                  ]
+                }
+              ]
+            },
+            {
+              "about": "At most 2 payouts a minute per agent.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-rate",
+              "limit": {
+                "calls": 2,
+                "per": "agent_tool",
+                "seconds": 60
+              },
+              "tools": [
+                "approve_payout"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payees with an account id.",
+              "action": "allow",
+              "agents": null,
+              "id": "known-payee",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/payee/id",
+                  "op": "prefix",
+                  "value": "acct_"
+                }
+              ]
+            },
+            {
+              "about": "agent-b does not refund.",
+              "action": "block",
+              "agents": [
+                "agent-b"
+              ],
+              "id": "bot-b-no-refunds",
+              "tools": [
+                "refund"
+              ],
+              "when": []
+            }
+          ],
+          "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+          "version": 1
+        }
+      },
+      {
+        "name": "protect is a list",
+        "rules": {
+          "addresses": {
+            "cidrs": [
+              "10.20.0.0/16"
+            ],
+            "hosts": [
+              "*.corp.example"
+            ]
+          },
+          "approved": null,
+          "default": "allow",
+          "env": "live",
+          "fail": {
+            "approve_payout": "closed"
+          },
+          "format": "signafaide-rules/1",
+          "issued": "2026-11-17T09:00:00.000Z",
+          "mode": "enforce",
+          "prev": null,
+          "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+          "protect": [
+            "approve_payout"
+          ],
+          "rules": [
+            {
+              "about": "Agents never delete accounts.",
+              "action": "block",
+              "agents": null,
+              "id": "no-delete",
+              "tools": [
+                "delete_account"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payouts over 1000 need a person.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-limit",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "gt",
+                  "value": 1000
+                }
+              ]
+            },
+            {
+              "about": "Only GBP and EUR.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-currency",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/currency",
+                  "op": "not_in",
+                  "value": [
+                    "GBP",
+                    "EUR"
+                  ]
+                }
+              ]
+            },
+            {
+              "about": "At most 2 payouts a minute per agent.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-rate",
+              "limit": {
+                "calls": 2,
+                "per": "agent_tool",
+                "seconds": 60
+              },
+              "tools": [
+                "approve_payout"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payees with an account id.",
+              "action": "allow",
+              "agents": null,
+              "id": "known-payee",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/payee/id",
+                  "op": "prefix",
+                  "value": "acct_"
+                }
+              ]
+            },
+            {
+              "about": "agent-b does not refund.",
+              "action": "block",
+              "agents": [
+                "agent-b"
+              ],
+              "id": "bot-b-no-refunds",
+              "tools": [
+                "refund"
+              ],
+              "when": []
+            }
+          ],
+          "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+          "version": 1
+        }
+      },
+      {
+        "name": "a protect entry without fail",
+        "rules": {
+          "addresses": {
+            "cidrs": [
+              "10.20.0.0/16"
+            ],
+            "hosts": [
+              "*.corp.example"
+            ]
+          },
+          "approved": null,
+          "default": "allow",
+          "env": "live",
+          "fail": {
+            "approve_payout": "closed"
+          },
+          "format": "signafaide-rules/1",
+          "issued": "2026-11-17T09:00:00.000Z",
+          "mode": "enforce",
+          "prev": null,
+          "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+          "protect": {
+            "refund": {}
+          },
+          "rules": [
+            {
+              "about": "Agents never delete accounts.",
+              "action": "block",
+              "agents": null,
+              "id": "no-delete",
+              "tools": [
+                "delete_account"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payouts over 1000 need a person.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-limit",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "gt",
+                  "value": 1000
+                }
+              ]
+            },
+            {
+              "about": "Only GBP and EUR.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-currency",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/currency",
+                  "op": "not_in",
+                  "value": [
+                    "GBP",
+                    "EUR"
+                  ]
+                }
+              ]
+            },
+            {
+              "about": "At most 2 payouts a minute per agent.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-rate",
+              "limit": {
+                "calls": 2,
+                "per": "agent_tool",
+                "seconds": 60
+              },
+              "tools": [
+                "approve_payout"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payees with an account id.",
+              "action": "allow",
+              "agents": null,
+              "id": "known-payee",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/payee/id",
+                  "op": "prefix",
+                  "value": "acct_"
+                }
+              ]
+            },
+            {
+              "about": "agent-b does not refund.",
+              "action": "block",
+              "agents": [
+                "agent-b"
+              ],
+              "id": "bot-b-no-refunds",
+              "tools": [
+                "refund"
+              ],
+              "when": []
+            }
+          ],
+          "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+          "version": 1
+        }
+      },
+      {
+        "name": "a protect entry is a fail mode, not an object",
+        "rules": {
+          "addresses": {
+            "cidrs": [
+              "10.20.0.0/16"
+            ],
+            "hosts": [
+              "*.corp.example"
+            ]
+          },
+          "approved": null,
+          "default": "allow",
+          "env": "live",
+          "fail": {
+            "approve_payout": "closed"
+          },
+          "format": "signafaide-rules/1",
+          "issued": "2026-11-17T09:00:00.000Z",
+          "mode": "enforce",
+          "prev": null,
+          "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+          "protect": {
+            "refund": "closed"
+          },
+          "rules": [
+            {
+              "about": "Agents never delete accounts.",
+              "action": "block",
+              "agents": null,
+              "id": "no-delete",
+              "tools": [
+                "delete_account"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payouts over 1000 need a person.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-limit",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "gt",
+                  "value": 1000
+                }
+              ]
+            },
+            {
+              "about": "Only GBP and EUR.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-currency",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/currency",
+                  "op": "not_in",
+                  "value": [
+                    "GBP",
+                    "EUR"
+                  ]
+                }
+              ]
+            },
+            {
+              "about": "At most 2 payouts a minute per agent.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-rate",
+              "limit": {
+                "calls": 2,
+                "per": "agent_tool",
+                "seconds": 60
+              },
+              "tools": [
+                "approve_payout"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payees with an account id.",
+              "action": "allow",
+              "agents": null,
+              "id": "known-payee",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/payee/id",
+                  "op": "prefix",
+                  "value": "acct_"
+                }
+              ]
+            },
+            {
+              "about": "agent-b does not refund.",
+              "action": "block",
+              "agents": [
+                "agent-b"
+              ],
+              "id": "bot-b-no-refunds",
+              "tools": [
+                "refund"
+              ],
+              "when": []
+            }
+          ],
+          "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+          "version": 1
+        }
+      },
+      {
+        "name": "a protect entry with an unknown key",
+        "rules": {
+          "addresses": {
+            "cidrs": [
+              "10.20.0.0/16"
+            ],
+            "hosts": [
+              "*.corp.example"
+            ]
+          },
+          "approved": null,
+          "default": "allow",
+          "env": "live",
+          "fail": {
+            "approve_payout": "closed"
+          },
+          "format": "signafaide-rules/1",
+          "issued": "2026-11-17T09:00:00.000Z",
+          "mode": "enforce",
+          "prev": null,
+          "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+          "protect": {
+            "refund": {
+              "agents": [
+                "agent-a"
+              ],
+              "fail": "closed"
+            }
+          },
+          "rules": [
+            {
+              "about": "Agents never delete accounts.",
+              "action": "block",
+              "agents": null,
+              "id": "no-delete",
+              "tools": [
+                "delete_account"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payouts over 1000 need a person.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-limit",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "gt",
+                  "value": 1000
+                }
+              ]
+            },
+            {
+              "about": "Only GBP and EUR.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-currency",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/currency",
+                  "op": "not_in",
+                  "value": [
+                    "GBP",
+                    "EUR"
+                  ]
+                }
+              ]
+            },
+            {
+              "about": "At most 2 payouts a minute per agent.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-rate",
+              "limit": {
+                "calls": 2,
+                "per": "agent_tool",
+                "seconds": 60
+              },
+              "tools": [
+                "approve_payout"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payees with an account id.",
+              "action": "allow",
+              "agents": null,
+              "id": "known-payee",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/payee/id",
+                  "op": "prefix",
+                  "value": "acct_"
+                }
+              ]
+            },
+            {
+              "about": "agent-b does not refund.",
+              "action": "block",
+              "agents": [
+                "agent-b"
+              ],
+              "id": "bot-b-no-refunds",
+              "tools": [
+                "refund"
+              ],
+              "when": []
+            }
+          ],
+          "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+          "version": 1
+        }
+      },
+      {
+        "name": "a protect entry's fail is not open or closed",
+        "rules": {
+          "addresses": {
+            "cidrs": [
+              "10.20.0.0/16"
+            ],
+            "hosts": [
+              "*.corp.example"
+            ]
+          },
+          "approved": null,
+          "default": "allow",
+          "env": "live",
+          "fail": {
+            "approve_payout": "closed"
+          },
+          "format": "signafaide-rules/1",
+          "issued": "2026-11-17T09:00:00.000Z",
+          "mode": "enforce",
+          "prev": null,
+          "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+          "protect": {
+            "refund": {
+              "fail": "stop"
+            }
+          },
+          "rules": [
+            {
+              "about": "Agents never delete accounts.",
+              "action": "block",
+              "agents": null,
+              "id": "no-delete",
+              "tools": [
+                "delete_account"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payouts over 1000 need a person.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-limit",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "gt",
+                  "value": 1000
+                }
+              ]
+            },
+            {
+              "about": "Only GBP and EUR.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-currency",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/currency",
+                  "op": "not_in",
+                  "value": [
+                    "GBP",
+                    "EUR"
+                  ]
+                }
+              ]
+            },
+            {
+              "about": "At most 2 payouts a minute per agent.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-rate",
+              "limit": {
+                "calls": 2,
+                "per": "agent_tool",
+                "seconds": 60
+              },
+              "tools": [
+                "approve_payout"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payees with an account id.",
+              "action": "allow",
+              "agents": null,
+              "id": "known-payee",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/payee/id",
+                  "op": "prefix",
+                  "value": "acct_"
+                }
+              ]
+            },
+            {
+              "about": "agent-b does not refund.",
+              "action": "block",
+              "agents": [
+                "agent-b"
+              ],
+              "id": "bot-b-no-refunds",
+              "tools": [
+                "refund"
+              ],
+              "when": []
+            }
+          ],
+          "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+          "version": 1
+        }
+      },
+      {
+        "name": "a protect entry names an empty tool name",
+        "rules": {
+          "addresses": {
+            "cidrs": [
+              "10.20.0.0/16"
+            ],
+            "hosts": [
+              "*.corp.example"
+            ]
+          },
+          "approved": null,
+          "default": "allow",
+          "env": "live",
+          "fail": {
+            "approve_payout": "closed"
+          },
+          "format": "signafaide-rules/1",
+          "issued": "2026-11-17T09:00:00.000Z",
+          "mode": "enforce",
+          "prev": null,
+          "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+          "protect": {
+            "": {
+              "fail": "closed"
+            }
+          },
+          "rules": [
+            {
+              "about": "Agents never delete accounts.",
+              "action": "block",
+              "agents": null,
+              "id": "no-delete",
+              "tools": [
+                "delete_account"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payouts over 1000 need a person.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-limit",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/amount",
+                  "op": "gt",
+                  "value": 1000
+                }
+              ]
+            },
+            {
+              "about": "Only GBP and EUR.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-currency",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/currency",
+                  "op": "not_in",
+                  "value": [
+                    "GBP",
+                    "EUR"
+                  ]
+                }
+              ]
+            },
+            {
+              "about": "At most 2 payouts a minute per agent.",
+              "action": "block",
+              "agents": null,
+              "id": "payout-rate",
+              "limit": {
+                "calls": 2,
+                "per": "agent_tool",
+                "seconds": 60
+              },
+              "tools": [
+                "approve_payout"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payees with an account id.",
+              "action": "allow",
+              "agents": null,
+              "id": "known-payee",
+              "tools": [
+                "approve_payout"
+              ],
+              "when": [
+                {
+                  "field": "/payee/id",
+                  "op": "prefix",
+                  "value": "acct_"
+                }
+              ]
+            },
+            {
+              "about": "agent-b does not refund.",
+              "action": "block",
+              "agents": [
+                "agent-b"
+              ],
+              "id": "bot-b-no-refunds",
+              "tools": [
+                "refund"
+              ],
+              "when": []
+            }
+          ],
+          "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+          "version": 1
+        }
+      },
+      {
+        "name": "a tool in fail and in protect with different fail modes",
+        "rules": {
+          "addresses": {
+            "cidrs": [
+              "10.20.0.0/16"
+            ],
+            "hosts": [
+              "*.corp.example"
+            ]
+          },
+          "approved": null,
+          "default": "allow",
+          "env": "live",
+          "fail": {
+            "approve_payout": "closed"
+          },
+          "format": "signafaide-rules/1",
+          "issued": "2026-11-17T09:00:00.000Z",
+          "mode": "enforce",
+          "prev": null,
+          "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+          "protect": {
+            "approve_payout": {
+              "fail": "open"
+            }
+          },
+          "rules": [
+            {
+              "about": "Agents never delete accounts.",
+              "action": "block",
+              "agents": null,
+              "id": "no-delete",
+              "tools": [
+                "delete_account"
+              ],
+              "when": []
+            },
+            {
+              "about": "Payouts over 1000 need a person.",
+              "action": "block",
+              "agents": null,
               "id": "payout-limit",
               "tools": [
                 "approve_payout"

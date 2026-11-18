@@ -16,6 +16,7 @@ import { nodeTransport } from "./nodehttp.js";
 import { now, type Receipt, type SignedRecord } from "./records.js";
 import { atomicWrite, monotonicMs } from "./state.js";
 import type { Recorder } from "./runtime.js";
+import { development } from "./notes.js";
 import { failWord, modeWord, ruleWords } from "./words.js";
 
 type Json = Record<string, any>;
@@ -64,6 +65,15 @@ export function registerSyncTool(name: string): void {
 /** @internal Forget the wrapped synchronous functions (tests). */
 export function resetSyncTools(): void {
   SYNC_TOOLS.clear();
+}
+
+/** Why the rule set's `protect` cannot make `tool` strict here: it is a plain synchronous function
+ * (§8, SDK 0.5.2). */
+export function syncConsoleMessage(tool: string, version: number): string {
+  return (
+    `${tool} is a synchronous function, and the console protects it (rule set version ${version}): a protected call waits for the witness's ruling, which a synchronous function's callers cannot await. ` +
+    `Make the function async, or protect it in code (\`protect(fn)\` returns an async function), or unprotect it in the console`
+  );
 }
 
 /** Why the checks file may not make `tool` strict: it is a plain synchronous function. */
@@ -234,6 +244,9 @@ export interface Plan {
   heldBlock?: SignafaideBlocked | null;
   /** Notes for the caller (§8 notes): a possible hidden instruction in the call's arguments. */
   notes: C.CallNote[];
+  /** What protects a strict call (`meta.protected_by`, §8, SDK 0.5.2): `code`, `checks_file`,
+   * `console`, in that order; empty when the call is not strict. */
+  protectedBy: string[];
 }
 
 export interface PlanOptions {
@@ -287,6 +300,8 @@ function age(at: unknown): string {
 }
 
 const LISTED = new WeakMap<object, ReadonlySet<string>>();
+/** The stand-in checks files of `fileFor`: a tool protected with no checks file. */
+const DEFAULTS = new WeakSet<object>();
 const HASHES = new WeakMap<object, string>();
 /** `hashJson` of a rule set or local rules, made once for each parsed copy. */
 function hashOf(doc: Json): string {
@@ -324,6 +339,13 @@ export class ChecksState {
   private timer?: ReturnType<typeof setInterval>;
   private refreshing: Promise<void> | null = null;
   private again = false;
+  /** The first fetch of this process (§8 protected from the console: a call waits for it). */
+  private first: Promise<void> | null = null;
+  private firstDone = false;
+  /** A call was checked: the shared list is fetched from then on. */
+  private planned = false;
+  /** Per tool, whether the held version protected it at its last call (the stderr line, §8). */
+  private consoleSeen = new Map<string, boolean>();
 
   constructor(private readonly rec: Recorder) {}
 
@@ -401,18 +423,81 @@ export class ChecksState {
   /** Whether checks are on: a checks file exists (valid or not). With `protect` (a tool protected
    * in code) they are on unless `SIGNAFAIDE_CHECKS=0` turns them off: without a checks file such a
    * tool runs every check in On, as `init` would write them (§8). */
-  enabled(protect = false): boolean {
+  enabled(protect = false, tool?: string): boolean {
     const p = this.path();
-    return p !== null && (protect || fs.existsSync(p));
+    return p !== null && (protect || fs.existsSync(p) || (tool !== undefined && this.consoleProtects(tool)));
+  }
+
+  /** Whether the held rule set protects `tool` (a declared name) from the console (§8, SDK 0.5.2).
+   * Never while checks are off. */
+  consoleProtects(tool: string): boolean {
+    if (this.path() === null) return false;
+    return C.consoleProtects(this.heldRules(), tool);
+  }
+
+  /** Whether the held rule set protects any tool from the console. */
+  consoleProtectsAny(): boolean {
+    if (this.path() === null) return false;
+    const rs = this.heldRules();
+    return !!rs && isObj(rs.protect) && Object.keys(rs.protect).length > 0;
+  }
+
+  /** The stderr line of §8 (development only): the first call of a tool after the held version
+   * starts or stops protecting it from the console. `others`: what else protects it. */
+  observeConsole(tool: string, protectedNow: boolean, version: number | null, others: string[] = []): void {
+    const before = this.consoleSeen.get(tool);
+    this.consoleSeen.set(tool, protectedNow);
+    if (!development(this.rec)) return;
+    if (protectedNow && before !== true) console.error(`signafaide: ${tool} is now protected from the console (rule set version ${version})`);
+    else if (!protectedNow && before === true) {
+      const stays = others.length ? `; it stays protected ${C.sourceWords(others)}` : "";
+      console.error(`signafaide: ${tool} is no longer protected from the console (rule set version ${version ?? "none"})${stays}`);
+    }
+  }
+
+  /** A call that may wait (§8): while no rule set version is held and the first fetch of this
+   * process is running, the promise of that fetch, at most `RULES_START_WAIT_MS`; else null. */
+  startWait(): Promise<void> | null {
+    if (this.rec.test || !this.rec.apiKey || this.path() === null) return null;
+    this.start();
+    if (this.firstDone || !this.first || this.heldRulesItem() !== null) return null;
+    return new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, C.RULES_START_WAIT_MS);
+      t.unref?.();
+      this.first!.then(
+        () => {
+          clearTimeout(t);
+          resolve();
+        },
+        () => {
+          clearTimeout(t);
+          resolve();
+        },
+      );
+    });
   }
 
   /** The checks file in force; for a tool protected in code with no checks file, the one `init`
    * writes with every check On (enforce): its calls are checked here and ruled by the witness all
    * the same (§8). */
-  fileFor(protect: boolean): Json | null {
+  fileFor(protect: boolean, tool?: string): Json | null {
     const f = this.file();
-    if (f === null && protect && this.path() !== null) return { ...C.defaultChecksFile(), mode: "enforce" };
+    if (f === null && (protect || (tool !== undefined && this.consoleProtects(tool))) && this.path() !== null) {
+      const d = { ...C.defaultChecksFile(), mode: "enforce" };
+      DEFAULTS.add(d);
+      return d;
+    }
     return f;
+  }
+
+  /** Whether `f` is the stand-in file of a tool protected with no checks file (`fileFor`). */
+  private isDefault(f: Json): boolean {
+    return DEFAULTS.has(f);
+  }
+
+  /** What protects `tool` besides the console: the code, the checks file. */
+  private otherSources(f: Json, tool: string, byCode: boolean): string[] {
+    return [...(byCode ? ["code"] : []), ...(!this.isDefault(f) && C.toolSettings(f, tool).strict ? ["checks_file"] : [])];
   }
 
   // --- held state ---------------------------------------------------------------------
@@ -635,7 +720,7 @@ export class ChecksState {
 
   /** Fetch the rule set and the list now and every 60 s in the background (with an API key). */
   start(): void {
-    if (this.rec.test || !this.rec.apiKey || this.timer) return;
+    if (this.rec.test || !this.rec.apiKey || this.timer || this.path() === null) return;
     this.timer = setInterval(() => this.wake(), C.RULES_REFRESH_MS);
     this.timer.unref?.();
     this.wake();
@@ -657,11 +742,13 @@ export class ChecksState {
       .catch(() => undefined)
       .finally(() => {
         this.refreshing = null;
+        this.firstDone = true;
         if (this.again) {
           this.again = false;
           this.wake();
         }
       });
+    this.first ??= this.refreshing;
   }
 
   /** @internal Wait for the background fetch in flight (tests). */
@@ -675,6 +762,9 @@ export class ChecksState {
       ["rules", () => this.pullRules(hold)],
       ["fingerprints", () => this.pullList(hold)],
     ] as const) {
+      // Without a checks file the rule set is fetched for `protect` (§8); the shared list only
+      // once a call is checked (a checks file, a tool protected in code or from the console).
+      if (name === "fingerprints" && !hold && !this.planned && !this.enabled() && !this.consoleProtectsAny()) continue;
       try {
         await fn();
       } catch (e) {
@@ -812,23 +902,31 @@ export class ChecksState {
    * carries, and the values a strict call discloses. Null when checks are off. Throws
    * `CheckError` (`state`) when the checks file is invalid and no good version is in force. */
   plan(tool: ToolInfo, agent: string, args: unknown, opts: PlanOptions = {}): Plan | null {
-    const f = this.fileFor(!opts.telemetry && !!(opts.strictCode || opts.protect));
-    if (!f) return null;
-    this.start();
     const telemetry = !!opts.telemetry;
     const decl = opts.declared ?? declaredName(tool.name);
+    const rs = this.heldRules();
+    // §8 (SDK 0.5.2): the held rule set's `protect` protects a tool the client wraps, as the
+    // checks file's `protect: true` would; never a telemetry span (it never blocks).
+    const fromConsole = !telemetry && this.path() !== null && C.consoleProtects(rs, decl);
+    const byCode = !!(opts.strictCode || opts.protect);
+    const f = this.fileFor(!telemetry && (byCode || fromConsole));
+    if (!telemetry) this.observeConsole(decl, fromConsole, rs ? rs.version : null, f ? this.otherSources(f, decl, byCode) : byCode ? ["code"] : []);
+    if (!f) return null;
+    this.planned = true;
+    this.start();
     const ts = C.toolSettings(f, decl);
-    const mode: string = telemetry ? "watch" : ts.mode;
+    let mode: string = telemetry ? "watch" : ts.mode;
+    if (fromConsole && !ts.strict) mode = C.protection(rs, f, false, decl)!.mode;
     const cfg: Json = { strict: ts.strict, disclose: ts.disclose, fail: C.checksFileVersion(f) === 1 ? f.tools[decl]?.fail : undefined };
     if (opts.protect) cfg.fail = undefined; // protect(fn): fail closed unless the rule set says otherwise
-    if (opts.syncOnly && !opts.strictCode && cfg.strict === true && !telemetry) {
-      const msg = `${decl} did not run: ${syncStrictMessage(decl, this.path() ?? CHECKS_FILE)} (spec §8)`;
-      this.problems[`strict ${decl}`] = syncStrictMessage(decl, this.path() ?? CHECKS_FILE);
-      this.markSyncStrict(decl);
-      throw new CheckError(msg, "state");
+    if (opts.syncOnly && !opts.strictCode && (cfg.strict === true || fromConsole) && !telemetry) {
+      const why = cfg.strict === true ? syncStrictMessage(decl, this.path() ?? CHECKS_FILE) : syncConsoleMessage(decl, rs!.version);
+      this.problems[`strict ${decl}`] = why;
+      if (cfg.strict === true) this.markSyncStrict(decl);
+      throw new CheckError(`${decl} did not run: ${why} (spec §8)`, "state");
     }
-    const strict = telemetry ? false : !!(opts.strictCode || cfg.strict);
-    const rs = this.heldRules();
+    const strict = telemetry ? false : !!(opts.strictCode || cfg.strict || fromConsole);
+    const protectedBy = strict ? [...(byCode ? ["code"] : []), ...(ts.strict && !this.isDefault(f) ? ["checks_file"] : []), ...(fromConsole ? ["console"] : [])] : [];
     const held = this.heldList();
     const fps = C.toolFingerprints(tool.name, tool.description ?? "", tool.inputSchema, tool.serverInfo ?? null);
     const on = f.checks;
@@ -870,7 +968,7 @@ export class ChecksState {
       if (f === argF) notes = C.callNotes(decl, "arguments", argF);
     }
     const result = C.combined(results);
-    const fail: "open" | "closed" | null = strict ? ((rs ? rs.fail[decl] : undefined) ?? cfg.fail ?? "closed") : null;
+    const fail: "open" | "closed" | null = strict ? (C.ruleSetFail(rs, decl) ?? cfg.fail ?? "closed") : null;
     const disclose: string[] = cfg.disclose ?? [];
     // §10.4: a strict call sends the fields the held rule set can use for it that `disclose`
     // lists; a needed field it does not list makes the ruling fields_missing.
@@ -923,6 +1021,7 @@ export class ChecksState {
       declared: decl,
       fileFail: cfg.fail ?? null,
       notes,
+      protectedBy,
     };
     if (result === "block") plan.blocked = this.blockError(decl, results.find((e) => e.result === "block")!, rs, f.rules);
     else if (strict && rs && rs.mode === "enforce" && heldEntry?.enforce_result === "block") plan.heldBlock = this.heldBlockError(decl, heldEntry, rs);
@@ -1099,7 +1198,7 @@ export class ChecksState {
   private failClosed(plan: Plan): boolean {
     const rs = this.heldRules();
     const decl = plan.declared;
-    if (rs) return ((decl !== undefined ? rs.fail[decl] : undefined) ?? plan.fileFail ?? plan.fail ?? "closed") !== "open";
+    if (rs) return (C.ruleSetFail(rs, decl) ?? plan.fileFail ?? plan.fail ?? "closed") !== "open";
     if (this.noRuleSet) return plan.fail !== "open";
     return true;
   }
@@ -1158,12 +1257,14 @@ export class ChecksState {
   resultEntries(output: unknown, telemetry = false, tool?: string, protect = false): Json[] {
     let f: Json | null;
     try {
-      f = this.fileFor(protect && !telemetry);
+      f = this.fileFor(protect && !telemetry, telemetry ? undefined : tool);
     } catch {
       return [];
     }
     if (!f) return [];
-    const mode = telemetry ? "watch" : tool !== undefined ? C.toolSettings(f, tool).mode : (f.mode ?? "watch");
+    let mode = telemetry ? "watch" : tool !== undefined ? C.toolSettings(f, tool).mode : (f.mode ?? "watch");
+    // A tool protected from the console (§8): its checks are On unless the file names its mode.
+    if (!telemetry && tool !== undefined && this.consoleProtects(tool) && !C.toolSettings(f, tool).strict) mode = C.protection(this.heldRules(), f, false, tool)!.mode;
     const out: Json[] = [];
     if (f.checks.secret) out.push(C.entry("secret", C.secretFindings(output, this.witnessHost(), true), mode));
     if (f.checks.hidden_instruction) out.push(C.entry("hidden_instruction", C.hiddenFindings(output), mode));
@@ -1196,12 +1297,13 @@ export class ChecksState {
   reviewTool(tool: ToolInfo, agent: string, declared: string): Review {
     let f: Json | null;
     try {
-      f = this.file();
+      f = this.fileFor(false, declared || undefined);
     } catch {
       return { withhold: false, line: null };
     }
     if (!f) return { withhold: false, line: null };
-    const mode = C.toolSettings(f, declared).mode;
+    let mode = C.toolSettings(f, declared).mode;
+    if (declared && this.consoleProtects(declared) && !C.toolSettings(f, declared).strict) mode = C.protection(this.heldRules(), f, false, declared)!.mode;
     const why: string[] = [];
     let block = false;
     const like = this.lookAlikeOf(f.checks, agent, tool, declared);
@@ -1254,7 +1356,7 @@ export class ChecksState {
    * time, so a change before its first call is still a change. */
   seen(tool: ToolInfo, agent: string, declared: string, protect = false): void {
     try {
-      const f = this.fileFor(protect);
+      const f = this.fileFor(protect, declared);
       if (!f || !f.checks.changed_tool || !tool.name) return;
       const rs = this.heldRules();
       if (rs && rs.approved !== null) return;
@@ -1266,6 +1368,28 @@ export class ChecksState {
   }
 
   // --- status (signafaide checks status) ----------------------------------------------
+
+  /** Whether this program has shown `tool` to signafAIde (§8, SDK 0.5.2): `wrapped` (a
+   * declaration lists it as recorded, or a call of it was seen in this process), `unrecorded`
+   * (declared as not recorded), or `unseen`. */
+  wrappedState(tool: string): "wrapped" | "unrecorded" | "unseen" {
+    if (this.consoleSeen.has(tool)) return "wrapped";
+    let unrecorded = false;
+    try {
+      for (const agent of this.rec.state.agents()) {
+        for (const tools of Object.values(this.rec.state.toolSources(agent))) {
+          for (const [n, r] of Object.entries(tools)) {
+            if (declaredName(n) !== tool) continue;
+            if (r) return "wrapped";
+            unrecorded = true;
+          }
+        }
+      }
+    } catch {
+      /* no tool list held */
+    }
+    return unrecorded ? "unrecorded" : "unseen";
+  }
 
   /** The tools the checks file makes strict (version 1 `strict`, version 2 `protect`), in name order. */
   strictTools(f: Json): string[] {
@@ -1285,11 +1409,18 @@ export class ChecksState {
     } catch (e) {
       return [[`checks: PROBLEM ${(e as Error).message}`], true];
     }
-    if (!f) return [[`checks: off for tools not protected in code (no ${p}; \`signafaide protect\` or \`signafaide init\` writes one); a tool protected in code runs every check in On`], false];
+    const real = f;
+    if (!f) {
+      if (!this.consoleProtectsAny()) return [[`checks: off for tools not protected in code or from the console (no ${p}; \`signafaide protect\` or \`signafaide init\` writes one); a tool protected in code or from the console runs every check in On`], false];
+      f = { ...C.defaultChecksFile(), mode: "enforce" };
+      DEFAULTS.add(f);
+    }
     const on = C.FILE_CHECKS.filter((k) => f!.checks[k]);
     const v2 = C.checksFileVersion(f) === 2;
     lines.push(
-      v2
+      !real
+        ? `checks: no ${p}: only tools protected in code or from the console are checked, every check On (${on.join(", ")})`
+        : v2
         ? `checks: on, On or Calibrating per tool (${p}, version 2): protected tools are On, others Calibrating unless the file sets a tool's \`mode\`; checks on: ${on.join(", ") || "none"}`
         : `checks: on, ${modeWord(f.mode)} (${p}, version 1: \`mode\` is "${f.mode}"); checks on: ${on.join(", ") || "none"}`,
     );
@@ -1305,17 +1436,30 @@ export class ChecksState {
     const at = readJson(path.join(this.home, "fingerprints.at.json"))?.fetched;
     lines.push(held ? `shared fingerprint list: seq ${held.seq}, ${held.entries.length} entries (${age(at)})` : "shared fingerprint list: none held");
     lines.push(`ruling timeout: ${f.ruling_timeout_ms ?? C.RULING_TIMEOUT_MS} ms`);
-    const strict = this.strictTools(f);
+    const fromConsole = rs && isObj(rs.protect) ? Object.keys(rs.protect) : [];
+    const strict = [...new Set([...(real ? this.strictTools(real) : []), ...fromConsole])].sort(byCodePoint);
     const word = "protected tool";
     for (const n of strict) {
       const t = C.toolSettings(f, n);
-      const fail = (rs ? rs.fail[n] : undefined) ?? (v2 ? "closed" : (f.tools[n].fail ?? "closed"));
-      lines.push(`${word} ${n}: if signafAIde can't be reached: ${failWord(fail)}${v2 ? `, local checks ${modeWord(t.mode)}` : ""}; discloses ${t.disclose.join(", ") || "no field"}`);
+      const pr = C.protection(rs, real, false, n)!;
+      const fail = C.ruleSetFail(rs, n) ?? (t.strict ? (v2 ? "closed" : (f.tools[n].fail ?? "closed")) : "closed");
+      const showMode = v2 || !real || !t.strict;
+      lines.push(`${word} ${n}: if signafAIde can't be reached: ${failWord(fail)}${showMode ? `, local checks ${modeWord(pr.mode)}` : ""}; discloses ${t.disclose.join(", ") || "no field"}; protected ${C.sourceWords(pr.sources, rs?.version)}`);
+    }
+    // §8 (SDK 0.5.2): a tool the console protects that this program has not shown to signafAIde.
+    for (const n of fromConsole.sort(byCodePoint)) {
+      const where = this.wrappedState(n);
+      if (where === "wrapped") continue;
+      lines.push(
+        where === "unrecorded"
+          ? `${word} ${n}: protected from the console (rule set version ${rs!.version}), but the program declares it as not recorded: signafAIde never sees its calls, so it cannot protect them. Wrap it with record, protect or wrapTools, or run it through the gateway`
+          : `${word} ${n}: protected from the console (rule set version ${rs!.version}), but no record or declaration of this program names it yet: if the program does not wrap it, signafAIde never sees its calls and cannot protect them (wrap it with record, protect or wrapTools, or run it through the gateway)`,
+      );
     }
     if (rs) {
       for (const n of strict) {
         const d = C.disclosure(rs, this.rec.defaultAgent, n, C.toolSettings(f, n).disclose);
-        if (d.missing.length) lines.push(`${word} ${n}: rule set version ${rs.version} needs ${d.missing.join(", ")}: add them to its disclose list (\`signafaide pull\`), or its protected calls are ruled block (fields_missing)`);
+        if (d.missing.length) lines.push(`${word} ${n}: rule set version ${rs.version} needs ${d.missing.join(", ")}: run \`signafaide pull\` to approve sending ${d.missing.join(", ")} (it adds them to its disclose list), or its protected calls are ruled block (fields_missing)`);
         if (d.unsent.length) lines.push(`${word} ${n}: Calibrating rules or exceptions of rule set version ${rs.version} can use ${d.unsent.join(", ")}, which it does not send: they are not calibrated until \`signafaide pull\` adds them`);
       }
     }
@@ -1329,7 +1473,8 @@ export class ChecksState {
     // Synchronous functions the checks file makes strict (seen by this or an earlier process).
     const marked = readJson(path.join(this.home, "sync-strict.json"));
     for (const t of new Set([...SYNC_TOOLS].map((x) => declaredName(x)).concat(isObj(marked) ? Object.keys(marked) : []))) {
-      if (C.toolSettings(f, t).strict && !(`strict ${t}` in this.problems)) this.problems[`strict ${t}`] = syncStrictMessage(t, p);
+      if (real && C.toolSettings(real, t).strict && !(`strict ${t}` in this.problems)) this.problems[`strict ${t}`] = syncStrictMessage(t, p);
+      else if (rs && C.consoleProtects(rs, t) && !(`strict ${t}` in this.problems)) this.problems[`strict ${t}`] = syncConsoleMessage(t, rs.version);
     }
     let problem = false;
     for (const name of Object.keys(this.problems).sort()) {

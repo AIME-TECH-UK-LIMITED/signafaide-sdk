@@ -54,7 +54,7 @@ def test_every_request_carries_the_header(recorder, service, monkeypatch):
     signafaide.flush()
     assert service.calls and len(service.client_ids) == len(service.calls)
     # Never guessed per process: a program started from a terminal inside a coding agent is not that agent.
-    assert all(c and c.startswith("signafaide-python/") and c.endswith("agent=unknown; via=sdk)") for c in service.client_ids)
+    assert all(c and c.startswith("signafaide-python/") and c.endswith("agent=unknown; via=sdk)") for c in service.client_ids), (service.client_ids, service.calls)
 
 
 def test_strict_flag_in_header(recorder, service):

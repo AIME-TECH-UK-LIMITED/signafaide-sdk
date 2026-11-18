@@ -222,7 +222,10 @@ class Spec {
   private decide(input: unknown, plan?: Plan | null): [Recorder, SignedRecord] {
     const rec = getRecorder();
     declareBeforeCall(rec, this.opts.agent);
-    const meta = { sdk: `signafaide-js/${VERSION}`, ...(this.opts.meta ?? {}) };
+    const meta: Record<string, unknown> = { sdk: `signafaide-js/${VERSION}`, ...(this.opts.meta ?? {}) };
+    // Where a strict call's protection comes from (§8, SDK 0.5.2): code, checks file, console.
+    if (plan?.strict && plan.protectedBy.length) meta.protected_by = plan.protectedBy;
+    else if (!plan && this.opts.strict) meta.protected_by = ["code"];
     const content = { input: toJsonable(input) ?? null, meta: toJsonable(meta) } as Record<string, unknown>;
     const extra = plan ? { checks: plan.checks, disclosed: plan.disclosed, disclosedSalt: plan.disclosedSalt } : {};
     return [rec, rec.write("decision", this.name, content, { agent: this.opts.agent, storeContent: this.opts.storeContent, ...extra })];
@@ -233,8 +236,13 @@ class Spec {
    * fingerprints cover what the agent is shown of it (§11.1). */
   private plan(input: unknown, callId?: string): Plan | null {
     const rec = getRecorder();
-    // A tool protected in code is checked even without a checks file (every check On, §8).
-    if (!rec.checks.enabled(!!this.opts.strict)) return null;
+    const decl = declaredName(this.name);
+    // A tool protected in code, or from the console (the held rule set's `protect`, §8), is
+    // checked even without a checks file (every check On).
+    if (!rec.checks.enabled(!!this.opts.strict, decl)) {
+      rec.checks.observeConsole(decl, false, rec.checks.heldRules()?.version ?? null);
+      return null;
+    }
     return rec.checks.plan(this.tool ?? { name: this.name }, this.opts.agent || rec.defaultAgent, toJsonable(input) ?? null, {
       strictCode: !!this.opts.strict,
       callId,
@@ -351,11 +359,18 @@ class Spec {
    * by it. */
   call(input: unknown, fn: () => unknown, callId?: string): unknown {
     if (recordingDisabled()) return this.opts.strict ? Promise.resolve().then(fn) : fn();
+    // §8 (SDK 0.5.2): the rule set is fetched at start, with or without a checks file, so a tool
+    // protected from the console is protected; a call that can wait waits for the first fetch
+    // while no version is held (at most RULES_START_WAIT_MS). A plain synchronous function cannot.
+    if (!this.syncOnly || this.opts.strict) {
+      const wait = getRecorder().checks.startWait();
+      if (wait) return wait.then(() => this.call(input, fn, callId));
+    } else getRecorder().checks.start();
     // The telemetry plug-in has already written the decision of the tool span that is running
     // now (it then writes the outcome too): one call, one decision. Not with tool-call checks on:
     // the wrapper then always writes its own decision with the checks, and asks for the ruling of
     // a strict call (§8); the plug-in leaves spans of the tools a wrapper records to it.
-    const held = telemetryHooks.adopt && !checksOn(!!this.opts.strict) ? telemetryHooks.adopt(this.name, callId) : null;
+    const held = telemetryHooks.adopt && !checksOn(!!this.opts.strict, declaredName(this.name)) ? telemetryHooks.adopt(this.name, callId) : null;
     if (held) return this.opts.strict ? this.strictCheck(held[0], held[1]).then(fn) : fn();
     let plan: Plan | null;
     try {
@@ -564,9 +579,9 @@ export function wrapTool<T>(tool: T, opts: WrapOptions & { name?: string } = {})
 }
 
 /** Whether tool-call checks are on for the recorder in use (a checks file is in place). */
-function checksOn(protect = false): boolean {
+function checksOn(protect = false, tool?: string): boolean {
   try {
-    return getRecorder().checks.enabled(protect);
+    return getRecorder().checks.enabled(protect, tool);
   } catch {
     return false;
   }

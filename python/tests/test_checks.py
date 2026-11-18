@@ -290,6 +290,33 @@ def test_spec_1_1_words_and_checks_files(c):
         assert C.checks_file_errors(t["file"]) is not None, t["name"]
 
 
+def test_console_protect_vectors(c):
+    """SDK 0.5.2: a tool protected from the console (``checks.console_protect``)."""
+    from signafaide import words as W
+
+    cp = c["console_protect"]
+    v4 = cp["v4"]["rules"]
+    assert C.rule_set_errors(v4) is None and hash_json(v4) == cp["v4"]["hash"]
+    assert C.rule_set_errors(cp["v4_both"]) is None
+    docs = {"v4": v4, "rule_states.rule_sets.v3": c["rule_states"]["rule_sets"]["v3"]}
+    for t in cp["cases"]:
+        rs = None if t["rule_set"] is None else docs[t["rule_set"]]
+        if t["file"] is not None:
+            assert C.checks_file_errors(t["file"]) is None, t["name"]
+        for tool, want in t["expect"].items():
+            p = C.protection(rs, t["file"], tool in t["code"], tool)
+            if want is None:
+                assert p is None, (t["name"], tool)
+                continue
+            got = {"strict": p["strict"], "fail": p["fail"], "mode": p["mode"], "protected_by": p["sources"], "disclose": p["disclose"]}
+            if p["strict"] and rs:
+                got.update(C.disclosure(rs, "agent-a", tool, p["disclose"]))
+            assert got == want, (t["name"], tool)
+    words = W.rule_set_words(v4, cp["v4"]["hash"], False)
+    assert words == cp["words"]["words"]
+    assert W.rule_set_lines(words) == cp["words"]["lines"]
+
+
 def test_checks_file_schema():
     good = C.default_checks_file()
     assert C.checks_file_errors(good) is None

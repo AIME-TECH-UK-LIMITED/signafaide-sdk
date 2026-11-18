@@ -21,6 +21,8 @@ import {
 export const DISCLOSED_MAX_BYTES = 16_384;
 export const RULING_TIMEOUT_MS = 10_000;
 export const RULES_REFRESH_MS = 60_000;
+/** How long a call waits for the first rule set fetch of a process when no version is held (§8, §9, SDK 0.5.2). */
+export const RULES_START_WAIT_MS = 300;
 export const FINGERPRINTS_REFRESH_MS = 60_000;
 export const RULES_FORMAT = "signafaide-rules/1";
 export const LIST_FORMAT = "signafaide-fingerprints/1";
@@ -300,7 +302,7 @@ function rulesListErrors(rules: unknown, allowLimit = true, version: number | nu
 /** The first problem with a rule set document (§10.1), or null when it is valid. */
 export function ruleSetErrors(doc: unknown): string | null {
   if (!isObj(doc)) return "a rule set is a JSON object";
-  const err = exact(doc, ["format", "project", "env", "set", "version", "prev", "issued", "mode", "default", "fail", "addresses", "approved", "rules"], ["fingerprint_exceptions"], "the rule set");
+  const err = exact(doc, ["format", "project", "env", "set", "version", "prev", "issued", "mode", "default", "fail", "addresses", "approved", "rules"], ["fingerprint_exceptions", "protect"], "the rule set");
   if (err) return err;
   try {
     if (canonicalBytes(doc).length > MAX_RULE_SET_BYTES) return "the rule set's JCS form is more than 1 MiB";
@@ -318,6 +320,17 @@ export function ruleSetErrors(doc: unknown): string | null {
   if (doc.default !== "allow" && doc.default !== "block") return "default must be allow or block";
   const f = doc.fail;
   if (!isObj(f) || Object.keys(f).length > 1000 || !Object.entries(f).every(([k, v]) => declaredNameOk(k) && (v === "open" || v === "closed"))) return "fail maps declared tool names to open or closed";
+  if ("protect" in doc) {
+    const p = doc.protect;
+    if (!isObj(p) || Object.keys(p).length < 1 || Object.keys(p).length > 1000) return "protect must be an object of 1 to 1,000 tools (left out when no tool is protected from the console)";
+    for (const [name, e] of Object.entries(p)) {
+      if (!isObj(e)) return "protect maps declared tool names to {fail}";
+      const ee = exact(e, ["fail"], [], `protect.${name}`);
+      if (ee) return ee;
+      if (!declaredNameOk(name) || (e.fail !== "open" && e.fail !== "closed")) return 'protect maps declared tool names to {"fail": "closed" | "open"}';
+      if (Object.prototype.hasOwnProperty.call(f, name) && f[name] !== e.fail) return `${name} is in fail as ${f[name]} and in protect as ${e.fail}: a tool named in both has the same fail mode`;
+    }
+  }
   const a = doc.addresses;
   if (!sameSet(a, ["hosts", "cidrs"])) return "addresses must be {hosts, cidrs}";
   if (!Array.isArray(a.hosts) || a.hosts.length > 1000 || !a.hosts.every(hostPatternOk)) return "addresses.hosts holds lowercase names, or *. and a suffix";
@@ -1719,4 +1732,63 @@ export function checksLines(agent: string, j: AgentChecks): string[] {
   if (j.withheld.length) out.push(`${agent}: ${count(j.withheld.length, "tool result", "tool results")} withheld from the agent: seq ${j.withheld.join(", ")}`);
   if (j.rule_sets.length) out.push(`${agent}: rule sets used: ${j.rule_sets.map((x) => (x.set === "local" ? `local ${x.hash.slice(0, 8)}` : `${x.set} version ${x.version}`)).join(", ")}`);
   return out;
+}
+
+// --- protected from the console (SDK 0.5.2, §8, §10.1) -----------------------------------------
+
+/** The fail mode the held rule set gives `tool` (its `fail`, else its `protect`), when it names it. */
+export function ruleSetFail(rs: Json | null | undefined, tool: string | undefined): "open" | "closed" | undefined {
+  if (!rs || tool === undefined) return undefined;
+  const own = (o: unknown, k: string): boolean => isObj(o) && Object.prototype.hasOwnProperty.call(o, k);
+  if (own(rs.fail, tool)) return rs.fail[tool];
+  if (own(rs.protect, tool)) return rs.protect[tool].fail;
+  return undefined;
+}
+
+/** Whether the held rule set protects `tool` from the console (its `protect` names it). */
+export function consoleProtects(rs: Json | null | undefined, tool: string | undefined): boolean {
+  return !!rs && tool !== undefined && isObj(rs.protect) && Object.prototype.hasOwnProperty.call(rs.protect, tool);
+}
+
+/** What protects a tool, and how its calls are checked (§8, SDK 0.5.2). */
+export interface Protection {
+  strict: boolean;
+  fail: "open" | "closed" | null;
+  mode: "watch" | "enforce";
+  /** `code`, `checks_file`, `console`: each that protects the tool, in that order (`meta.protected_by`). */
+  sources: ("code" | "checks_file" | "console")[];
+  disclose: string[];
+}
+
+/** The protection of `tool` (a declared name) from the held rule set, the checks file and the
+ * code (`code`: strict in code); null when its calls are not checked at all. `vectors.json`
+ * `checks.console_protect`. */
+export function protection(rs: Json | null | undefined, file: Json | null | undefined, code: boolean, tool: string): Protection | null {
+  const console = consoleProtects(rs, tool);
+  if (!file && !code && !console) return null;
+  const ts = file ? toolSettings(file, tool) : null;
+  const inFile = !!ts?.strict;
+  const sources: Protection["sources"] = [];
+  if (code) sources.push("code");
+  if (inFile) sources.push("checks_file");
+  if (console) sources.push("console");
+  const strict = sources.length > 0;
+  let mode: "watch" | "enforce";
+  if (!ts) mode = "enforce";
+  else if (inFile || !console) mode = ts.mode;
+  else {
+    const t = file!.format === CHECKS_FORMAT_2 && isObj(file!.tools) && Object.prototype.hasOwnProperty.call(file!.tools, tool) ? file!.tools[tool] : undefined;
+    mode = t && (t.mode === "watch" || t.mode === "enforce") ? t.mode : "enforce";
+  }
+  const fail = strict ? (ruleSetFail(rs, tool) ?? (inFile ? ts!.fail : "closed")) : null;
+  return { strict, fail, mode, sources, disclose: ts ? [...ts.disclose] : [] };
+}
+
+/** Where a tool's protection comes from, in words (§8): `by the code`, `by the checks file`,
+ * `from the console (rule set version 4)`, joined with `and` (`by the code and the checks file`). */
+export function sourceWords(sources: readonly string[], version?: number | null): string {
+  const by = sources.filter((s) => s !== "console").map((s) => (s === "code" ? "the code" : "the checks file"));
+  const parts = by.length ? [`by ${by.join(" and ")}`] : [];
+  if (sources.includes("console")) parts.push(`from the console${version != null ? ` (rule set version ${version})` : ""}`);
+  return parts.join(" and ");
 }

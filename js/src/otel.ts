@@ -222,9 +222,9 @@ function claimed(tool: string, by: { id?: string; running?: boolean; began?: num
 }
 
 /** Whether tool-call checks are on for `rec` (a checks file is in place); never throws. */
-function checksOnFor(rec: Recorder, protect = false): boolean {
+function checksOnFor(rec: Recorder, protect = false, tool?: string): boolean {
   try {
-    return rec.checks.enabled(protect);
+    return rec.checks.enabled(protect, tool);
   } catch {
     return false;
   }
@@ -371,7 +371,7 @@ export class SignafaideSpanProcessor {
     // decision itself, with its checks and, when strict, the witness's ruling (§8). The span is
     // left to it: when it ends, the wrapper's call is matched to it as for a span that says only
     // at its end that it is a tool call, and recorded here only when no wrapper ran.
-    if (wrapperRecords(call.tool) && checksOnFor(rec, wrapperProtects(call.tool))) {
+    if (wrapperRecords(call.tool) && checksOnFor(rec, wrapperProtects(call.tool), declaredName(call.tool))) {
       this.keep(this.began, spanId, ++tick);
       return;
     }

@@ -5,7 +5,7 @@
 use super::{is_hex64, is_pointer, is_rule_id, is_set_id, safe_int};
 use serde_json::{Map, Value};
 use crate::{jcs, time, valid_agent_name, valid_project_id};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const FORMAT: &str = "signafaide-rules/1";
 /// A rule set's JCS form is at most 1 MiB (§9).
@@ -223,12 +223,22 @@ pub struct RuleSet {
     pub mode: Mode,
     pub default: Action,
     pub rules: Vec<Rule>,
+    /// `fail` (§10.1): the fail mode of named tools.
+    pub fail: BTreeMap<String, &'static str>,
     /// `fingerprint_exceptions` (§10.1): the `(kind, fingerprint)` pairs this project accepts
     /// despite the shared list; empty when the document has none.
     pub fingerprint_exceptions: BTreeSet<(String, String)>,
+    /// `protect` (§10.1, SDK 0.5.2): the tools a person protected from the console, each with its
+    /// fail mode (`open` or `closed`); empty when the document has none.
+    pub protect: BTreeMap<String, &'static str>,
 }
 
 impl RuleSet {
+    /// The fail mode the rule set gives `tool` (`fail`, else `protect`), when it names it.
+    pub fn fail_of(&self, tool: &str) -> Option<&'static str> {
+        self.fail.get(tool).copied().or_else(|| self.protect.get(tool).copied())
+    }
+
     /// Whether the rule set excepts the shared-list entry `kind` `fingerprint` (§10.1).
     pub fn excepts(&self, kind: &str, fingerprint: &str) -> bool {
         self.fingerprint_exceptions.contains(&(kind.to_string(), fingerprint.to_string()))
@@ -243,6 +253,14 @@ pub(crate) fn exact(o: &Map<String, Value>, keys: &[&str], optional: &[&str], wh
         return Err(format!("{what} lacks the field '{k}'"));
     }
     Ok(())
+}
+
+fn fail_word(v: &Value) -> Option<&'static str> {
+    match v.as_str() {
+        Some("open") => Some("open"),
+        Some("closed") => Some("closed"),
+        _ => None,
+    }
 }
 
 pub(crate) fn declared_name(v: &Value) -> bool {
@@ -269,7 +287,7 @@ impl RuleSet {
     /// Parse and validate a whole document (§10.1). The message names the first problem.
     pub fn parse(doc: &Value) -> Result<RuleSet, String> {
         let o = doc.as_object().ok_or("a rule set is a JSON object")?;
-        exact(o, &TOP_KEYS, &["fingerprint_exceptions"], "the rule set")?;
+        exact(o, &TOP_KEYS, &["fingerprint_exceptions", "protect"], "the rule set")?;
         let text = jcs::canonicalize(doc).map_err(|e| format!("the rule set is not canonical JSON: {e}"))?;
         if text.len() > MAX_DOCUMENT_BYTES {
             return Err(format!("the rule set's JCS form is {} bytes, more than 1 MiB", text.len()));
@@ -293,10 +311,23 @@ impl RuleSet {
             _ => return Err("`mode` must be \"watch\" (Calibrating) or \"enforce\" (On)".into()),
         };
         let default = Action::parse(&o["default"]).ok_or("default must be allow or block")?;
-        let fail = o["fail"].as_object().filter(|f| f.len() <= 1000).ok_or("fail must be an object of at most 1,000 tools")?;
-        for (name, f) in fail {
-            if !declared_name(&Value::String(name.clone())) || !matches!(f.as_str(), Some("open" | "closed")) {
-                return Err("fail maps declared tool names to open or closed".into());
+        let fail_obj = o["fail"].as_object().filter(|f| f.len() <= 1000).ok_or("fail must be an object of at most 1,000 tools")?;
+        let mut fail = BTreeMap::new();
+        for (name, f) in fail_obj {
+            let mode = fail_word(f).filter(|_| declared_name(&Value::String(name.clone()))).ok_or("fail maps declared tool names to open or closed")?;
+            fail.insert(name.clone(), mode);
+        }
+        let mut protect = BTreeMap::new();
+        if let Some(p) = o.get("protect") {
+            let p = p.as_object().filter(|p| (1..=1000).contains(&p.len())).ok_or("protect must be an object of 1 to 1,000 tools (left out when no tool is protected from the console)")?;
+            for (name, e) in p {
+                let e = e.as_object().ok_or("protect maps declared tool names to {fail}")?;
+                exact(e, &["fail"], &[], &format!("protect.{name}"))?;
+                let mode = fail_word(&e["fail"]).filter(|_| declared_name(&Value::String(name.clone()))).ok_or("protect maps declared tool names to {\"fail\": \"closed\" | \"open\"}")?;
+                if fail.get(name).is_some_and(|f| *f != mode) {
+                    return Err(format!("{name} is in fail as {} and in protect as {mode}: a tool named in both has the same fail mode", fail[name]));
+                }
+                protect.insert(name.clone(), mode);
             }
         }
         let a = o["addresses"].as_object().ok_or("addresses must be {hosts, cidrs}")?;
@@ -349,7 +380,7 @@ impl RuleSet {
                 return Err(format!("rule '{}': a rule set whose `mode` is \"watch\" (Calibrating) never blocks, so no rule in it is On", r.id));
             }
         }
-        Ok(RuleSet { project: project.into(), env: env.into(), set: set.into(), version, issued: issued.into(), mode, default, rules, fingerprint_exceptions })
+        Ok(RuleSet { project: project.into(), env: env.into(), set: set.into(), version, issued: issued.into(), mode, default, rules, fail, fingerprint_exceptions, protect })
     }
 
     /// The local rules of a checks file (§8): `{"default", "rules"}`, the rules as §10.1 writes
@@ -372,7 +403,9 @@ impl RuleSet {
             mode: Mode::Enforce,
             default,
             rules,
+            fail: BTreeMap::new(),
             fingerprint_exceptions: BTreeSet::new(),
+            protect: BTreeMap::new(),
         })
     }
 

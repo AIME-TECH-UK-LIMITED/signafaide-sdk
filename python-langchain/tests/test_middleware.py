@@ -224,3 +224,35 @@ def test_a_possible_hidden_instruction_is_a_note_handed_to_on_note(recorder):
     assert mw.wrap_tool_call(req, lambda r: msg) is msg
     assert [(n["in"], n["tool"], n["found"]) for n in got] == [("arguments", "get_weather", ["instruction_phrase"]), ("result", "get_weather", ["instruction_phrase"])]
     assert signafaide.notes(msg) == got
+
+
+def test_a_tool_protected_from_the_console_is_protected_through_the_middleware(recorder, monkeypatch):
+    """SDK 0.5.2 (SPEC §8): a person protects a tool in the console; the middleware's next call of
+    it asks the witness for a ruling, with no checks file and nothing in the code."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python" / "tests"))
+    from fake_service import FakeService
+
+    service = FakeService()
+    try:
+        monkeypatch.setenv("SIGNAFAIDE_URL", service.url)
+        r = runtime.configure(quiet=True, flush_interval=3600)
+        r.create_sandbox()
+        service.publish_rules(r.api_key, [], protect={"refund": {"fail": "closed"}})
+        r.checks.pull_rules()
+        agent = create_agent(model_calling(("get_weather", {"city": "Paris"}), ("refund", {"order": "A1", "amount": 12.5})), tools=[get_weather, refund],
+                             middleware=[SignafaideMiddleware(agent="support-bot")])
+        agent.invoke({"messages": [("user", "weather, then refund")]})
+        body = [x for x in records(r, "support-bot") if x["envelope"]["kind"] != "note"]
+        weather, refund_d = body[0], body[2]
+        assert "checks" not in weather["envelope"]
+        assert refund_d["envelope"]["checks"]["strict"] is True and refund_d["receipt"]["ruling"]["ruling"] == "allow"
+        assert refund_d["content"]["meta"]["protected_by"] == ["console"]
+        r._stopped = True
+        r._wake.set()
+        r._tool_stop.set()
+        atexit.unregister(r.close)
+    finally:
+        service.close()

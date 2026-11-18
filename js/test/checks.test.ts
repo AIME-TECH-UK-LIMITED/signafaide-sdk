@@ -271,6 +271,35 @@ describe("vectors.json checks", () => {
     for (const t of f.invalid) expect(C.checksFileErrors(t.file), t.name).not.toBeNull();
   });
 
+  it("SDK 0.5.2: a tool protected from the console (checks.console_protect)", () => {
+    const cp = c.console_protect;
+    const v4 = cp.v4.rules;
+    expect(C.ruleSetErrors(v4)).toBeNull();
+    expect(hashJson(v4)).toBe(cp.v4.hash);
+    expect(C.ruleSetErrors(cp.v4_both)).toBeNull();
+    const docs: Record<string, any> = { v4, "rule_states.rule_sets.v3": c.rule_states.rule_sets.v3 };
+    for (const t of cp.cases) {
+      const rs = t.rule_set === null ? null : docs[t.rule_set];
+      if (t.file !== null) expect(C.checksFileErrors(t.file), t.name).toBeNull();
+      for (const [tool, want] of Object.entries<any>(t.expect)) {
+        const p = C.protection(rs, t.file, t.code.includes(tool), tool);
+        if (want === null) {
+          expect(p, `${t.name} ${tool}`).toBeNull();
+          continue;
+        }
+        const got: any = { strict: p!.strict, fail: p!.fail, mode: p!.mode, protected_by: p!.sources, disclose: p!.disclose };
+        if (p!.strict && rs) {
+          const d = C.disclosure(rs, "agent-a", tool, p!.disclose);
+          Object.assign(got, { sent: d.sent, missing: d.missing, unsent: d.unsent });
+        }
+        expect(got, `${t.name} ${tool}`).toEqual(plain(want));
+      }
+    }
+    const words = W.ruleSetWords(v4, cp.v4.hash, false);
+    expect(plain(words)).toEqual(plain(cp.words.words));
+    expect(W.ruleSetLines(words)).toEqual(cp.words.lines);
+  });
+
   it("the checks file schema", () => {
     const good = C.defaultChecksFile();
     expect(C.checksFileErrors(good)).toBeNull();

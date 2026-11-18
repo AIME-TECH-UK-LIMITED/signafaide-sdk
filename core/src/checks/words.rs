@@ -182,6 +182,27 @@ pub struct RuleSetWords {
     /// The default in words, and its state (`on`, `calibrating` in watch mode; null for local).
     pub default: RuleWords,
     pub exceptions: Vec<ExceptionWords>,
+    /// SDK 0.5.2: the tools the version protects from the console (`protect`, §10.1), in code
+    /// point order; left out of the JSON for a version without `protect` (and for local rules).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protect: Option<Vec<ProtectWords>>,
+}
+
+/// One tool a rule set version protects from the console (§7 JSON output `rules[].protect`).
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct ProtectWords {
+    pub tool: String,
+    /// `closed` (Stop) or `open` (Let it run).
+    pub fail: &'static str,
+}
+
+/// A fail mode in words, as the console says it: `closed` is Stop, `open` is Let it run.
+pub fn fail_mode(fail: &str) -> &'static str {
+    if fail == "open" {
+        "Let it run"
+    } else {
+        "Stop"
+    }
 }
 
 /// A valid rule set version, or local rules (`local` true), in words.
@@ -199,6 +220,11 @@ pub fn rule_set(rs: &RuleSet, hash: &str, local: bool) -> RuleSetWords {
             .iter()
             .flat_map(|r| r.exceptions.iter().map(|e| ExceptionWords { rule: r.id.clone(), since: e.since, sentence: exception(e), reason: e.reason.clone() }))
             .collect(),
+        protect: (!local && !rs.protect.is_empty()).then(|| {
+            let mut tools: Vec<&String> = rs.protect.keys().collect();
+            tools.sort_by(|a, b| a.chars().cmp(b.chars()));
+            tools.into_iter().map(|t| ProtectWords { tool: t.clone(), fail: rs.protect[t] }).collect()
+        }),
     }
 }
 
@@ -225,6 +251,9 @@ pub fn lines(w: &RuleSetWords) -> Vec<String> {
     for e in &w.exceptions {
         let reason = jcs::canonicalize(&Value::String(e.reason.clone())).unwrap_or_default();
         out.push(format!("{label}: exception to rule {} since version {}: {}, reason {reason}", e.rule, e.since, e.sentence));
+    }
+    for p in w.protect.iter().flatten() {
+        out.push(format!("{label}: protected from the console: {}, if signafAIde can't be reached: {}", p.tool, fail_mode(p.fail)));
     }
     out
 }

@@ -356,7 +356,7 @@ export class FakeService {
   // --- tool-call checks -----------------------------------------------------------------
 
   /** Publish a new rule set version for the key's project (§10). */
-  publishRules(apiKey: string, rules: any[], o: { mode?: string; default?: string; fail?: any; addresses?: any; approved?: any; issued?: string; set?: string; fingerprintExceptions?: any[] } = {}): any {
+  publishRules(apiKey: string, rules: any[], o: { mode?: string; default?: string; fail?: any; addresses?: any; approved?: any; issued?: string; set?: string; fingerprintExceptions?: any[]; protect?: any } = {}): any {
     const prj = this.projects.get(apiKey);
     const items = this.ruleItems.get(prj.project) ?? [];
     this.ruleItems.set(prj.project, items);
@@ -376,6 +376,7 @@ export class FakeService {
       approved: o.approved ?? null,
       rules,
       ...(o.fingerprintExceptions ? { fingerprint_exceptions: o.fingerprintExceptions } : {}),
+      ...(o.protect ? { protect: o.protect } : {}),
     };
     const item = { rules: doc, sig: this.key.sign("rules", hashJson(doc)), service_key_id: this.key.keyId };
     items.push(item);
@@ -389,7 +390,7 @@ export class FakeService {
     const newest = items.at(-1)?.rules.version ?? null;
     if ((body.after ?? null) !== newest) return err(400, "bad_request", "Someone published meanwhile: fetch the rule set, merge and try again.");
     const d = body.draft ?? {};
-    const item = this.publishRules(apiKey, d.rules, { mode: d.mode, default: d.default, fail: d.fail, addresses: d.addresses, approved: d.approved, fingerprintExceptions: d.fingerprint_exceptions });
+    const item = this.publishRules(apiKey, d.rules, { mode: d.mode, default: d.default, fail: d.fail, addresses: d.addresses, approved: d.approved, fingerprintExceptions: d.fingerprint_exceptions, protect: d.protect });
     const bad = C.ruleSetErrors(item.rules);
     if (bad) {
       items.pop();

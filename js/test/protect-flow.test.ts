@@ -228,7 +228,7 @@ describe("protect, then the first blocked payout", () => {
     await getRecorder().flush();
     [c, out] = await cli("status");
     expect(out.split("\n")[0]).toMatch(/^tool\s+recorded\s+protected\s+proof$/);
-    expect(out).toMatch(/approve_payout\s+4 calls, last \d\d:\d\d\s+2 of 3 rules On, 1 Calibrating\s+intact/);
+    expect(out).toMatch(/approve_payout\s+4 calls, last \d\d:\d\d\s+2 of 3 rules On, 1 Calibrating, by the code and the checks file\s+intact/);
     expect(out).toMatch(/lookup_invoice\s+0 calls\s+Off\s+intact/);
 
     // prove: the link first, the calls, the rules in words, Before and the record.
