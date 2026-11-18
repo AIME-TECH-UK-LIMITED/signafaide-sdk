@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langchain-signafaide"
-version = "0.1.1"
+version = "0.1.2"
 description = "signafAIde for LangChain: audit evidence of every tool call an agent makes, signed and verifiable offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2."
 readme = "README.md"
 requires-python = ">=3.10"
