@@ -6,6 +6,6 @@
   "homepage": "https://signafaide.co.uk",
   "repository": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk",
   "license": "Apache-2.0",
-  "keywords": ["audit-trail", "ai-agents", "tamper-evidence", "compliance", "mcp"],
+  "keywords": ["audit-trail", "ai-agents", "tamper-evidence", "guardrails", "mcp"],
   "skills": "plugin/skills"
 }
