@@ -9,6 +9,12 @@ The record format changed between v0.1.1 and v0.1.2 (salted content hashes) and 
 (packs name their project), before any public release. Records and packs written by a version
 verify with that version and later ones unless an entry below says otherwise.
 
+## Unreleased
+
+Descriptions and README opener
+
+- The README openings and the package descriptions (`signafaide`, `signafaide-mcp`, `signafaide` for Python, `langchain-signafaide`) say what signafAIde does: it checks risky tool calls before they run, signs every call and lets an auditor verify offline. They no longer name EU AI Act, ISO/IEC 42001 or SOC 2 as what it is for. No code, protocol or record change.
+
 ## v0.5.2 (2026-11-18)
 
 Protect from the console (owner decision, issue #65: "i expect when i press the protect button i activate protect same as the cli command. i can also do the cli command if i want to"). The spec stays 1.1 (SPEC sections 6, 7, 8, 9 and 10); records do not change.
