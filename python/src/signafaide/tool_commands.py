@@ -424,7 +424,24 @@ def auditor_link_for(rec: Any, agent: str, tool: Optional[str], start: Optional[
         _links_file(rec).write_text(json.dumps(rest + [{**link, "agent": agent, "tool": tool, "from": start, "witness": rec.url}], indent=2) + "\n")
     except OSError:
         pass  # not kept: the next prove asks again
-    return link, False
+    return link, link.get("reused") is True
+
+
+def _reused_link_lines(rec: Any, link: dict, days: int, tool: Optional[str]) -> List[str]:
+    """Said when ``prove --days N`` got the link made earlier back instead of a new one: plainly
+    that it is the earlier link and until when, why, and how to get a new one."""
+    sandbox = False
+    try:
+        sandbox = (rec.client(timeout=10).project() or {}).get("claimed") is False
+    except Exception:  # unknown: said without the plan
+        pass
+    until = f", open until {_when(link['expires_at'])[:-6]}" if link.get("expires_at") else ""
+    why = "an unclaimed sandbox's plan allows one active link" if sandbox else "the witness gives this API key its open link again for the same agent, tool and start"
+    return [
+        f"           You asked for {days} {'day' if days == 1 else 'days'}: this is not a new link. The link made earlier is reused{until}, because {why}.",
+        f"           For a new link: {'keep the sandbox (the claim link from init), then ' if sandbox else ''}revoke this one in the console "
+        f"({site_of(rec.url)}, Share with an auditor), then run signafaide prove{' ' + tool if tool else ''} --days {days} again.",
+    ]
 
 
 def run_prove(rec: Any, prompt: Prompter, out: Out, tool: Optional[str] = None, agent: Optional[str] = None, files: bool = False,
@@ -474,6 +491,9 @@ def run_prove(rec: Any, prompt: Prompter, out: Out, tool: Optional[str] = None, 
             out("Send this link to your auditor (made earlier, still open):" if reused else "Send this link to your auditor:")
             until = f", until {_when(link['expires_at'])[:-6]}" if link.get("expires_at") else ""
             out(f"           {link['url']}   read only{until}")
+            if reused and days is not None:
+                for line in _reused_link_lines(rec, link, days, tool):
+                    out(line)
             if link.get("agent_keys") is True:
                 out("           They can check it in their browser; nothing to install.")
             else:

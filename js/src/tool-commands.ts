@@ -417,6 +417,7 @@ export async function runProve(rec: Recorder, o: ProveOptions): Promise<number> 
     if (link?.url) {
       out(reused ? "Send this link to your auditor (made earlier, still open):" : "Send this link to your auditor:");
       out(`           ${link.url}   read only${link.expires_at ? `, until ${when(link.expires_at).slice(0, -6)}` : ""}`);
+      if (reused && o.days !== undefined) for (const l of await reusedLinkLines(rec, link, o.days, o.tool)) out(l);
       if (link.agent_keys === true) out("           They can check it in their browser; nothing to install.");
       else {
         out("           The witness did not keep this agent's public keys with the link, so the browser check");
@@ -497,7 +498,24 @@ export async function runProve(rec: Recorder, o: ProveOptions): Promise<number> 
   return writeProofFiles(rec, { agent, tool: o.tool ?? null, from, out, prompt: o.prompt, content: o.content, dir: o.dir, records: recs });
 }
 
-type AuditorLink = { url: string; expires_at?: string; agent_keys?: boolean };
+type AuditorLink = { url: string; expires_at?: string; agent_keys?: boolean; reused?: boolean };
+
+/** Said when `prove --days N` got the link made earlier back instead of a new one: plainly that
+ * it is the earlier link and until when, why, and how to get a new one. */
+async function reusedLinkLines(rec: Recorder, link: AuditorLink, days: number, tool?: string): Promise<string[]> {
+  let sandbox = false;
+  try {
+    sandbox = (await rec.client(10_000).project())?.claimed === false;
+  } catch {
+    /* unknown: said without the plan */
+  }
+  const until = link.expires_at ? when(link.expires_at).slice(0, -6) : null;
+  const why = sandbox ? "an unclaimed sandbox's plan allows one active link" : "the witness gives this API key its open link again for the same agent, tool and start";
+  return [
+    `           You asked for ${days} ${days === 1 ? "day" : "days"}: this is not a new link. The link made earlier is reused${until ? `, open until ${until}` : ""}, because ${why}.`,
+    `           For a new link: ${sandbox ? "keep the sandbox (the claim link from init), then " : ""}revoke this one in the console (${siteOf(rec.url)}, Share with an auditor), then run npx signafaide prove${tool ? ` ${tool}` : ""} --days ${days} again.`,
+  ];
+}
 
 /** Links `prove` made, kept so a second `prove` reuses an active one (`.signafaide/auditor-links.json`). */
 function linksFile(rec: Recorder): string {
@@ -567,7 +585,7 @@ export async function auditorLinkFor(rec: Recorder, agent: string, tool: string 
   } catch {
     /* not kept: the next prove asks again */
   }
-  return { link, reused: false };
+  return { link, reused: link.reused === true };
 }
 
 /** `prove --files`: the pack (with the local rules its records name), the agent keys, the head

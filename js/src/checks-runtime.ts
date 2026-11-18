@@ -14,7 +14,7 @@ import { Client, DEFAULT_URL, SignafaideError } from "./http.js";
 import { canonicalBytes, canonicalize } from "./jcs.js";
 import { nodeTransport } from "./nodehttp.js";
 import { now, type Receipt, type SignedRecord } from "./records.js";
-import { monotonicMs } from "./state.js";
+import { atomicWrite, monotonicMs } from "./state.js";
 import type { Recorder } from "./runtime.js";
 import { failWord, modeWord, ruleWords } from "./words.js";
 
@@ -268,8 +268,7 @@ function pretty(value: unknown): string {
 
 function writeAtomic(p: string, text: string): void {
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p + ".tmp", text);
-  fs.renameSync(p + ".tmp", p);
+  atomicWrite(p, text);
 }
 
 function readJson(p: string): any {

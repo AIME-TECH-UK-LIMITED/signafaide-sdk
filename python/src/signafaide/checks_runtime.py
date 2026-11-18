@@ -20,6 +20,7 @@ from .coverage import declared_name
 from .crypto import hash_json, new_salt, verify_sig
 from .http import DEFAULT_URL, SignafaideError
 from .jcs import canonicalize, dumps
+from .state import atomic_write
 from .records import now, parse_time
 from .words import fail_word, mode_word, rule_words
 
@@ -231,16 +232,12 @@ def checks_path(root: Path) -> Optional[Path]:
 
 def _write_pretty(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
-    tmp.replace(path)
+    atomic_write(path, json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
 
 
 def _write_jcs(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(dumps(value))
-    tmp.replace(path)
+    atomic_write(path, dumps(value))
 
 
 def _read(path: Path) -> Any:

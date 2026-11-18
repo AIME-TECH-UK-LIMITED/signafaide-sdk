@@ -1581,8 +1581,10 @@ def checks_file_errors(doc: Any) -> Optional[str]:
 
 
 def _proposed_errors(p: Any, v2: bool, rules: Any) -> Optional[str]:
-    """``proposed`` of a version 2 checks file: the local rules an agent run proposed with no key to
-    save them, each ``{rule, by: "agent", on: "YYYY-MM-DD"}``. A person running ``protect`` is offered them."""
+    """``proposed`` of a version 2 checks file: the rules an agent run proposed and could not save,
+    each ``{rule, by: "agent", on: "YYYY-MM-DD"}``: ``rule`` is the id of a local rule, or a rule
+    with a ``limit`` itself (only the witness counts calls, so it is never a local rule and never
+    applies here). A person running ``protect`` is offered them."""
     if not v2:
         return "proposed is for checks file version 2"
     if not isinstance(p, list) or len(p) > 1000:
@@ -1595,11 +1597,22 @@ def _proposed_errors(p: Any, v2: bool, rules: Any) -> Optional[str]:
         err = _exact(x, ("rule", "by", "on"), (), f"proposed[{i}]")
         if err:
             return err
-        if not isinstance(x["rule"], str) or x["rule"] not in ids:
-            return f"proposed[{i}].rule must be the id of a rule in rules"
-        if x["rule"] in seen:
-            return f"proposed lists {x['rule']} twice"
-        seen.add(x["rule"])
+        if isinstance(x["rule"], dict):
+            err = rule_errors(x["rule"], True, None)
+            if err:
+                return f"proposed[{i}].rule: {err}"
+            if "limit" not in x["rule"]:
+                return f"proposed[{i}].rule holds a rule only when it has a limit; any other rule is a local rule in rules, named by its id"
+            if x["rule"]["id"] in ids:
+                return f"proposed[{i}].rule has the id of a rule in rules"
+            rid = x["rule"]["id"]
+        elif not isinstance(x["rule"], str) or x["rule"] not in ids:
+            return f"proposed[{i}].rule must be the id of a rule in rules, or a rule with a limit"
+        else:
+            rid = x["rule"]
+        if rid in seen:
+            return f"proposed lists {rid} twice"
+        seen.add(rid)
         if x["by"] != "agent":
             return f'proposed[{i}].by must be "agent"'
         if not isinstance(x["on"], str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", x["on"]):

@@ -162,7 +162,7 @@ describe("a network that blocks the witness (4)", () => {
     throw new Error("no refusal");
   }
 
-  it("says it in one sentence for a proxy's 403 or 407, a refused tunnel, blocked DNS, or a refused proxy", async () => {
+  it("says it in one sentence for a proxy's 403 or 407, a refused tunnel or blocked DNS, not for a proxy that is not there", async () => {
     const url = "https://api.signafaide.co.uk";
     for (const t of [
       answering(403, "<html>Blocked by network policy</html>"),
@@ -180,8 +180,9 @@ describe("a network that blocks the witness (4)", () => {
     try {
       delete process.env.HTTPS_PROXY;
       expect((await refusal(new Client(url, undefined, 1000, "test", { transport: refused }))).blocked).toBe(false);
+      // A proxy that refuses the connection has refused nothing: it is not there (issue #65).
       process.env.HTTPS_PROXY = "http://10.0.0.1:3128";
-      expect((await refusal(new Client(url, undefined, 1000, "test", { transport: refused }))).message).toBe(SENTENCE);
+      expect((await refusal(new Client(url, undefined, 1000, "test", { transport: refused }))).blocked).toBe(false);
     } finally {
       if (saved === undefined) delete process.env.HTTPS_PROXY;
       else process.env.HTTPS_PROXY = saved;

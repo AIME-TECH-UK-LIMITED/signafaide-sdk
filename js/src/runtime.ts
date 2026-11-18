@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { b64url, hashJson, type SigningKey } from "./crypto.js";
-import { Client, DEFAULT_URL, SignafaideError, type Transport } from "./http.js";
+import { Client, DEFAULT_URL, SignafaideError, witnessUrl, type Transport } from "./http.js";
 import { nodeTransport } from "./nodehttp.js";
 import { ChecksState, NO_KEY_WHY } from "./checks-runtime.js";
 import { plural } from "./plural.js";
@@ -245,11 +245,11 @@ export class Recorder {
 
   get url(): string {
     const given = this._url || process.env.SIGNAFAIDE_URL;
-    if (given) return given.replace(/\/+$/, "");
+    if (given) return witnessUrl(given);
     const envFile = path.join(this.state.root, ".env");
     const fromFile = readEnvFile(envFile).SIGNAFAIDE_URL;
     if (!fromFile) return DEFAULT_URL;
-    const url = fromFile.replace(/\/+$/, "");
+    const url = witnessUrl(fromFile);
     // The witness checks the rule sets, the shared list and the rulings of this program: say once
     // where its address came from when a file in the project, not the code or the environment, set it.
     if (url !== DEFAULT_URL && !this.toldEnvUrl && !this.quiet) {

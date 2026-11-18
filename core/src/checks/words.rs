@@ -121,12 +121,23 @@ pub fn rule(r: &Rule) -> String {
         parts.push(format!(
             "more than {} in {} {per}",
             plural_number(l.calls, "call", "calls"),
-            plural_number(l.seconds, "second", "seconds")
+            window(l.seconds)
         ));
     }
     let when = if parts.is_empty() { String::new() } else { format!(" when {}", parts.join(" and ")) };
     let except = if r.exceptions.is_empty() { String::new() } else { format!(", except when {}", r.exceptions.iter().map(exception).collect::<Vec<_>>().join(" or ")) };
     format!("{action} {tools}{agents}{when}{except}")
+}
+
+/// A limit's window as the console says it: `1 minute` for 60 seconds, `2 hours`, `90 seconds`.
+pub fn window(seconds: i64) -> String {
+    if seconds % 3600 == 0 {
+        plural_number(seconds / 3600, "hour", "hours")
+    } else if seconds % 60 == 0 {
+        plural_number(seconds / 60, "minute", "minutes")
+    } else {
+        plural_number(seconds, "second", "seconds")
+    }
 }
 
 fn plural_number(n: i64, one: &str, many: &str) -> String {

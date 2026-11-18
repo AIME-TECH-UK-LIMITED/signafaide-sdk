@@ -291,15 +291,18 @@ export interface Proposal {
 }
 
 /** The rule an agent run proposed for this tool (checks file version 2: `proposed` names a local
- * rule and the day), or null. */
+ * rule, or holds a rule only the witness applies, one with a limit; and the day), or null. */
 export function proposalFor(file: Json | null, decl: string): Proposal | null {
   if (!file || C.checksFileVersion(file) !== 2 || !Array.isArray(file.proposed)) return null;
   for (const p of file.proposed) {
-    const rule = file.rules?.rules?.find((r: Json) => r.id === p.rule && r.tools?.includes(decl));
+    const rule = typeof p.rule === "object" && p.rule ? (p.rule.tools?.includes(decl) ? p.rule : undefined) : file.rules?.rules?.find((r: Json) => r.id === p.rule && r.tools?.includes(decl));
     if (rule) return { rule, on: p.on };
   }
   return null;
 }
+
+/** The id a `proposed` entry names: its local rule's, or that of the rule it holds. */
+export const proposedId = (p: Json): string => (typeof p.rule === "string" ? p.rule : p.rule?.id);
 
 /** Today as `YYYY-MM-DD` (UTC). */
 const today = (): string => new Date().toISOString().slice(0, 10);
@@ -355,6 +358,69 @@ export async function publisher(rec: Recorder): Promise<Publisher | string> {
     return `the witness could not be asked whether the sandbox is claimed (${(e as Error).message})`;
   }
   return { client: rec.client(15_000), how: "sandbox_key", who: "this machine (unclaimed sandbox)" };
+}
+
+/** Keep rules a run without a person could not save in the checks file as an agent run's
+ * proposals, all Calibrating: a rule without a limit as a local rule (the tool's mode is watch, so
+ * it blocks nothing), a rule with a limit held in its `proposed` entry (only the witness counts
+ * calls, so it never applies here). A person who runs protect at a terminal is offered each one. */
+export function keepProposed(doc: Json, rules: Json[]): void {
+  if (!rules.length) return;
+  const local = doc.rules ?? { default: "allow", rules: [] };
+  let proposals: Json[] = Array.isArray(doc.proposed) ? doc.proposed : [];
+  for (const r of rules) {
+    const { state: _state, ...plain } = r;
+    proposals = proposals.filter((p) => proposedId(p) !== plain.id);
+    if ("limit" in plain) proposals.push({ rule: plain, by: "agent", on: today() });
+    else {
+      local.rules = local.rules.filter((x: Json) => x.id !== plain.id);
+      local.rules.push(plain);
+      proposals.push({ rule: plain.id, by: "agent", on: today() });
+      for (const decl of plain.tools ?? []) if (doc.tools[decl]?.protect) doc.tools[decl].mode = "watch";
+    }
+  }
+  if (local.rules.length) doc.rules = local;
+  doc.proposed = proposals;
+}
+
+/** The longest a rule may be in an add link, once decoded (journeys/NOTES.md §1). */
+const ADD_LINK_MAX = 4000;
+
+/** The console link that adds one suggested rule to one tool (journeys/NOTES.md §1):
+ * `<add_in_console>/<agent>/<tool>?add=<rule>`, the rule with only the keys the page takes and never
+ * a state (a rule added from the link starts Calibrating). Null when it would be too long. */
+export function addLink(tools: string, agent: string, r: Json): string | null {
+  const tool = r.tools?.[0];
+  if (typeof tool !== "string") return null;
+  const rule = (about: boolean): Json => ({ id: r.id, ...(about && r.about ? { about: r.about } : {}), action: "block", tools: [tool], agents: null, when: r.when ?? [], ...(r.limit ? { limit: r.limit } : {}) });
+  const text = [rule(true), rule(false)].map((x) => JSON.stringify(x)).find((x) => x.length <= ADD_LINK_MAX);
+  if (!text) return null;
+  return `${tools.replace(/\/+$/, "")}/${encodeURIComponent(agent)}/${encodeURIComponent(tool)}?add=${encodeURIComponent(text)}`;
+}
+
+/** Where a person adds the rules of a project an API key cannot save them in: the witness says it
+ * (`add_in_console` in its refusal of `POST /v1/rules`, the project's Tools page); never built from
+ * SIGNAFAIDE_URL. Asked only of a witness a person chose (not one a project's `.env` named).
+ * `{published}` when the witness saved them after all (a sandbox nobody had claimed yet). */
+export async function addInConsole(rec: Recorder, rules: Json[]): Promise<string | { published: Json } | null> {
+  if (!rec.apiKey) return null;
+  try {
+    if (rec.url !== personWitness(rec._url)) return null;
+  } catch {
+    return null;
+  }
+  try {
+    return { published: await publishRules(rec, { client: rec.client(15_000), how: "sandbox_key", who: "this machine (unclaimed sandbox)" }, rules) };
+  } catch (e) {
+    const link = (e as SignafaideError).body?.error?.add_in_console;
+    if (typeof link !== "string") return null;
+    try {
+      const u = new URL(link);
+      return (u.protocol === "https:" || u.protocol === "http:") && !u.username && !u.password ? u.href.replace(/\/+$/, "") : null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 /** The draft of the next version: the held version's settings and rules, plus `add`. A new rule
@@ -729,15 +795,23 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
   let finish: string | null = null;
   // What leaves the machine: the fields of the rules the person chose, approved here because a
   // person chose them. Without a person nothing is approved (`signafaide pull` asks at a terminal).
+  const fileBefore = toVersion2(fileNow);
   for (const t of chosen) {
     const sends = sendsByTool.get(t.name) ?? new Set<string>();
     const fields = [...sends].sort(byCodePoint);
     const n = newRules.filter((r) => r.tools?.includes(declaredName(t.name))).length;
-    if (!o.local && !prompt.person && fields.length) {
-      out(`Sends to signafAIde when ${t.name} runs: nothing yet. Its rules need ${fields.map(fieldWords).join(", ")}: run npx signafaide pull at a terminal to approve sending them.`);
-      notDone.push(`sending ${fields.map(fieldWords).join(", ")} for ${t.name} is not approved (npx signafaide pull at a terminal)`);
+    // Fields a person approved earlier (`pull` or `protect` at a terminal) are sent already.
+    const was = fileBefore.tools?.[declaredName(t.name)];
+    const approved: string[] = was?.protect ? (was.disclose ?? []) : [];
+    const fresh = fields.filter((f) => !approved.includes(f));
+    if (!o.local && !prompt.person && fresh.length) {
+      const sent = fields.filter((f) => approved.includes(f));
+      out(`Sends to signafAIde when ${t.name} runs: ${sent.length ? `${sent.map(fieldWords).join(", ")} (approved earlier); not ${fresh.map(fieldWords).join(", ")} yet` : "nothing yet"}. Its rules need ${fresh.map(fieldWords).join(", ")}: run npx signafaide pull at a terminal to approve sending ${fresh.length === 1 ? "it" : "them"}.`);
+      notDone.push(`sending ${fresh.map(fieldWords).join(", ")} for ${t.name} is not approved (npx signafaide pull at a terminal)`);
       finish ??= "npx signafaide pull (at a terminal)";
-      sends.clear();
+      for (const f of fresh) sends.delete(f);
+    } else if (!o.local && !prompt.person && fields.length) {
+      out(`Sends to signafAIde when ${t.name} runs: ${fields.map(fieldWords).join(", ")} (approved earlier; the fields your ${n === 1 ? "rule needs" : `${n} rules need`})`);
     } else if (!o.local) {
       out(`Sends to signafAIde when ${t.name} runs: ${fields.map(fieldWords).join(", ") || "nothing but the tool's fingerprints"}${fields.length ? ` (the fields your ${n === 1 ? "rule needs" : `${n} rules need`})` : ""}`);
     }
@@ -834,24 +908,11 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
     doc.rules.rules = doc.rules.rules.filter((r: Json) => !consumed.has(r.id));
     if (!doc.rules.rules.length) doc.rules = null;
   }
-  if (Array.isArray(doc.proposed)) doc.proposed = doc.proposed.filter((p: Json) => !consumed.has(p.rule));
+  if (Array.isArray(doc.proposed)) doc.proposed = doc.proposed.filter((p: Json) => !consumed.has(proposedId(p)));
   // An agent run with no key cannot save its rule at the witness: it is kept here as a local
   // Calibrating rule (the tool's mode is watch, so it blocks nothing) that a person is offered later.
   const keepProposal = !o.local && (!!o.limit || !!prompt.yes) && !prompt.person && !rec.apiKey && newRules.length > 0;
-  if (keepProposal) {
-    const local = doc.rules ?? { default: "allow", rules: [] };
-    const proposals: Json[] = Array.isArray(doc.proposed) ? doc.proposed : [];
-    for (const r of newRules) {
-      if ("limit" in r) continue;
-      const { state: _state, ...plain } = r;
-      local.rules = local.rules.filter((x: Json) => x.id !== plain.id);
-      local.rules.push(plain);
-      doc.proposed = proposals.filter((p) => p.rule !== plain.id);
-      doc.proposed.push({ rule: plain.id, by: "agent", on: today() });
-      for (const decl of plain.tools ?? []) if (doc.tools[decl]?.protect) doc.tools[decl].mode = "watch";
-    }
-    doc.rules = local;
-  }
+  if (keepProposal) keepProposed(doc, newRules);
   if (Array.isArray(doc.proposed) && !doc.proposed.length) delete doc.proposed;
   if (o.local && newRules.length) {
     const local = doc.rules ?? { default: "allow", rules: [] };
@@ -911,12 +972,35 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
     code = 1;
   } else if (!o.local && newRules.length) {
     const pub = await publisher(rec);
-    if (typeof pub === "string") {
-      out(`Rules      not saved: ${pub}.`);
-      out("           Saving rules needs a person's sign-in: npx signafaide login, then npx signafaide protect again (or add them in the console).");
-      notDone.push("the rules are not saved");
-      finish = "npx signafaide login, then npx signafaide protect";
+    // Without a person, on a project an API key cannot save rules in: the rules stay in the checks
+    // file, Calibrating, and one console link per rule lets a person add it.
+    const where = typeof pub === "string" && !prompt.person ? await addInConsole(rec, newRules) : null;
+    if (where && typeof where === "object") {
+      published = where.published;
+      out(`Rules      saved in your sandbox as version ${published!.rules.version}, signed by signafAIde`);
+    } else if (typeof pub === "string") {
       code = 1;
+      if (!prompt.person) {
+        keepProposed(doc, newRules);
+        writeChecksFile(cp, doc);
+      }
+      if (typeof where === "string") {
+        out(`Rules      kept in ${rel(cp)} as Calibrating (they block nothing). An API key`);
+        out("           cannot save rules in a project of an organisation: a person adds each one in the");
+        out("           console, then runs npx signafaide pull at a terminal to approve sending the fields it needs.");
+        for (const r of newRules) {
+          const link = addLink(where, agent, r);
+          out(link ? `           Add ${r.tools?.[0]}'s rule: ${link}` : `           Add ${r.tools?.[0]}'s rule in the console: ${where}/${encodeURIComponent(agent)}/${encodeURIComponent(r.tools?.[0] ?? "")} (the rule is too long for a link)`);
+        }
+        notDone.push("the rules are not saved for the project: a person adds each one in the console (the links above)");
+        finish = "a person opens each link above and adds the rule (Add as Calibrating); or npx signafaide login, then npx signafaide protect";
+      } else {
+        out(`Rules      not saved: ${pub}.`);
+        out("           Saving rules needs a person's sign-in: npx signafaide login, then npx signafaide protect again (or add them in the console).");
+        if (!prompt.person) out(`           Kept in ${rel(cp)} as Calibrating (they block nothing); a person who runs npx signafaide protect in a terminal is offered them.`);
+        notDone.push("the rules are not saved for the project");
+        finish = "npx signafaide login, then npx signafaide protect";
+      }
     } else {
       try {
         published = await publishRules(rec, pub, newRules);

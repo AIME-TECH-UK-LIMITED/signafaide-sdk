@@ -180,7 +180,7 @@ export class State {
       // Inside the folder itself: nothing in it (agent keys above all) is ever committed, even
       // before `signafaide init` adds the folder to the project's .gitignore (§8).
       const gi = path.join(this.home, ".gitignore");
-      if (!fs.existsSync(gi)) fs.writeFileSync(gi, "*\n");
+      if (!fs.existsSync(gi)) atomicWrite(gi, "*\n");
     } catch (e) {
       throw fsError(e, this.home);
     }
@@ -347,12 +347,8 @@ export class State {
           // chain as continuing after it instead of missing seq 1..N.
           // With the earlier instance's stop note, when the head names one (a clean restart).
           if (base?.signed) writeJson(this.basePath(`${dst}/${agent}`), base.stop ? { ...base.signed, stop: base.stop } : base.signed);
-          const fd = fs.openSync(target + ".tmp", "w");
-          fs.writeSync(fd, out.map(([r]) => canonicalize(r) + "\n").join(""));
-          fs.fsyncSync(fd);
-          fs.closeSync(fd);
           for (const [rec, store] of out) this.writeOutbox(`${dst}/${agent}`, store === undefined ? wire(rec) : wireOf(rec, store));
-          fs.renameSync(target + ".tmp", target);
+          atomicWrite(target, out.map(([r]) => canonicalize(r) + "\n").join(""), { sync: true });
           fs.unlinkSync(this.chainPath(`${src}/${agent}`));
         }),
       );
@@ -449,11 +445,7 @@ export class State {
       const dir = this.heldDir(chain);
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, `${pad(recs[0].envelope.seq)}-${pad(recs[recs.length - 1].envelope.seq)}.jsonl`);
-      const fd = fs.openSync(file + ".tmp", "w", 0o600);
-      fs.writeSync(fd, recs.map((r) => canonicalize(r) + "\n").join(""));
-      fs.fsyncSync(fd);
-      fs.closeSync(fd);
-      fs.renameSync(file + ".tmp", file);
+      atomicWrite(file, recs.map((r) => canonicalize(r) + "\n").join(""), { mode: 0o600, sync: true });
       const cfd = fs.openSync(p, "r+");
       try {
         fs.ftruncateSync(cfd, cut[0][0]);
@@ -524,9 +516,7 @@ export class State {
     const doc = JSON.parse(fs.readFileSync(p, "utf8"));
     if (doc.retired === validTo) return false;
     doc.retired = validTo;
-    const tmp = p + ".tmp";
-    fs.writeFileSync(tmp, canonicalize(doc) + "\n", { mode: 0o600 });
-    fs.renameSync(tmp, p);
+    atomicWrite(p, canonicalize(doc) + "\n", { mode: 0o600 });
     return true;
   }
 
@@ -558,15 +548,13 @@ export class State {
     this.ensure();
     const p = this.keyPath(doc.agent, scope);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    let fd: number;
+    let made: boolean;
     try {
-      fd = fs.openSync(p, "wx", 0o600);
+      made = createOnce(p, canonicalize(doc) + "\n");
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new StateError(`agent ${doc.agent} already has a key file (${p}); use \`signafaide keys rotate\` to replace it`);
       throw fsError(e, this.home);
     }
-    fs.writeSync(fd, canonicalize(doc) + "\n");
-    fs.closeSync(fd);
+    if (!made) throw new StateError(`agent ${doc.agent} already has a key file (${p}); use \`signafaide keys rotate\` to replace it`);
     return p;
   }
 
@@ -634,17 +622,15 @@ export class State {
       const key = SigningKey.generate((n) => new Uint8Array(randomBytes(n)));
       const t = now();
       const doc = { agent, key_id: key.keyId, public_key: b64url(key.publicKey), private_key: b64url(key.seed()), created: createdAt && validTime(createdAt) && createdAt < t ? createdAt : t };
-      let fd: number;
+      let made: boolean;
       try {
         fs.mkdirSync(path.dirname(p), { recursive: true });
-        fd = fs.openSync(p, "wx", 0o600);
+        made = createOnce(p, canonicalize(doc) + "\n");
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "EEXIST") return this.loadKey(agent, false, scope);
         throw fsError(e, this.home);
       }
-      fs.writeSync(fd, canonicalize(doc) + "\n");
-      fs.closeSync(fd);
-      return key;
+      // Another process won the race: use its key, which is whole once it is there.
+      return made ? key : this.loadKey(agent, false, scope);
     }
     try {
       return new SigningKey(b64urlDecode(JSON.parse(fs.readFileSync(p, "utf8")).private_key));
@@ -892,9 +878,7 @@ export class State {
   private writeOutbox(chain: string, rec: SignedRecord): void {
     const d = this.outboxDir(chain);
     fs.mkdirSync(d, { recursive: true });
-    const tmp = path.join(d, `.${pad(rec.envelope.seq)}.tmp`);
-    fs.writeFileSync(tmp, canonicalize(rec));
-    fs.renameSync(tmp, path.join(d, `${pad(rec.envelope.seq)}.json`));
+    atomicWrite(path.join(d, `${pad(rec.envelope.seq)}.json`), canonicalize(rec));
   }
 
   private lines(chain: string): SignedRecord[] {
@@ -979,12 +963,7 @@ export class State {
       });
       if (filled) {
         const journal = p + ".tail";
-        const tmp = p + ".tail.tmp";
-        const fd = fs.openSync(tmp, "w");
-        fs.writeSync(fd, `${suffix[0][0]}\n` + out.join(""));
-        fs.fsyncSync(fd);
-        fs.closeSync(fd);
-        fs.renameSync(tmp, journal);
+        atomicWrite(journal, `${suffix[0][0]}\n` + out.join(""), { sync: true });
         this.recover(chain);
         this.maybeRoll(chain);
       }
@@ -1167,11 +1146,85 @@ function readJson<T>(p: string): T | null {
   }
 }
 
+/** Write `data` to `p` all at once: into a temp file of a unique name in the same folder (created
+ * exclusively; `mode` before the umask), then a rename over `p`. Two writers of the same file
+ * (processes, or worker threads) never share a temp file, and a reader sees the old file or the
+ * new one, never part of one. `sync`: flush it to disk before the rename. */
+export function atomicWrite(p: string, data: string | Uint8Array, opts: { mode?: number; sync?: boolean } = {}): void {
+  let tmp = "";
+  let fd = -1;
+  for (let i = 0; fd < 0; i++) {
+    tmp = path.join(path.dirname(p), `.${path.basename(p)}.${randomBytes(8).toString("hex")}.tmp`);
+    try {
+      fd = fs.openSync(tmp, "wx", opts.mode ?? 0o666);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST" || i >= 100) throw e;
+    }
+  }
+  try {
+    try {
+      fs.writeSync(fd, typeof data === "string" ? Buffer.from(data) : data);
+      if (opts.sync) fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, p);
+  } catch (e) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* already gone */
+    }
+    throw e;
+  }
+}
+
+/** Create `p` with `data` unless it exists; false when it does. The file appears whole: it is
+ * written under a unique temp name in the same folder, then hard-linked into place, which fails
+ * when the name is taken. A reader never sees it empty or half written (a key file another process
+ * is still writing). Where hard links are not supported, an exclusive create instead. */
+export function createOnce(p: string, data: string, mode = 0o600): boolean {
+  const tmp = path.join(path.dirname(p), `.${path.basename(p)}.${randomBytes(8).toString("hex")}.tmp`);
+  const fd = fs.openSync(tmp, "wx", mode);
+  try {
+    try {
+      fs.writeSync(fd, data);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    try {
+      fs.linkSync(tmp, p);
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+      let fd2: number;
+      try {
+        fd2 = fs.openSync(p, "wx", mode);
+      } catch (e2) {
+        if ((e2 as NodeJS.ErrnoException).code === "EEXIST") return false;
+        throw e2;
+      }
+      try {
+        fs.writeSync(fd2, data);
+      } finally {
+        fs.closeSync(fd2);
+      }
+      return true;
+    }
+  } finally {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
 function writeJson(p: string, value: unknown): void {
   const sorted = (v: any): any =>
     Array.isArray(v) ? v.map(sorted) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted(v[k])])) : v;
-  fs.writeFileSync(p + ".tmp", JSON.stringify(sorted(value), null, 2) + "\n");
-  fs.renameSync(p + ".tmp", p);
+  atomicWrite(p, JSON.stringify(sorted(value), null, 2) + "\n");
 }
 
 export function ensureGitignore(p: string, entry: string): void {

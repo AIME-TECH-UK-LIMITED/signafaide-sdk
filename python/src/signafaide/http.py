@@ -16,6 +16,18 @@ from .telemetry import HEADER, client_header
 #: server such as http://127.0.0.1:7474); a release test fails if this is ever a loopback address.
 DEFAULT_URL = "https://api.signafaide.co.uk"
 
+#: The hosted console's origin. The console's prompt gives it as ``SIGNAFAIDE_URL``, and it answers
+#: as the hosted witness too: it and ``DEFAULT_URL`` are one service.
+HOSTED_CONSOLE = "https://signafaide.co.uk"
+
+
+def witness_url(u: str) -> str:
+    """A witness URL as the SDK uses it: trimmed, without a trailing slash, and the hosted
+    console's origin read as the hosted witness (``DEFAULT_URL``), so either address names the
+    same witness."""
+    t = u.strip().rstrip("/")
+    return DEFAULT_URL if t.lower() in (HOSTED_CONSOLE, DEFAULT_URL) else t
+
 #: Errors the SDK cannot fix by retrying: shipping stops until the configuration changes.
 NON_RETRYABLE = frozenset({"quota_exceeded", "invalid_key", "plan_required", "bad_signature", "invalid_record", "content_mismatch",
                            "chain_conflict", "unknown_agent", "key_mismatch", "bad_response"})
@@ -45,15 +57,16 @@ def _uses_proxy(url: str) -> bool:
 
 def blocked_by_network(url: str, reason: BaseException) -> bool:
     """Whether a failed request was stopped by the network here rather than by the witness: a
-    proxy refused the tunnel (HTTP 403 or 407 to CONNECT), the name does not resolve (DNS
-    blocked), or a proxy refused the connection."""
+    proxy refused the tunnel (HTTP 403 or 407 to CONNECT), or, with no proxy in the way, the name
+    does not resolve (DNS blocked). A proxy that cannot be reached, or does not answer, has
+    refused nothing: that is said as it is."""
     text = str(reason)
-    if isinstance(reason, socket.gaierror) or "Name or service not known" in text or "Temporary failure in name resolution" in text \
-            or "nodename nor servname" in text or "getaddrinfo failed" in text:
-        return True
     if "Tunnel connection failed" in text or ("407" in text and "roxy" in text):
         return True
-    return isinstance(reason, ConnectionRefusedError) and _uses_proxy(url)
+    if _uses_proxy(url):
+        return False  # the witness's name is looked up by the proxy, not here
+    return isinstance(reason, socket.gaierror) or "Name or service not known" in text or "Temporary failure in name resolution" in text \
+        or "nodename nor servname" in text or "getaddrinfo failed" in text
 
 
 class SignafaideError(Exception):
