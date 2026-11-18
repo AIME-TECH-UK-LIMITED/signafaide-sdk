@@ -99,6 +99,12 @@ export function exceptionWords(x: Json): string {
 }
 
 const countWords = (n: number, one: string, many: string): string => `${numberWords(String(n))} ${n === 1 ? one : many}`;
+/** A limit's window as the console says it: `1 minute` for 60 seconds, `2 hours`, `90 seconds`. */
+export function windowWords(seconds: number): string {
+  if (seconds % 3600 === 0) return countWords(seconds / 3600, "hour", "hours");
+  if (seconds % 60 === 0) return countWords(seconds / 60, "minute", "minutes");
+  return countWords(seconds, "second", "seconds");
+}
 const PER: Record<string, string> = { agent: "by the same agent", tool: "to the same tool", agent_tool: "by the same agent to the same tool" };
 
 /** A rule in words, without its state: `Block approve_payout when amount is above 1,000`. */
@@ -107,7 +113,7 @@ export function ruleWords(r: Json): string {
   const tools = r.tools === null ? "any tool" : either(r.tools);
   const agents = r.agents === null ? "" : r.agents.length === 1 ? ` for agent ${r.agents[0]}` : ` for agents ${either(r.agents)}`;
   const parts: string[] = r.when.map(conditionWords);
-  if (r.limit) parts.push(`more than ${countWords(r.limit.calls, "call", "calls")} in ${countWords(r.limit.seconds, "second", "seconds")} ${PER[r.limit.per]}`);
+  if (r.limit) parts.push(`more than ${countWords(r.limit.calls, "call", "calls")} in ${windowWords(r.limit.seconds)} ${PER[r.limit.per]}`);
   const when = parts.length ? ` when ${parts.join(" and ")}` : "";
   const xs: Json[] = r.exceptions ?? [];
   const except = xs.length ? `, except when ${xs.map(exceptionWords).join(" or ")}` : "";

@@ -25,11 +25,12 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from ._version import __version__
-from .http import DEFAULT_URL, Client, SignafaideError
+from .http import DEFAULT_URL, HOSTED_CONSOLE, Client, SignafaideError, witness_url
+from .state import atomic_write
 
 SESSION_RE = re.compile(r"\Asfa_user_[0-9A-Za-z]{32}\Z")
 #: The console of the hosted witness (``DEFAULT_URL``): its sign-in page is on this origin.
-DEFAULT_CONSOLE = "https://signafaide.co.uk"
+DEFAULT_CONSOLE = HOSTED_CONSOLE
 #: Characters a URL the CLI shows, opens or keys a session by may hold (RFC 3986, without quotes).
 _URL_CHARS = re.compile(r"[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+\Z")
 _SERVICE = "signafaide"
@@ -58,7 +59,7 @@ def person_witness(given: Optional[str] = None) -> str:
     """The witness a person signs in to and publishes rules with (§8): *given* (``--url``), else
     ``SIGNAFAIDE_URL`` in the process environment, else the hosted service. Never the project's
     ``.env``: a file in a project must not choose where a person's sign-in or session goes."""
-    u = (given or os.environ.get("SIGNAFAIDE_URL") or DEFAULT_URL).strip().rstrip("/")
+    u = witness_url(given or os.environ.get("SIGNAFAIDE_URL") or DEFAULT_URL)
     if _origin(u) is None:
         raise SignafaideError(f"{u} is not a witness URL (https://host, or http://127.0.0.1:port for a local one).", code="bad_request")
     return u
@@ -72,7 +73,7 @@ def console_origin(witness: str, given: Optional[str] = None) -> str:
         if o is None:
             raise SignafaideError(f"--console {given} is not an http(s) origin.", code="bad_request")
         return o
-    if witness.rstrip("/") == DEFAULT_URL:
+    if witness_url(witness) == DEFAULT_URL:
         return DEFAULT_CONSOLE
     o = _origin(witness)
     if o is None:
@@ -131,12 +132,7 @@ def _all() -> dict:
 def _write(sessions: dict) -> None:
     f = session_file()
     f.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    tmp = f.with_name(f"session.json.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        fh.write(json.dumps({"sessions": sessions}, indent=2) + "\n")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, f)
+    atomic_write(f, json.dumps({"sessions": sessions}, indent=2) + "\n", mode=0o600)
 
 
 def load_session(url: str) -> Optional[dict]:
@@ -220,7 +216,7 @@ def login(url: str, client_id: str, out: Callable[[str], None], *, sleep: Callab
     the real console's page and keep the session the person approves), prints the code and the
     page, opens the browser when it can, polls until the person approves or refuses, and keeps the
     session for that witness only."""
-    url = url.strip().rstrip("/")
+    url = witness_url(url)
     origin = console_origin(url, console)
     client = Client(url, None, 10.0, client_id)
     host = (socket.gethostname() or "this machine")[:100]
@@ -270,7 +266,7 @@ def login(url: str, client_id: str, out: Callable[[str], None], *, sleep: Callab
 
 def logout(url: str, client_id: str) -> bool:
     """``signafaide logout``: end the session at the witness it was made for and forget it here."""
-    url = url.strip().rstrip("/")
+    url = witness_url(url)
     s = load_session(url)
     if s is not None:
         try:

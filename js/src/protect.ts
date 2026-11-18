@@ -23,6 +23,7 @@ import { fieldWords, ruleWords, stateWord } from "./words.js";
 import { KIND_WORDS, RISKY, agentInCode, codeChanges, findTools, wrapCall, type Field, type FoundTool } from "./find-tools.js";
 import { lineDiff } from "./source.js";
 import { NOTE_QUESTION, noteWhat, offerNote } from "./agents.js";
+import { riskOf } from "./ci-check.js";
 
 type Json = Record<string, any>;
 
@@ -32,6 +33,8 @@ type Json = Record<string, any>;
  * approved for sending, only when a person answered (never from flags or the environment). */
 export interface Prompter {
   readonly person: boolean;
+  /** `--yes` without a terminal: protect then saves default rules, all Calibrating. */
+  readonly yes?: boolean;
   confirm(question: string, def: boolean): Promise<boolean>;
   choose(question: string, choices: string[], def: number): Promise<number>;
   multi(question: string, choices: string[], defaults: boolean[]): Promise<boolean[]>;
@@ -106,6 +109,7 @@ export function terminalPrompter(input: NodeJS.ReadableStream = process.stdin, o
 export function flagPrompter(answers: { yes?: boolean } = {}): Prompter {
   return {
     person: false,
+    yes: !!answers.yes,
     async confirm(_q, def) {
       return answers.yes ? true : def;
     },
@@ -234,6 +238,27 @@ export function limitChoice(t: FoundTool, field: string): Choice | null {
   };
 }
 
+/** The calls a minute of each default rule (`protect --yes`), by what the tool does. */
+const DEFAULT_RATE: Record<string, number> = { "pays money": 5, "deletes data": 5, "sends messages": 20, "runs commands": 5, "pushes code": 5, "edits secrets": 5, "edits config": 5 };
+
+/** What makes a tool risky, in words (`check --ci` reads tools the same way); null when it is not. */
+export function risk(t: FoundTool): string | null {
+  return riskOf(t.name, t.kind);
+}
+
+/** The rule `protect --yes` saves for a risky tool, without a person to ask: a tool that pays is
+ * blocked above 1000 when it has an amount, every other risky tool (and a payment without an
+ * amount) above a number of calls a minute. It starts Calibrating: it blocks nothing until a
+ * person turns it On. */
+export function defaultRule(t: FoundTool, decl: string, taken: Set<string>): Json | null {
+  const why = risk(t);
+  if (why === null) return null;
+  const amount = why === KIND_WORDS.pays ? fieldOf(t, AMOUNT) : null;
+  if (amount) return { id: ruleId(decl, "amount", taken), about: `${decl}: ${amount.name} above 1000.`, action: "block", tools: [decl], agents: null, when: [{ field: amount.pointer, op: "gt", value: 1000 }] };
+  const n = DEFAULT_RATE[why] ?? 5;
+  return { id: ruleId(decl, "rate", taken), about: `${decl}: more than ${n} calls a minute.`, action: "block", tools: [decl], agents: null, when: [], limit: { calls: n, seconds: 60, per: "agent_tool" } };
+}
+
 /** Said for each rule a run without a person adds. */
 export const CALIBRATING_LINE =
   "  Starts Calibrating: it notes the calls it would have blocked and blocks none. Only a person turns it On: npx signafaide protect at a terminal, or the console.";
@@ -266,15 +291,18 @@ export interface Proposal {
 }
 
 /** The rule an agent run proposed for this tool (checks file version 2: `proposed` names a local
- * rule and the day), or null. */
+ * rule, or holds a rule only the witness applies, one with a limit; and the day), or null. */
 export function proposalFor(file: Json | null, decl: string): Proposal | null {
   if (!file || C.checksFileVersion(file) !== 2 || !Array.isArray(file.proposed)) return null;
   for (const p of file.proposed) {
-    const rule = file.rules?.rules?.find((r: Json) => r.id === p.rule && r.tools?.includes(decl));
+    const rule = typeof p.rule === "object" && p.rule ? (p.rule.tools?.includes(decl) ? p.rule : undefined) : file.rules?.rules?.find((r: Json) => r.id === p.rule && r.tools?.includes(decl));
     if (rule) return { rule, on: p.on };
   }
   return null;
 }
+
+/** The id a `proposed` entry names: its local rule's, or that of the rule it holds. */
+export const proposedId = (p: Json): string => (typeof p.rule === "string" ? p.rule : p.rule?.id);
 
 /** Today as `YYYY-MM-DD` (UTC). */
 const today = (): string => new Date().toISOString().slice(0, 10);
@@ -330,6 +358,69 @@ export async function publisher(rec: Recorder): Promise<Publisher | string> {
     return `the witness could not be asked whether the sandbox is claimed (${(e as Error).message})`;
   }
   return { client: rec.client(15_000), how: "sandbox_key", who: "this machine (unclaimed sandbox)" };
+}
+
+/** Keep rules a run without a person could not save in the checks file as an agent run's
+ * proposals, all Calibrating: a rule without a limit as a local rule (the tool's mode is watch, so
+ * it blocks nothing), a rule with a limit held in its `proposed` entry (only the witness counts
+ * calls, so it never applies here). A person who runs protect at a terminal is offered each one. */
+export function keepProposed(doc: Json, rules: Json[]): void {
+  if (!rules.length) return;
+  const local = doc.rules ?? { default: "allow", rules: [] };
+  let proposals: Json[] = Array.isArray(doc.proposed) ? doc.proposed : [];
+  for (const r of rules) {
+    const { state: _state, ...plain } = r;
+    proposals = proposals.filter((p) => proposedId(p) !== plain.id);
+    if ("limit" in plain) proposals.push({ rule: plain, by: "agent", on: today() });
+    else {
+      local.rules = local.rules.filter((x: Json) => x.id !== plain.id);
+      local.rules.push(plain);
+      proposals.push({ rule: plain.id, by: "agent", on: today() });
+      for (const decl of plain.tools ?? []) if (doc.tools[decl]?.protect) doc.tools[decl].mode = "watch";
+    }
+  }
+  if (local.rules.length) doc.rules = local;
+  doc.proposed = proposals;
+}
+
+/** The longest a rule may be in an add link, once decoded (journeys/NOTES.md §1). */
+const ADD_LINK_MAX = 4000;
+
+/** The console link that adds one suggested rule to one tool (journeys/NOTES.md §1):
+ * `<add_in_console>/<agent>/<tool>?add=<rule>`, the rule with only the keys the page takes and never
+ * a state (a rule added from the link starts Calibrating). Null when it would be too long. */
+export function addLink(tools: string, agent: string, r: Json): string | null {
+  const tool = r.tools?.[0];
+  if (typeof tool !== "string") return null;
+  const rule = (about: boolean): Json => ({ id: r.id, ...(about && r.about ? { about: r.about } : {}), action: "block", tools: [tool], agents: null, when: r.when ?? [], ...(r.limit ? { limit: r.limit } : {}) });
+  const text = [rule(true), rule(false)].map((x) => JSON.stringify(x)).find((x) => x.length <= ADD_LINK_MAX);
+  if (!text) return null;
+  return `${tools.replace(/\/+$/, "")}/${encodeURIComponent(agent)}/${encodeURIComponent(tool)}?add=${encodeURIComponent(text)}`;
+}
+
+/** Where a person adds the rules of a project an API key cannot save them in: the witness says it
+ * (`add_in_console` in its refusal of `POST /v1/rules`, the project's Tools page); never built from
+ * SIGNAFAIDE_URL. Asked only of a witness a person chose (not one a project's `.env` named).
+ * `{published}` when the witness saved them after all (a sandbox nobody had claimed yet). */
+export async function addInConsole(rec: Recorder, rules: Json[]): Promise<string | { published: Json } | null> {
+  if (!rec.apiKey) return null;
+  try {
+    if (rec.url !== personWitness(rec._url)) return null;
+  } catch {
+    return null;
+  }
+  try {
+    return { published: await publishRules(rec, { client: rec.client(15_000), how: "sandbox_key", who: "this machine (unclaimed sandbox)" }, rules) };
+  } catch (e) {
+    const link = (e as SignafaideError).body?.error?.add_in_console;
+    if (typeof link !== "string") return null;
+    try {
+      const u = new URL(link);
+      return (u.protocol === "https:" || u.protocol === "http:") && !u.username && !u.password ? u.href.replace(/\/+$/, "") : null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 /** The draft of the next version: the held version's settings and rules, plus `add`. A new rule
@@ -580,7 +671,12 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
   out("");
   let chosen: FoundTool[];
   if (o.tool) chosen = found.tools.filter((t) => t.name === o.tool || t.fn === o.tool);
-  else {
+  else if (!prompt.person) {
+    // Nobody to ask: every risky tool is protected (and any protected in the code already).
+    chosen = found.tools.filter((t) => risk(t) !== null || t.wrapped === "protect");
+    if (chosen.length)
+      out(`Protect    ${chosen.map((t) => t.name).join(", ")}: without a terminal, every tool that pays, deletes, sends, runs commands, pushes code or edits secrets or config is protected`);
+  } else {
     // Every tool is in the question; the first risky one, and any already protected, are ticked.
     const firstRisky = found.tools.findIndex((t) => RISKY.has(t.kind));
     const risky = found.tools.filter((t) => RISKY.has(t.kind));
@@ -658,6 +754,9 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
     } else if (proposed) {
       rule = { ...proposed.rule, id: ruleId(decl, proposed.rule.id.slice(decl.length + 1) || "limit", taken) };
       out(`  Rule: ${ruleWords(rule)}  (proposed by an agent run on ${proposed.on})`);
+    } else if (!prompt.person && prompt.yes && defaultRule(t, decl, new Set(taken)) !== null) {
+      // protect --yes: a sensible default for what the tool does, Calibrating (it blocks nothing).
+      rule = defaultRule(t, decl, taken)!;
     } else {
       const pick = await prompt.choose(`What should we block on ${t.name}?`, [...choices.map((x) => x.label), "Nothing yet, record only"], prompt.person ? 0 : choices.length);
       if (pick >= choices.length) continue;
@@ -696,14 +795,23 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
   let finish: string | null = null;
   // What leaves the machine: the fields of the rules the person chose, approved here because a
   // person chose them. Without a person nothing is approved (`signafaide pull` asks at a terminal).
+  const fileBefore = toVersion2(fileNow);
   for (const t of chosen) {
     const sends = sendsByTool.get(t.name) ?? new Set<string>();
     const fields = [...sends].sort(byCodePoint);
     const n = newRules.filter((r) => r.tools?.includes(declaredName(t.name))).length;
-    if (!o.local && !prompt.person && fields.length) {
-      out(`Sends to signafAIde when ${t.name} runs: nothing yet. Its rules need ${fields.map(fieldWords).join(", ")}: run npx signafaide pull at a terminal to approve sending them.`);
-      notDone.push(`sending ${fields.map(fieldWords).join(", ")} for ${t.name} is not approved (npx signafaide pull at a terminal)`);
-      sends.clear();
+    // Fields a person approved earlier (`pull` or `protect` at a terminal) are sent already.
+    const was = fileBefore.tools?.[declaredName(t.name)];
+    const approved: string[] = was?.protect ? (was.disclose ?? []) : [];
+    const fresh = fields.filter((f) => !approved.includes(f));
+    if (!o.local && !prompt.person && fresh.length) {
+      const sent = fields.filter((f) => approved.includes(f));
+      out(`Sends to signafAIde when ${t.name} runs: ${sent.length ? `${sent.map(fieldWords).join(", ")} (approved earlier); not ${fresh.map(fieldWords).join(", ")} yet` : "nothing yet"}. Its rules need ${fresh.map(fieldWords).join(", ")}: run npx signafaide pull at a terminal to approve sending ${fresh.length === 1 ? "it" : "them"}.`);
+      notDone.push(`sending ${fresh.map(fieldWords).join(", ")} for ${t.name} is not approved (npx signafaide pull at a terminal)`);
+      finish ??= "npx signafaide pull (at a terminal)";
+      for (const f of fresh) sends.delete(f);
+    } else if (!o.local && !prompt.person && fields.length) {
+      out(`Sends to signafAIde when ${t.name} runs: ${fields.map(fieldWords).join(", ")} (approved earlier; the fields your ${n === 1 ? "rule needs" : `${n} rules need`})`);
     } else if (!o.local) {
       out(`Sends to signafAIde when ${t.name} runs: ${fields.map(fieldWords).join(", ") || "nothing but the tool's fingerprints"}${fields.length ? ` (the fields your ${n === 1 ? "rule needs" : `${n} rules need`})` : ""}`);
     }
@@ -800,24 +908,11 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
     doc.rules.rules = doc.rules.rules.filter((r: Json) => !consumed.has(r.id));
     if (!doc.rules.rules.length) doc.rules = null;
   }
-  if (Array.isArray(doc.proposed)) doc.proposed = doc.proposed.filter((p: Json) => !consumed.has(p.rule));
+  if (Array.isArray(doc.proposed)) doc.proposed = doc.proposed.filter((p: Json) => !consumed.has(proposedId(p)));
   // An agent run with no key cannot save its rule at the witness: it is kept here as a local
   // Calibrating rule (the tool's mode is watch, so it blocks nothing) that a person is offered later.
-  const keepProposal = !o.local && !!o.limit && !prompt.person && !rec.apiKey && newRules.length > 0;
-  if (keepProposal) {
-    const local = doc.rules ?? { default: "allow", rules: [] };
-    const proposals: Json[] = Array.isArray(doc.proposed) ? doc.proposed : [];
-    for (const r of newRules) {
-      if ("limit" in r) continue;
-      const { state: _state, ...plain } = r;
-      local.rules = local.rules.filter((x: Json) => x.id !== plain.id);
-      local.rules.push(plain);
-      doc.proposed = proposals.filter((p) => p.rule !== plain.id);
-      doc.proposed.push({ rule: plain.id, by: "agent", on: today() });
-      for (const decl of plain.tools ?? []) if (doc.tools[decl]?.protect) doc.tools[decl].mode = "watch";
-    }
-    doc.rules = local;
-  }
+  const keepProposal = !o.local && (!!o.limit || !!prompt.yes) && !prompt.person && !rec.apiKey && newRules.length > 0;
+  if (keepProposal) keepProposed(doc, newRules);
   if (Array.isArray(doc.proposed) && !doc.proposed.length) delete doc.proposed;
   if (o.local && newRules.length) {
     const local = doc.rules ?? { default: "allow", rules: [] };
@@ -870,23 +965,54 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
     // No key and no sandbox: nothing can save the rules yet, and a sign-in would not help.
     const calibrating = newRules.every((r) => r.state === "calibrating");
     out(`Rules      not saved yet: there is no key.${calibrating ? ` ${newRules.length === 1 ? "It starts" : "They start"} Calibrating once saved.` : ""}`);
-    if (keepProposal) out(`           Kept in ${rel(cp)} as a local Calibrating rule (it blocks nothing); a person who runs npx signafaide protect in a terminal is offered it.`);
+    if (keepProposal) {
+      const one = newRules.length === 1;
+      out(`           Kept in ${rel(cp)} as ${one ? "a local Calibrating rule (it blocks nothing)" : "local Calibrating rules (they block nothing)"}; a person who runs npx signafaide protect in a terminal is offered ${one ? "it" : "them"}.`);
+    }
     out("           A person runs npx signafaide protect in a terminal and answers yes to the free sandbox; it asks for the rules again.");
     notDone.push("the rules are not saved (no key yet)");
     finish ??= "npx signafaide protect (in a terminal)";
     code = 1;
   } else if (!o.local && newRules.length) {
     const pub = await publisher(rec);
-    if (typeof pub === "string") {
-      out(`Rules      not saved: ${pub}.`);
-      out("           Saving rules needs a person's sign-in: npx signafaide login, then npx signafaide protect again (or add them in the console).");
-      notDone.push("the rules are not saved");
-      finish = "npx signafaide login, then npx signafaide protect";
+    // Without a person, on a project an API key cannot save rules in: the rules stay in the checks
+    // file, Calibrating, and one console link per rule lets a person add it.
+    const where = typeof pub === "string" && !prompt.person ? await addInConsole(rec, newRules) : null;
+    if (where && typeof where === "object") {
+      published = where.published;
+      out(`Rules      saved in your sandbox as version ${published!.rules.version}, signed by signafAIde`);
+    } else if (typeof pub === "string") {
       code = 1;
+      if (!prompt.person) {
+        keepProposed(doc, newRules);
+        writeChecksFile(cp, doc);
+      }
+      if (typeof where === "string") {
+        out(`Rules      kept in ${rel(cp)} as Calibrating (they block nothing). An API key`);
+        out("           cannot save rules in a project of an organisation: a person adds each one in the");
+        out("           console, then runs npx signafaide pull at a terminal to approve sending the fields it needs.");
+        for (const r of newRules) {
+          const link = addLink(where, agent, r);
+          out(link ? `           Add ${r.tools?.[0]}'s rule: ${link}` : `           Add ${r.tools?.[0]}'s rule in the console: ${where}/${encodeURIComponent(agent)}/${encodeURIComponent(r.tools?.[0] ?? "")} (the rule is too long for a link)`);
+        }
+        notDone.push("the rules are not saved for the project: a person adds each one in the console (the links above)");
+        finish = "a person opens each link above and adds the rule (Add as Calibrating); or npx signafaide login, then npx signafaide protect";
+      } else {
+        out(`Rules      not saved: ${pub}.`);
+        out("           Saving rules needs a person's sign-in: npx signafaide login, then npx signafaide protect again (or add them in the console).");
+        if (!prompt.person) out(`           Kept in ${rel(cp)} as Calibrating (they block nothing); a person who runs npx signafaide protect in a terminal is offered them.`);
+        notDone.push("the rules are not saved for the project");
+        finish = "npx signafaide login, then npx signafaide protect";
+      }
     } else {
       try {
         published = await publishRules(rec, pub, newRules);
         out(`Rules      saved ${pub.how === "sandbox_key" ? "in your sandbox" : `by ${pub.who}`} as version ${published.rules.version}, signed by signafAIde`);
+        if (!prompt.person) {
+          const one = newRules.length === 1;
+          out(`           ${one ? "The rule" : `All ${newRules.length} rules`} start Calibrating: ${one ? "it notes" : "they note"} the calls ${one ? "it" : "they"} would have blocked and block none until a person turns them On:`);
+          for (const r of newRules) out(`             Calibrating  ${ruleWords(r)}`);
+        }
         if (pub.how === "sandbox_key") {
           out("           This machine may save rules only while the sandbox is unclaimed. After you keep it,");
           out("           saving rules needs a person's sign-in (npx signafaide login); the API key cannot.");

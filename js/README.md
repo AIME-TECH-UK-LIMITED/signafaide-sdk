@@ -15,7 +15,7 @@ In your agent's folder, at a terminal:
 npx signafaide protect
 ```
 
-It finds your agent's tools (an object named like `tools`, exported functions in files named like tools, Vercel AI SDK, OpenAI Agents and LangChain `tool(...)`, MCP servers, tool classes), lists every one with what it does, and asks which to protect and what to block: an amount, a currency, a number of calls a minute, each On (it blocks) or Calibrating (it only notes "Would have blocked"). It shows the change to your code as a diff and asks before writing it: `protect(...)` for the tools you protect, `record(...)` for the others, the same agent name in every call, and `declareTools(...)` once. It writes `signafaide.checks.json` (commit it), makes a free sandbox if you say yes (no account, email or card) and saves your rules. A run without a terminal says exactly what it did not do and the command to finish.
+It finds your agent's tools (an object named like `tools`, exported functions in files named like tools, Vercel AI SDK, OpenAI Agents and LangChain `tool(...)`, MCP servers, tool classes), lists every one with what it does, and asks which to protect and what to block: an amount, a currency, a number of calls a minute, each On (it blocks) or Calibrating (it only notes "Would have blocked"). It shows the change to your code as a diff and asks before writing it: `protect(...)` for the tools you protect, `record(...)` for the others, the same agent name in every call, and `declareTools(...)` once. It writes `signafaide.checks.json` (commit it), makes a free sandbox if you say yes (no account, email or card) and saves your rules. A run without a terminal says exactly what it did not do and the command to finish (see [Without a terminal](#without-a-terminal-protect---yes)).
 
 ```bash
 npx signafaide check approve_payout amount=1200 currency=GBP   # a dry run: exit 1 when it would block
@@ -25,11 +25,33 @@ npx signafaide prove approve_payout                              # a read-only l
 
 A protected tool asks signafAIde before it runs, every call, and signafAIde rules with the newest rules, so a limit changed in the console applies from the next call. If signafAIde can't be reached it retries for the ruling timeout (10 s), then stops (Stop, the default; Let it run is a person's choice in the console). Checks on this machine (a secret in the arguments, a private address, hidden instructions, a changed tool) block here, before signafAIde is asked. A blocked call throws `SignafaideBlocked`: one sentence with the rule in words and a link.
 
+A tool wrapped with `protect(...)` in code (or `wrapTool(..., { strict: true })`) is protected also without `signafaide.checks.json`: every check on this machine runs On, as `init` writes them, the call asks signafAIde for a ruling, and its records carry `checks` with `strict: true`, so `status`, `prove`, `verify`, `check --ci` and the console count it as protected. A tool that is only recorded (`record(...)`) is unchanged, and `SIGNAFAIDE_CHECKS=0` still turns the checks off.
+
 - `npx signafaide pull` fetches the rules saved in the console and asks before any new field of a protected tool leaves the machine.
-- `npx signafaide prove [tool] [--days N] [--files]` asks for a 30-day link, or the longest your plan allows, reuses an active link for the same tool, and sends the agent's public keys with it, so the auditor's browser check is complete. `--files` writes a pack instead.
+- `npx signafaide prove [tool] [--days N] [--files]` asks for a 30-day link, or the longest your plan allows, reuses an active link for the same tool, and sends the agent's public keys with it, so the auditor's browser check is complete. `--files` writes a pack instead. With `--days N` the witness may give the earlier link back: always on a plan with one active link (Free, or a sandbox nobody has kept), and on Solo and Team when the open link lasts N days or more (a longer request makes a new link). `prove` then says it is the earlier link, until when it is open and why, and how to get a new one: revoke it in the console (Share with an auditor), then run `prove --days N` again.
 - `npx signafaide login` signs you in (a code you approve in the console): after you keep the sandbox, rules are saved by a person, never by the agent's API key.
 
-A runnable example: [`examples/payout-agent`](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/tree/main/examples/payout-agent).
+A runnable example: [`examples/payout-agent`](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/tree/main/examples/payout-agent). Starters with a protected tool in place: [`templates/`](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/tree/main/templates).
+
+### Without a terminal: `protect --yes`
+
+A coding agent, a script or CI runs `npx signafaide protect --yes`. It asks nothing, and protects every tool that pays, deletes, sends messages, runs commands, pushes code or edits secrets or config (the tools `check --ci` reads as risky), each with a default rule:
+
+| the tool | its default rule |
+|---|---|
+| pays money and has an amount field | Block when amount is above 1,000 |
+| pays money with no amount field, deletes data, runs commands, pushes code, edits secrets or config | Block when more than 5 calls in 1 minute by the same agent to the same tool |
+| sends messages | Block when more than 20 calls in 1 minute by the same agent to the same tool |
+
+Every default rule starts Calibrating: it notes the calls it would have blocked and blocks none until a person turns it On (`npx signafaide protect` at a terminal, or the console). The output lists each rule and where it went:
+
+- **A sandbox nobody has kept yet** (made by `init`, or a person's `protect`): the rules are saved in the sandbox, `Rules saved in your sandbox as version N`, each listed as `Calibrating  Block ...`.
+- **No key**: the rules are kept in `signafaide.checks.json` as local Calibrating rules (`proposed`, with the day), and a person who runs `npx signafaide protect` at a terminal is offered each one. It exits 1.
+- **A project an API key cannot save rules in** (made in the console, or a sandbox somebody kept): the rules are kept in `signafaide.checks.json` as Calibrating, and `protect` prints one console link per tool, `Add approve_payout's rule: https://signafaide.co.uk/app/p/<project>/<env>/tools/<agent>/<tool>?add=<rule>`, where a person adds the rule with one click (Add as Calibrating). It says the rules are not saved for the project and exits 1. The link is built from the page the witness names in its refusal (`add_in_console`), never from `SIGNAFAIDE_URL`. A rule with a limit is held in its `proposed` entry, since only the witness counts calls.
+
+A field a rule needs (`amount`) is sent to signafAIde only after a person approves it with `npx signafaide pull` at a terminal. Until then the output says so and ends `To finish: npx signafaide pull (at a terminal)`. A field already approved is said as approved.
+
+`--tool <name>` protects that one tool (the agent's full tool list is still declared); `--limit-field amount --above 1000` gives its limit in place of the default rule. `protect` writes `declareTools(...)` before the program's run call, never after it, and runs no git command.
 
 ## Recording without protecting
 
@@ -191,6 +213,22 @@ record(fn, { name: "x", storeContent: true }); // one tool
 
 Nothing waits on the network unless you protect a tool. With an API key, records go to `.signafaide/outbox/` and are shipped in batches, one request at a time: every 2 seconds, every 100 records, and once more when the process is about to exit, for at most 3 seconds (`exitFlushMs`, `SIGNAFAIDE_EXIT_FLUSH_MS`). If the service can't be reached, they stay on disk and are retried with a backoff that grows to a minute; a refusal retrying cannot fix (quota used up, a wrong or revoked key) stops sending until the configuration changes. A malformed `SIGNAFAIDE_API_KEY` is caught here and never sent. They ship on the next run or with `signafaide flush`. Records are never lost on exit, and background requests never keep your process alive.
 
+## Networks that block the witness
+
+A cloud coding agent's sandbox, a CI runner or a company network can refuse the witness. When a proxy or the network's policy refuses it (an HTTP 403 or 407 from a proxy, a refused CONNECT tunnel, or, with no proxy in the way, a blocked name lookup), errors, a protected call's `no_ruling` and `signafaide flush` say so in one sentence:
+
+```text
+The network here blocks signafaide.co.uk (common in cloud coding agents and CI sandboxes): allow signafaide.co.uk and api.signafaide.co.uk in the environment's network settings, or run from a machine that can reach them; records stay signed on this machine meanwhile.
+```
+
+Allow both hosts: `signafaide.co.uk` (the console, sign-in and console links) and `api.signafaide.co.uk` (records and rulings); for a self-hosted witness, its own address. A protected call stops asking at once in that case, without waiting out the ruling timeout, and then does what its If signafAIde can't be reached setting says. A proxy that cannot be reached at all has refused nothing, and the error says that as it is.
+
+The SDK goes through the proxy the environment names, as curl does, with no extra dependency: `HTTPS_PROXY` for an https witness (a CONNECT tunnel, then TLS to the witness inside it), `HTTP_PROXY` for an http one, else `ALL_PROXY`; the lower case name first, then the upper case one. A host `NO_PROXY` names (`example.com`, `.example.com`, `*.example.com`, with or without a port, or `*` for every host) goes direct. Only http and https proxies are used: with a `socks5://` proxy the request goes direct.
+
+## Tests
+
+Under Vitest, Jest and `node --test` the SDK is in test mode: records go to a temporary folder, nothing is sent, and a protected tool runs without a ruling, so a unit test never depends on the network or on the rules of the day. The checks on this machine still run, so a local rule that is On still blocks. Test mode never turns itself on with a live key (`sfa_live_`, from the code, the environment or `.env`): then a protected tool asks for its ruling as in production. `SIGNAFAIDE_TEST=1` forces test mode in a script no test runner starts (set it before the first wrapped tool is made), and `SIGNAFAIDE_TEST=0` turns it off. To test the rules themselves, use `npx signafaide check <tool> field=value` (exit 1 when the call would be blocked).
+
 ## Containers that restart
 
 A container with no persistent disk continues its chain after the witness's head, and its first record is a signed start note. So that a routine restart is not read as a possible loss, end the instance with `await stop()`: it ships what is left and then writes a signed stop note. A start right after a stop note is a clean restart; a start with no stop note before it (a crash, a kill, an unreachable witness) is shown as a warning, because records the earlier instance had not sent are not known.
@@ -266,7 +304,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 
 | command | does |
 |---|---|
-| `signafaide protect [tool] [--tool <name>] [--limit-field <field> --above <number>] [--local] [--yes]` | finds the tools, asks what to block, shows the code change and writes it, writes the checks file, adds the project note to AGENTS.md / CLAUDE.md if you say yes, makes a free sandbox if you say yes, saves the rules; `--limit-field` and `--above` give the limit without asking, and without a terminal every rule starts Calibrating |
+| `signafaide protect [tool] [--tool <name>] [--limit-field <field> --above <number>] [--local] [--yes]` | finds the tools, asks what to block, shows the code change and writes it, writes the checks file, adds the project note to AGENTS.md / CLAUDE.md if you say yes, makes a free sandbox if you say yes, saves the rules; `--limit-field` and `--above` give the limit without asking; without a terminal it protects every risky tool with a default rule that starts Calibrating (see Without a terminal) |
 | `signafaide check <tool> field=value...` | a dry run of a call against the rules: what would block, what is sent; exit 1 when it would block |
 | `signafaide pull` | fetches the project's rules; asks before a new field of a protected tool is sent |
 | `signafaide prove [tool] [--days N] [--files] [--all]` | the auditor link (or files), with the calls, the rules in words and what ran before protection |
@@ -311,7 +349,7 @@ The MCP tools: `signafaide_setup` (a preview that changes, creates and sends not
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-js/0.5.0 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
+X-Signafaide-Client: signafaide-js/0.5.1 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
 ```
 
 It holds the SDK and its version, the JavaScript runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `vercel-ai`, `otel` for the OpenTelemetry processor, or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`, `signafaide agent setup`) and kept in `.signafaide/config.json`; it is never guessed per process, so a program started from a terminal inside a coding agent is not labelled as that agent. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
@@ -323,13 +361,14 @@ The header and the events hold no content, file paths, hostnames or user names. 
 | variable | default |
 |---|---|
 | `SIGNAFAIDE_API_KEY` | read from the environment, then `.env`; created by `signafaide init`; none: local only |
-| `SIGNAFAIDE_URL` | `https://api.signafaide.co.uk`; a self-hosted witness, or `http://127.0.0.1:7474` for a local dev server. Alone it sends nothing |
+| `SIGNAFAIDE_URL` | `https://api.signafaide.co.uk`; a self-hosted witness, or `http://127.0.0.1:7474` for a local dev server. `https://signafaide.co.uk` (the console's address) is read as the hosted witness too. Alone it sends nothing |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` | the proxy requests go through, and the hosts that go direct (see Networks that block the witness) |
 | `SIGNAFAIDE_HOME` | `.signafaide/` in the project root; a mounted volume or `/tmp/signafaide` in production |
 | `SIGNAFAIDE_AGENT_KEY_<NAME>` | an agent's key file content from a secret store (or `keyProvider` in code); live keys can use `SIGNAFAIDE_AGENT_KEY_LIVE_<NAME>`, made with `signafaide keys create --env live --print` |
 | `SIGNAFAIDE_HEAD_FILE` | unset: a file outside `.signafaide/` (a persistent volume) that also keeps the newest signed heads, for containers whose disk does not last; or `onHead` in `configure()` |
 | `SIGNAFAIDE_INSTANCE_STOP` | unset: a signed stop note is written at a clean exit when a head file is set; `1` always, `0` never (see Containers that restart) |
 | `SIGNAFAIDE_EXIT_FLUSH_MS` | `3000`: the longest a finished program is kept open to send; `0` never |
-| `SIGNAFAIDE_TEST` | test mode is on by itself under Vitest, Jest and `node --test` (records in a temporary folder, nothing sent), except with a live API key (`sfa_live_`); `1` forces it, `0` turns it off |
+| `SIGNAFAIDE_TEST` | test mode is on by itself under Vitest, Jest and `node --test` (records in a temporary folder, nothing sent, protected tools run without a ruling), except with a live API key (`sfa_live_`); `1` forces it, `0` turns it off |
 | `SIGNAFAIDE_DISABLED` | `1`: wrapped functions run and nothing is recorded |
 | `SIGNAFAIDE_DECLARE_TOOLS` | `0`: `wrapTools` does not declare the tools it wraps (`declareTools()` still does) |
 | `SIGNAFAIDE_SEGMENT_BYTES` | `67108864`: a shipped chain file larger than this rolls into a sealed segment |

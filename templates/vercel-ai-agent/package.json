@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "ai": "^7.0.176",
-    "signafaide": "^0.5.0",
+    "signafaide": "^0.5.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

@@ -7,6 +7,18 @@ import { VERSION } from "./version.js";
  * server such as http://127.0.0.1:7474); a release test fails if this is ever a loopback address. */
 export const DEFAULT_URL = "https://api.signafaide.co.uk";
 
+/** The hosted console's origin. The console's prompt gives it as `SIGNAFAIDE_URL`, and it answers
+ * as the hosted witness too: it and `DEFAULT_URL` are one service. */
+export const HOSTED_CONSOLE = "https://signafaide.co.uk";
+
+/** A witness URL as the SDK uses it: trimmed, without a trailing slash, and the hosted console's
+ * origin read as the hosted witness (`DEFAULT_URL`), so either address names the same witness. */
+export function witnessUrl(u: string): string {
+  const t = u.trim().replace(/\/+$/, "");
+  const l = t.toLowerCase();
+  return l === HOSTED_CONSOLE || l === DEFAULT_URL ? DEFAULT_URL : t;
+}
+
 /** Errors the SDK cannot fix by retrying: shipping stops until the configuration changes. */
 export const NON_RETRYABLE = new Set(["quota_exceeded", "invalid_key", "plan_required", "bad_signature", "invalid_record", "content_mismatch", "chain_conflict", "unknown_agent", "key_mismatch", "bad_response"]);
 
@@ -15,6 +27,8 @@ export interface TransportResponse {
   status: number;
   contentType: string;
   text: string;
+  /** The answer came through a proxy the environment names (the Node transport says so). */
+  viaProxy?: boolean;
 }
 
 /** How a request is made. The default is `fetch`; the Node runtime passes one whose idle
@@ -37,6 +51,34 @@ export const fetchTransport: Transport = async (req) => {
   }
 };
 
+/** The one sentence said when the network here does not let the witness be reached (a proxy or
+ * network policy refused it, or its name does not resolve): common in cloud coding agents and CI
+ * sandboxes. */
+export function networkBlockedWords(url: string): string {
+  let host = url;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    /* not a URL: said as it is */
+  }
+  if (host === "signafaide.co.uk" || host.endsWith(".signafaide.co.uk"))
+    return "The network here blocks signafaide.co.uk (common in cloud coding agents and CI sandboxes): allow signafaide.co.uk and api.signafaide.co.uk in the environment's network settings, or run from a machine that can reach them; records stay signed on this machine meanwhile.";
+  return `The network here blocks ${host} (common in cloud coding agents and CI sandboxes): allow ${host} in the environment's network settings, or run from a machine that can reach it; records stay signed on this machine meanwhile.`;
+}
+
+/** Whether a failed request was stopped by the network here rather than by the witness: a proxy
+ * refused the tunnel (HTTP 403 or 407 to CONNECT), or, with no proxy in the way, the name does
+ * not resolve (DNS blocked). A proxy that cannot be reached, or does not answer, has refused
+ * nothing: that is said as it is. */
+export function blockedByNetwork(e: unknown): boolean {
+  const err = e as { cause?: { code?: string; message?: string }; code?: string; message?: string; viaProxy?: boolean };
+  const code = err?.cause?.code ?? err?.code ?? "";
+  const text = `${err?.message ?? ""} ${err?.cause?.message ?? ""}`;
+  if (code === "EPROXYREFUSED" || /tunnel|proxy response \(4\d\d\)|\b407\b/i.test(text)) return true;
+  if (err?.viaProxy) return false; // the witness's name is looked up by the proxy, not here
+  return code === "ENOTFOUND" || code === "EAI_AGAIN" || /getaddrinfo (ENOTFOUND|EAI_AGAIN)/.test(text);
+}
+
 /**
  * An error from the service or the SDK. `message` is the one-sentence fix.
  * `code` is the service error code (`chain_conflict`, `invalid_key`...), or
@@ -55,6 +97,11 @@ export class SignafaideError extends Error {
     this.status = opts.status ?? 0;
     this.docs = opts.docs;
     this.body = opts.body ?? {};
+  }
+
+  /** The network here blocks the witness (a proxy or network policy): the message says so. */
+  get blocked(): boolean {
+    return this.code === "network" && this.body.blocked === true;
   }
 
   get retryable(): boolean {
@@ -111,12 +158,18 @@ export class Client {
     } catch (e) {
       const err = e as { cause?: { code?: string }; code?: string; name?: string; message?: string };
       const raw = err.cause?.code ?? err.code ?? err.message ?? String(e);
+      if (blockedByNetwork(e)) throw new SignafaideError(networkBlockedWords(this.url), { code: "network", body: { blocked: true } });
       const reason = /abort|timeout/i.test(`${err.name} ${raw}`) ? (this.timeoutLabel ?? `no answer within ${this.timeoutMs / 1000} s`) : raw;
       throw new SignafaideError(`Cannot reach the signafAIde service at ${this.url} (${reason}); check the network or SIGNAFAIDE_URL.`, { code: "network" });
     }
     const { status, text, contentType: ctype } = resp;
     if (status === 304) return null;
-    if (status < 200 || status >= 300) throw serviceError(status, text);
+    if (status < 200 || status >= 300) {
+      const se = serviceError(status, text);
+      // A proxy's refusal, not the witness's: 407, or a 403 that is not the witness's JSON error.
+      if (status === 407 || (status === 403 && se.code === "http_error")) throw new SignafaideError(networkBlockedWords(this.url), { code: "network", body: { blocked: true } });
+      throw se;
+    }
     return ctype.includes("json") || /^[[{]/.test(text) ? JSON.parse(text) : text;
   }
 

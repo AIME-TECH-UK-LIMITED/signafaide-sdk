@@ -32,6 +32,8 @@ import contextlib
 import hashlib
 import json
 import os
+import secrets
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -133,7 +135,7 @@ class State:
             # even before `signafaide init` adds the folder to the project's .gitignore (§8).
             gi = self.home / ".gitignore"
             if not gi.exists():
-                gi.write_text("*\n")
+                atomic_write(gi, "*\n")
         except OSError as e:
             raise fs_error(e, self.home) from None
 
@@ -251,12 +253,7 @@ class State:
             d = self.held_dir(chain)
             d.mkdir(parents=True, exist_ok=True)
             out = d / f"{recs[0]['envelope']['seq']:012d}-{recs[-1]['envelope']['seq']:012d}.jsonl"
-            tmp = out.with_name(out.name + ".tmp")
-            with open(tmp, "wb") as f:
-                f.write("".join(jcs.dumps(r) + "\n" for r in recs).encode())
-                f.flush()
-                os.fsync(f.fileno())
-            tmp.replace(out)
+            atomic_write(out, "".join(jcs.dumps(r) + "\n" for r in recs), sync=True)
             with open(path, "r+b") as f:
                 f.truncate(cut[0][0])
                 f.flush()
@@ -341,14 +338,9 @@ class State:
                     # reports the chain as continuing after it instead of missing seq 1..N.
                     # With the earlier instance's stop note, when the head names one (a clean restart).
                     _write_json(self._base_path(f"{dst}/{agent}"), {**base["signed"], "stop": base["stop"]} if base.get("stop") else base["signed"])
-                tmp = target.with_name(target.name + ".tmp")
-                with open(tmp, "wb") as f:
-                    f.write("".join(jcs.dumps(r) + "\n" for r, _ in out).encode())
-                    f.flush()
-                    os.fsync(f.fileno())
                 for rec, store in out:
                     self._write_outbox(f"{dst}/{agent}", wire(rec) if store is None else _wire(rec, store))
-                tmp.replace(target)
+                atomic_write(target, "".join(jcs.dumps(r) + "\n" for r, _ in out), sync=True)
                 path.unlink()
         return conflicts
 
@@ -433,11 +425,7 @@ class State:
         if doc.get("retired") == valid_to:
             return False
         doc["retired"] = valid_to
-        tmp = p.with_name(p.name + ".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(jcs.dumps(doc) + "\n")
-        os.replace(tmp, p)
+        atomic_write(p, jcs.dumps(doc) + "\n", mode=0o600)
         return True
 
     def rotate_key(self, agent: str, scope: str = "") -> Tuple[SigningKey, SigningKey]:
@@ -513,14 +501,11 @@ class State:
             doc = {"agent": agent, "key_id": key.key_id, "public_key": b64url(key.public_key), "private_key": b64url(key.seed()), "created": created}
             try:
                 path.parent.mkdir(parents=True, exist_ok=True)
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            except FileExistsError:  # another process won the race; use its key
-                return self.load_key(agent, create=False, scope=scope)
+                made = create_once(path, jcs.dumps(doc) + "\n")
             except OSError as e:
                 raise fs_error(e, self.home) from None
-            with os.fdopen(fd, "w") as f:
-                f.write(jcs.dumps(doc) + "\n")
-            return key
+            # Another thread or process won the race: use its key, which is whole once it is there.
+            return key if made else self.load_key(agent, create=False, scope=scope)
         try:
             doc = json.loads(path.read_text())
             return SigningKey(b64url_decode(doc["private_key"]))
@@ -542,13 +527,11 @@ class State:
         path = self.key_path(doc["agent"], scope)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            raise StateError(f"agent {doc['agent']} already has a key file ({path}); use `signafaide keys rotate` to replace it") from None
+            made = create_once(path, jcs.dumps(doc) + "\n")
         except OSError as e:
             raise fs_error(e, self.home) from None
-        with os.fdopen(fd, "w") as f:
-            f.write(jcs.dumps(doc) + "\n")
+        if not made:
+            raise StateError(f"agent {doc['agent']} already has a key file ({path}); use `signafaide keys rotate` to replace it")
         return path
 
     # --- locking ------------------------------------------------------------
@@ -777,9 +760,7 @@ class State:
     def _write_outbox(self, chain: str, rec: dict) -> None:
         d = self.outbox_dir(chain)
         d.mkdir(parents=True, exist_ok=True)
-        tmp = d / f".{rec['envelope']['seq']:012d}.tmp"
-        tmp.write_text(jcs.dumps(rec))
-        tmp.replace(d / f"{rec['envelope']['seq']:012d}.json")
+        atomic_write(d / f"{rec['envelope']['seq']:012d}.json", jcs.dumps(rec))
 
     def _lines(self, chain: str) -> Iterator[dict]:
         for path in [*self.segments(chain), self.chain_path(chain)]:
@@ -824,12 +805,7 @@ class State:
                     out.append(jcs.dumps(rec) + "\n")
                 if filled_seqs:
                     journal = path.with_name(path.name + ".tail")
-                    tmp = path.with_name(path.name + ".tail.tmp")
-                    with open(tmp, "wb") as f:
-                        f.write(f"{suffix[0][0]}\n".encode() + "".join(out).encode())
-                        f.flush()
-                        os.fsync(f.fileno())
-                    tmp.replace(journal)
+                    atomic_write(journal, f"{suffix[0][0]}\n".encode() + "".join(out).encode(), sync=True)
                     self._recover(chain)
                     self._maybe_roll(chain)
         return len(filled_seqs)
@@ -944,7 +920,8 @@ class State:
     def save_config(self, **values: Any) -> None:
         self.ensure()
         try:
-            _write_json(self.home / "config.json", {**self.config(), **values})
+            with _CONFIG_LOCK:  # read, merge, write: two threads of one process never lose a value
+                _write_json(self.home / "config.json", {**self.config(), **values})
         except OSError as e:
             raise fs_error(e, self.home) from None
 
@@ -1050,10 +1027,70 @@ def _read_json(path: Path) -> Optional[dict]:
         raise StateError(f"{path} is not valid JSON; fix or delete it") from None
 
 
+_CONFIG_LOCK = threading.Lock()
+
+
+def atomic_write(path: Path, data: Any, mode: int = 0o666, sync: bool = False) -> None:
+    """Write ``data`` (bytes or str) to ``path`` all at once: into a temp file of a unique name in
+    the same folder (created exclusively, like ``mkstemp``; ``mode`` before the umask), then
+    ``os.replace``. Two threads or processes writing the same file never share a temp file, and a
+    reader sees the old file or the new one, never part of one."""
+    raw = data.encode() if isinstance(data, str) else data
+    for _ in range(100):
+        tmp = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+            break
+        except FileExistsError:
+            continue
+    else:  # pragma: no cover - 100 collisions of 64 random bits
+        raise StateError(f"could not make a temp file next to {path}")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+            if sync:
+                f.flush()
+                os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def create_once(path: Path, data: Any, mode: int = 0o600) -> bool:
+    """Create ``path`` with ``data`` unless it exists; False when it does. The file appears whole:
+    it is written under a unique temp name in the same folder, then hard-linked into place, which
+    fails when the name is taken. A reader never sees it empty or half written (a key file another
+    thread is still writing). Where hard links are not supported, an exclusive create instead."""
+    raw = data.encode() if isinstance(data, str) else data
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.link(tmp, path)
+            return True
+        except FileExistsError:
+            return False
+        except (AttributeError, NotImplementedError, OSError):  # no hard links here
+            try:
+                fd2 = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+            except FileExistsError:
+                return False
+            with os.fdopen(fd2, "wb") as f:
+                f.write(raw)
+            return True
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+
+
 def _write_json(path: Path, value: dict) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
+    atomic_write(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
 def ensure_gitignore(path: Path, entry: str) -> None:

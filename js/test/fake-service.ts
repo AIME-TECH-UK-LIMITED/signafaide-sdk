@@ -67,6 +67,9 @@ export class FakeService {
   auditorMaxInBody = true;
   /** A witness of before agent_keys and head: bad_request when they are sent. */
   auditorLinksNoKeys = false;
+  /** As the service: a repeat for the same agent, tool and start while its link is open answers
+   * that link again (200, `reused: true`), whatever `days` asks. */
+  auditorReuse = false;
   private ifNoneMatch?: string;
   url = "";
   private server = http.createServer((req, res) => void this.handle(req, res));
@@ -188,7 +191,9 @@ export class FakeService {
     if (!prj) return err(401, "invalid_key", "The API key is not valid; run `signafaide init` for a new sandbox key.");
     if (method === "POST" && path === "/v1/rules") {
       // An API key publishes only into its own sandbox while it is unclaimed (§6).
-      if (prj.env !== "test" || prj.claimed || body.project !== prj.project || body.env !== prj.env) return err(401, "invalid_key", "An API key cannot publish rules; sign in with `signafaide login`.");
+      if (body.project !== prj.project || body.env !== prj.env) return err(401, "invalid_key", "An API key cannot publish rules; sign in with `signafaide login`.");
+      // As the service: where a person adds the rules instead, the project's Tools page.
+      if (prj.env !== "test" || prj.claimed) return err(401, "invalid_key", "An API key publishes rules only into its own sandbox while nobody has claimed it.", { add_in_console: `${this.url}/app/p/${prj.project}/${prj.env}/tools` });
       return this.publishDraft(bearer, body, "sandbox_key", null);
     }
     if (method === "POST" && path === "/v1/auditor-links") {
@@ -196,6 +201,11 @@ export class FakeService {
       if (this.auditorMaxDays !== null && body.days > this.auditorMaxDays)
         return err(402, "plan_required", `An auditor link of an unclaimed sandbox expires within ${this.auditorMaxDays} days: ask for fewer days, or claim the sandbox in the console.`, this.auditorMaxInBody ? { max_days: this.auditorMaxDays } : {});
       if (this.auditorLinksNoKeys && ("agent_keys" in body || "head" in body)) return err(400, "bad_request", "Unknown field agent_keys.");
+      if (this.auditorReuse) {
+        const i = this.auditorLinks.findIndex((b) => b.agent === body.agent && (b.tool ?? null) === (body.tool ?? null) && (b.from ?? null) === (body.from ?? null));
+        if (i >= 0) return [200, { url: `${this.url}/audit/aud_${i + 1}`, expires_at: new Date(this.auditorLinks[i].at + this.auditorLinks[i].days * 86_400_000).toISOString(), reused: true, agent_keys: true }];
+        body.at = Date.now();
+      }
       this.auditorLinks.push(body);
       return [201, { url: `${this.url}/audit/aud_${this.auditorLinks.length}`, expires_at: new Date(Date.now() + body.days * 86_400_000).toISOString(), ...("agent_keys" in body ? { agent_keys: true } : {}) }];
     }

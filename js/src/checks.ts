@@ -967,7 +967,10 @@ function formatsIn(text: string, label: string, hosts: string[], witnessHost: st
   for (const m of text.matchAll(TOKEN)) {
     const tok = m[0];
     if (tok.length < MIN_TOKEN) continue;
+    const n = found.size;
     tableFormat(tok, hosts, witnessHost, found);
+    // A key glued to a name by "_" or "-" (aws_key_AKIA..., id-AKIA...): its parts are tokens too.
+    if (found.size === n && /[_-]/.test(tok)) for (const part of tok.split(/[_-]+/)) tableFormat(part, hosts, witnessHost, found);
     if (tok.length >= 51 && isWif(tok)) found.add("wallet_private_key");
     else if (tok.length >= 64 && isHexKey(tok, `${label} ${text.slice(Math.max(0, m.index! - 32), m.index!)}`)) found.add("wallet_private_key");
   }
@@ -1497,8 +1500,10 @@ export function checksFileErrors(doc: unknown): string | null {
   return null;
 }
 
-/** `proposed` of a version 2 checks file: the local rules an agent run proposed with no key to save
- * them, each `{rule, by: "agent", on: "YYYY-MM-DD"}`. A person running `protect` is offered them. */
+/** `proposed` of a version 2 checks file: the rules an agent run proposed and could not save, each
+ * `{rule, by: "agent", on: "YYYY-MM-DD"}`: `rule` is the id of a local rule, or a rule with a
+ * `limit` itself (only the witness counts calls, so it is never a local rule and never applies
+ * here). A person running `protect` is offered them. */
 function proposedErrors(p: unknown, v2: boolean, rules: unknown): string | null {
   if (!v2) return "proposed is for checks file version 2";
   if (!Array.isArray(p) || p.length > 1000) return "proposed must be a list of at most 1,000 {rule, by, on}";
@@ -1508,9 +1513,17 @@ function proposedErrors(p: unknown, v2: boolean, rules: unknown): string | null 
     if (!isObj(x)) return `proposed[${i}] must be {"rule", "by", "on"}`;
     const e = exact(x, ["rule", "by", "on"], [], `proposed[${i}]`);
     if (e) return e;
-    if (typeof x.rule !== "string" || !ids.has(x.rule)) return `proposed[${i}].rule must be the id of a rule in rules`;
-    if (seen.has(x.rule)) return `proposed lists ${x.rule} twice`;
-    seen.add(x.rule);
+    let id: string;
+    if (isObj(x.rule)) {
+      const re = ruleErrors(x.rule, true, null);
+      if (re) return `proposed[${i}].rule: ${re}`;
+      if (!("limit" in x.rule)) return `proposed[${i}].rule holds a rule only when it has a limit; any other rule is a local rule in rules, named by its id`;
+      if (ids.has(x.rule.id)) return `proposed[${i}].rule has the id of a rule in rules`;
+      id = x.rule.id;
+    } else if (typeof x.rule !== "string" || !ids.has(x.rule)) return `proposed[${i}].rule must be the id of a rule in rules, or a rule with a limit`;
+    else id = x.rule;
+    if (seen.has(id)) return `proposed lists ${id} twice`;
+    seen.add(id);
     if (x.by !== "agent") return `proposed[${i}].by must be "agent"`;
     if (typeof x.on !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(x.on)) return `proposed[${i}].on must be a date, YYYY-MM-DD`;
   }

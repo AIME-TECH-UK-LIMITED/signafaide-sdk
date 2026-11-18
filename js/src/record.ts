@@ -54,10 +54,17 @@ const EXPLICIT = new Map<string, { names: string[]; unrecorded: Set<string> }>()
  * the telemetry plug-in leaves a span of such a tool to the wrapper (§8): the wrapper's decision
  * carries the checks, and a span's decision written at its start would not. */
 const BY_WRAPPER = new Set<string>();
+/** Of those, the names a wrapper protects (strict in code): checked even without a checks file. */
+const STRICT_BY_WRAPPER = new Set<string>();
 
 /** @internal Whether a wrapper of the SDK in this process records tool calls named `name`. */
 export function wrapperRecords(name: string): boolean {
   return BY_WRAPPER.has(name);
+}
+
+/** @internal Whether a wrapper of the SDK in this process protects tool calls named `name` (strict in code). */
+export function wrapperProtects(name: string): boolean {
+  return STRICT_BY_WRAPPER.has(name);
 }
 
 /** Bumped whenever one of the three changes, so a recorder looks again only then. */
@@ -175,6 +182,7 @@ export function resetToolRegistry(): void {
   LISTED.clear();
   EXPLICIT.clear();
   BY_WRAPPER.clear();
+  STRICT_BY_WRAPPER.clear();
   resetSyncTools();
   toolsVersion++;
   toldDeclare = false;
@@ -197,13 +205,14 @@ class Spec {
     if (syncOnly) registerSyncTool(name);
     BY_WRAPPER.add(name);
     if (tool?.name) BY_WRAPPER.add(tool.name);
+    if (opts.strict) for (const n of [name, tool?.name]) if (n) STRICT_BY_WRAPPER.add(n);
     remember(WRAPPED, opts.agent, name);
     if (listed) remember(LISTED, opts.agent, name);
     // The agent is shown the tool from now on: its fingerprints are approved the first time (§8).
     if (tool && !recordingDisabled()) {
       try {
         const rec = getRecorder();
-        rec.checks.seen(tool, opts.agent || rec.defaultAgent, declaredName(name));
+        rec.checks.seen(tool, opts.agent || rec.defaultAgent, declaredName(name), !!opts.strict);
       } catch {
         /* the first call reports what is wrong */
       }
@@ -224,7 +233,8 @@ class Spec {
    * fingerprints cover what the agent is shown of it (§11.1). */
   private plan(input: unknown, callId?: string): Plan | null {
     const rec = getRecorder();
-    if (!rec.checks.enabled()) return null;
+    // A tool protected in code is checked even without a checks file (every check On, §8).
+    if (!rec.checks.enabled(!!this.opts.strict)) return null;
     return rec.checks.plan(this.tool ?? { name: this.name }, this.opts.agent || rec.defaultAgent, toJsonable(input) ?? null, {
       strictCode: !!this.opts.strict,
       callId,
@@ -290,7 +300,7 @@ class Spec {
     };
     const done = (v: unknown): unknown => {
       const value = toJsonable(v) ?? null;
-      const results = rec.checks.resultEntries(value, false, declaredName(this.name));
+      const results = rec.checks.resultEntries(value, false, declaredName(this.name), !!this.opts.strict);
       const withheld = rec.checks.withheld(this.name, results);
       this.notify(rec, [...argNotes, ...rec.checks.resultNotes(declaredName(this.name), results)], withheld ? undefined : v);
       if (withheld) {
@@ -345,7 +355,7 @@ class Spec {
     // now (it then writes the outcome too): one call, one decision. Not with tool-call checks on:
     // the wrapper then always writes its own decision with the checks, and asks for the ruling of
     // a strict call (§8); the plug-in leaves spans of the tools a wrapper records to it.
-    const held = telemetryHooks.adopt && !checksOn() ? telemetryHooks.adopt(this.name, callId) : null;
+    const held = telemetryHooks.adopt && !checksOn(!!this.opts.strict) ? telemetryHooks.adopt(this.name, callId) : null;
     if (held) return this.opts.strict ? this.strictCheck(held[0], held[1]).then(fn) : fn();
     let plan: Plan | null;
     try {
@@ -554,9 +564,9 @@ export function wrapTool<T>(tool: T, opts: WrapOptions & { name?: string } = {})
 }
 
 /** Whether tool-call checks are on for the recorder in use (a checks file is in place). */
-function checksOn(): boolean {
+function checksOn(protect = false): boolean {
   try {
-    return getRecorder().checks.enabled();
+    return getRecorder().checks.enabled(protect);
   } catch {
     return false;
   }

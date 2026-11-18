@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from ._plural import plural
 from .coverage import TOOLS, declared_name, telemetry as tool_telemetry, telemetry_lines, tool_note_name
 from .crypto import SigningKey, b64url, hash_json
-from .http import DEFAULT_URL, Client, SignafaideError
+from .http import DEFAULT_URL, Client, SignafaideError, witness_url
 from .records import (API_KEY_RE, AGENT_RE, INSTANCE_STOP, MAX_CLOCK_SKEW_MS, instance_stop_content, is_stop_note, agent_name, clamp_time, make_draft, make_record, now, parse_time, record_hash,
                       registration, valid_project_id, with_wall_time)
 from .state import TOOL_SOURCE_REFRESH_MS, PENDING, KeyProvider, State, StateError, agent_key_env_name, append_env_file, find_root, key_fingerprint, read_env_file, scope_of, wire_record
@@ -56,6 +56,23 @@ def recording_disabled() -> bool:
     return os.environ.get("SIGNAFAIDE_DISABLED", "").strip().lower() in ("1", "true", "yes")
 
 
+def under_pytest() -> bool:
+    """Whether this process is a pytest run, from its start: not only while a test runs
+    (``PYTEST_CURRENT_TEST``) but also while pytest imports the test modules, when a module that
+    wraps tools at import makes the recorder. ``PYTEST_VERSION`` (pytest 8.2 and later) and
+    ``PYTEST_XDIST_WORKER`` are set for the whole run; for an older pytest, pytest is imported and
+    the program is pytest (``pytest``, ``py.test``, ``python -m pytest``). Importing pytest in
+    other code turns nothing on."""
+    env = os.environ
+    if "PYTEST_CURRENT_TEST" in env or "PYTEST_VERSION" in env or "PYTEST_XDIST_WORKER" in env:
+        return True
+    if "pytest" not in sys.modules:
+        return False
+    argv0 = os.path.basename(sys.argv[0] if sys.argv and sys.argv[0] else "").lower()
+    parent = os.path.basename(os.path.dirname(sys.argv[0])).lower() if sys.argv and sys.argv[0] else ""
+    return argv0 in ("pytest", "py.test", "pytest.exe", "py.test.exe", "pytest-script.py") or (argv0 == "__main__.py" and parent == "pytest")
+
+
 def test_mode(api_key: Optional[str] = None) -> bool:
     """Test mode: records are written to a temporary folder and never sent, so unit tests never ship
     records under a production agent name. On with ``SIGNAFAIDE_TEST=1``, and by itself under pytest
@@ -65,7 +82,7 @@ def test_mode(api_key: Optional[str] = None) -> bool:
     v = os.environ.get("SIGNAFAIDE_TEST", "").strip().lower()
     if v:
         return v in ("1", "true", "yes")
-    if "PYTEST_CURRENT_TEST" not in os.environ:
+    if not under_pytest():
         return False
     key = api_key if api_key is not None else os.environ.get("SIGNAFAIDE_API_KEY", "")
     return not (key or "").strip().startswith("sfa_live_")
@@ -176,12 +193,12 @@ class Recorder:
     def url(self) -> str:
         given = self._url or os.environ.get("SIGNAFAIDE_URL")
         if given:
-            return given.rstrip("/")
+            return witness_url(given)
         env_file = self.state.root / ".env"
         from_file = read_env_file(env_file).get("SIGNAFAIDE_URL")
         if not from_file:
             return DEFAULT_URL
-        url = from_file.rstrip("/")
+        url = witness_url(from_file)
         # The witness checks the rule sets, the shared list and the rulings of this program: say
         # once where its address came from when a file in the project, not the code or the
         # environment, set it.

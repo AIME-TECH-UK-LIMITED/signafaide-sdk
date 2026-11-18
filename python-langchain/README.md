@@ -13,7 +13,7 @@ uv add langchain-signafaide
 uv run signafaide protect
 ```
 
-It finds the `@tool` functions, asks which to protect and what to block, shows the change (`@signafaide.protect(agent=...)` under `@tool`) and asks before writing it, makes a free sandbox if you say yes and saves your rules. Then `uv run signafaide check <tool> field=value` (a dry run), `signafaide pull` (the console's rules), `signafaide prove <tool>` (the auditor link) and `signafaide login` (a person's sign-in for saving rules). The middleware below records every tool call the agent makes, whatever protect found.
+It finds the `@tool` functions, asks which to protect and what to block, shows the change (`@signafaide.protect(agent=...)` under `@tool`) and asks before writing it, makes a free sandbox if you say yes and saves your rules. Without a terminal, `uv run signafaide protect --yes` protects every tool that pays, deletes, sends messages, runs commands, pushes code or edits secrets or config, with a default rule that starts Calibrating (it blocks nothing until a person turns it On); see the [signafaide README](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/tree/main/python#without-a-terminal-protect---yes). A tool with `@signafaide.protect` in code is protected with or without `signafaide.checks.json`. Then `uv run signafaide check <tool> field=value` (a dry run), `signafaide pull` (the console's rules), `signafaide prove <tool>` (the auditor link) and `signafaide login` (a person's sign-in for saving rules). The middleware below records every tool call the agent makes, whatever protect found.
 
 ## Install
 
@@ -51,6 +51,8 @@ signafaide verify
 | `store_content` | Also send inputs and outputs to the witness, encrypted. Default: hashes only. |
 
 The middleware works with `invoke` and `ainvoke`. A tool that raises is recorded with its error and the exception is raised unchanged.
+
+Under pytest nothing is sent and a protected tool runs without a ruling (test mode, from the start of the run), never with a live key. When a proxy or network policy refuses the witness, the error says so in one sentence: allow `signafaide.co.uk` and `api.signafaide.co.uk` in the environment's network settings.
 
 ## Tools outside an agent
 

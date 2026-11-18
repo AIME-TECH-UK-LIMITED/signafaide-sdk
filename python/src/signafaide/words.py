@@ -83,6 +83,15 @@ def _count(n: int, one: str, many: str) -> str:
     return f"{number_words(str(n))} {one if n == 1 else many}"
 
 
+def window_words(seconds: int) -> str:
+    """A limit's window as the console says it: ``1 minute`` for 60 seconds, ``2 hours``, ``90 seconds``."""
+    if seconds % 3600 == 0:
+        return _count(seconds // 3600, "hour", "hours")
+    if seconds % 60 == 0:
+        return _count(seconds // 60, "minute", "minutes")
+    return _count(seconds, "second", "seconds")
+
+
 _PER = {"agent": "by the same agent", "tool": "to the same tool", "agent_tool": "by the same agent to the same tool"}
 
 
@@ -96,7 +105,7 @@ def rule_words(r: dict) -> str:
     parts = [condition_words(c) for c in r["when"]]
     lim = r.get("limit")
     if lim:
-        parts.append(f"more than {_count(lim['calls'], 'call', 'calls')} in {_count(lim['seconds'], 'second', 'seconds')} {_PER[lim['per']]}")
+        parts.append(f"more than {_count(lim['calls'], 'call', 'calls')} in {window_words(lim['seconds'])} {_PER[lim['per']]}")
     when = f" when {' and '.join(parts)}" if parts else ""
     xs = r.get("exceptions") or []
     except_ = f", except when {' or '.join(exception_words(x) for x in xs)}" if xs else ""

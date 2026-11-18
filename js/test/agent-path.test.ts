@@ -107,6 +107,18 @@ describe("protect --yes --tool --limit-field --above, with no key", () => {
     expect(JSON.parse(read("signafaide.checks.json")).proposed).toHaveLength(1);
   });
 
+  it("says the kept rules in the plural when several are kept", async () => {
+    fs.writeFileSync(
+      path.join(ctx.root, "src", "tools.ts"),
+      TOOLS_TS.replace("async function lookup_invoice", "export async function refund_payout(payee: string, amount: number) {\n  return payee + amount;\n}\nasync function lookup_invoice").replace("{ approve_payout,", "{ approve_payout, refund_payout,"),
+    );
+    setPrompter(() => flagPrompter({ yes: true }));
+    const [, out] = await cli("protect", "--yes");
+    expect(out).toContain("Kept in signafaide.checks.json as local Calibrating rules (they block nothing)");
+    expect(out).toContain("is offered them.");
+    expect(out).not.toContain("a local Calibrating rule");
+  });
+
   it("accepting the proposal uses the agent's value, says where it came from and uses the proposal up", async () => {
     setPrompter(() => flagPrompter({ yes: true }));
     await cli(...AGENT_RUN);

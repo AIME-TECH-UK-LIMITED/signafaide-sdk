@@ -9,7 +9,7 @@
   },
   "tools": {
     "approve_payout": {
-      "protect": false,
+      "protect": true,
       "mode": "enforce"
     }
   },

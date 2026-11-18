@@ -1,7 +1,14 @@
 """The smoke test, with no account, no key and no network: the agent pays 800, and 1,200 is
-blocked by the rule on this machine before approve_payout runs. Exit 1 when either is not so."""
+blocked by the rule on this machine before approve_payout runs. Exit 1 when either is not so.
 
+It runs in test mode (set before the tools are imported): records go to a temporary folder and
+nothing is sent, so the protected approve_payout runs without a ruling, as under pytest, and the
+rule on this machine still blocks 1,200. Never set with a live key."""
+
+import os
 import sys
+
+os.environ.setdefault("SIGNAFAIDE_TEST", "1")
 
 import signafaide
 from payout_agent.agent import run_agent

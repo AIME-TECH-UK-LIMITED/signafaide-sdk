@@ -7,9 +7,11 @@ async function pay(payee: string, amount: number, currency: string): Promise<str
   return `paid ${amount} ${currency} to ${payee}`;
 }
 
-// approve_payout pays money, so it is protected: it runs only when the rules allow it. Here the
-// rule is in signafaide.checks.json, on this machine ("block when amount is above 1,000", On).
-// lookup_invoice only reads, so it is recorded. Every call is signed and recorded in .signafaide/.
+// approve_payout pays money, so it is protected (`"protect": true` in signafaide.checks.json): every
+// call runs the local checks in On, the rule on this machine blocks it when the amount is above
+// 1,000, and a call the rule lets through runs only when signafAIde rules allow (a key or sandbox:
+// `npx signafaide init`). lookup_invoice only reads, so it is recorded. Every call is signed and
+// recorded in .signafaide/.
 export const tools = {
   approve_payout: wrapTool(
     tool({

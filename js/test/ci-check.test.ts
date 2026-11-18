@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { main } from "../src/cli.js";
-import { checksFileErrors } from "../src/checks.js";
+import { checksFileErrors, toolSettings } from "../src/checks.js";
 import { ciCheck, riskOf } from "../src/ci-check.js";
 import { toolKind } from "../src/find-tools.js";
 import { NOTE } from "../src/skill.js";
@@ -239,6 +239,13 @@ describe("the starter templates", () => {
       expect(fs.readFileSync(path.join(d, "AGENTS.md"), "utf8")).toBe(`<!-- signafaide:start -->\n${NOTE}<!-- signafaide:end -->\n`);
       expect(fs.readFileSync(path.join(d, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n");
       expect(checksFileErrors(JSON.parse(fs.readFileSync(path.join(d, "signafaide.checks.json"), "utf8")))).toBeNull();
+    }
+  });
+  it("protect approve_payout in the checks file, On, so `checks status` lists it as a protected tool", () => {
+    for (const t of ["vercel-ai-agent", "openai-agents-python"]) {
+      const f = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../templates", t, "signafaide.checks.json"), "utf8"));
+      expect(f.tools.approve_payout).toEqual({ protect: true, mode: "enforce" });
+      expect(toolSettings(f, "approve_payout").strict).toBe(true);
     }
   });
 });

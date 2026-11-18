@@ -14,7 +14,7 @@ import { hashJson } from "./crypto.js";
 import { SignafaideError } from "./http.js";
 import { verify } from "./index.js";
 import { plural } from "./plural.js";
-import { fieldUses, toVersion2, writeChecksFile, type Prompter } from "./protect.js";
+import { fieldUses, findTools, toVersion2, writeChecksFile, type Prompter } from "./protect.js";
 import { recordHash, type SignedRecord } from "./records.js";
 import type { Recorder } from "./runtime.js";
 import { VERSION } from "./version.js";
@@ -65,10 +65,32 @@ export interface ToolLine {
   proof: string;
 }
 
-/** What `status` says of each tool's protection: `1 of 3 rules On, 2 Calibrating`, `Off`, ... */
-export function protectionWords(rec: Recorder, f: Json | null, agent: string, tool: string): string {
+/** The declared names of the tools the project's code protects (`protect(...)`, or `record(fn,
+ * { strict: true })`): protected whatever the checks file says (§8). */
+export function protectedInCode(rec: Recorder): Set<string> {
+  try {
+    return new Set(findTools(rec.state.root).tools.filter((t) => t.wrapped === "protect").map((t) => declaredName(t.name)));
+  } catch {
+    return new Set(); // code that cannot be read protects nothing here
+  }
+}
+
+/** The tools that are protected: by the checks file, by the code, or whose last call was strict. */
+export function protectedNames(rec: Recorder, f: Json | null, records: SignedRecord[]): Set<string> {
+  const out = new Set<string>(f ? Object.keys(f.tools).filter((n) => C.toolSettings(f, n).strict) : []);
+  const last = new Map<string, boolean>();
+  for (const r of records) if (r.envelope.kind === "decision" && isObj(r.envelope.checks)) last.set(r.envelope.name, (r.envelope.checks as Json).strict === true);
+  for (const n of protectedInCode(rec)) out.add(n);
+  for (const [n, x] of last) if (x) out.add(n);
+  return out;
+}
+
+/** What `status` says of each tool's protection: `1 of 3 rules On, 2 Calibrating`, `Off`, ...
+ * `inCode`: the code protects it (its wrapper, or its last call was strict). */
+export function protectionWords(rec: Recorder, f: Json | null, agent: string, tool: string, inCode = false): string {
   const decl = declaredName(tool);
-  const ts = f ? C.toolSettings(f, decl) : null;
+  let ts = f ? C.toolSettings(f, decl) : null;
+  if (inCode) ts = { ...(ts ?? { mode: "enforce", disclose: [], fail: "closed" }), strict: true };
   const rs = rec.checks.heldRules();
   if (ts && !ts.strict && ts.mode === "enforce" && f?.rules) {
     const n = f.rules.rules.filter((r: Json) => C.applies(r, agent, decl)).length;
@@ -89,15 +111,18 @@ export function toolLines(rec: Recorder, proofOf: (agent: string) => string): To
   const agents = new Set<string>([...chains.keys()]);
   for (const a of rec.state.agents()) agents.add(a);
   const out: ToolLine[] = [];
+  const code = protectedInCode(rec);
   for (const agent of [...agents].sort(byCodePoint)) {
     const names = new Set<string>();
     for (const tools of Object.values(rec.state.toolSources(agent))) for (const t of Object.keys(tools)) names.add(declaredName(t));
     const recs = chains.get(agent)?.records ?? [];
     const calls = new Map<string, { n: number; last: string }>();
+    const strict = new Map<string, boolean>(); // the last call of each tool: strict (protected in code) or not
     for (const r of recs) {
       const e = r.envelope;
       if (e.kind !== "decision" || e.name.startsWith("signafaide.")) continue;
       names.add(e.name);
+      if (isObj(e.checks)) strict.set(e.name, (e.checks as Json).strict === true);
       const c = calls.get(e.name) ?? { n: 0, last: e.time };
       c.n++;
       c.last = e.time;
@@ -108,7 +133,7 @@ export function toolLines(rec: Recorder, proofOf: (agent: string) => string): To
     const proof = proofOf(agent);
     for (const tool of [...names].sort(byCodePoint)) {
       const c = calls.get(tool);
-      out.push({ agent, tool, calls: c?.n ?? 0, last: c?.last ?? null, protected: protectionWords(rec, f, agent, tool), proof });
+      out.push({ agent, tool, calls: c?.n ?? 0, last: c?.last ?? null, protected: protectionWords(rec, f, agent, tool, code.has(tool) || strict.get(tool) === true), proof });
     }
   }
   return out;
@@ -392,6 +417,7 @@ export async function runProve(rec: Recorder, o: ProveOptions): Promise<number> 
     if (link?.url) {
       out(reused ? "Send this link to your auditor (made earlier, still open):" : "Send this link to your auditor:");
       out(`           ${link.url}   read only${link.expires_at ? `, until ${when(link.expires_at).slice(0, -6)}` : ""}`);
+      if (reused && o.days !== undefined) for (const l of await reusedLinkLines(rec, link, o.days, o.tool)) out(l);
       if (link.agent_keys === true) out("           They can check it in their browser; nothing to install.");
       else {
         out("           The witness did not keep this agent's public keys with the link, so the browser check");
@@ -443,7 +469,7 @@ export async function runProve(rec: Recorder, o: ProveOptions): Promise<number> 
   for (const t of cov.declared) declared.set(t.name, t.recorded);
   if (!declared.size) for (const tools of Object.values(rec.state.toolSources(agent))) for (const [n, r] of Object.entries(tools)) declared.set(declaredName(n), (declared.get(declaredName(n)) ?? false) || r);
   const f = checksFile(rec);
-  const prot = f ? Object.keys(f.tools).filter((n) => C.toolSettings(f, n).strict).length : 0;
+  const prot = protectedNames(rec, f, chain.records).size;
   if (declared.size) {
     const rcd = [...declared.values()].filter(Boolean).length;
     out(`  Tools      ${agent} has ${plural(declared.size, "tool")}, ${rcd === declared.size ? `all ${rcd}` : `${rcd}`} recorded, ${prot} protected`);
@@ -472,7 +498,24 @@ export async function runProve(rec: Recorder, o: ProveOptions): Promise<number> 
   return writeProofFiles(rec, { agent, tool: o.tool ?? null, from, out, prompt: o.prompt, content: o.content, dir: o.dir, records: recs });
 }
 
-type AuditorLink = { url: string; expires_at?: string; agent_keys?: boolean };
+type AuditorLink = { url: string; expires_at?: string; agent_keys?: boolean; reused?: boolean };
+
+/** Said when `prove --days N` got the link made earlier back instead of a new one: plainly that
+ * it is the earlier link and until when, why, and how to get a new one. */
+async function reusedLinkLines(rec: Recorder, link: AuditorLink, days: number, tool?: string): Promise<string[]> {
+  let sandbox = false;
+  try {
+    sandbox = (await rec.client(10_000).project())?.claimed === false;
+  } catch {
+    /* unknown: said without the plan */
+  }
+  const until = link.expires_at ? when(link.expires_at).slice(0, -6) : null;
+  const why = sandbox ? "an unclaimed sandbox's plan allows one active link" : "the witness gives this API key its open link again for the same agent, tool and start";
+  return [
+    `           You asked for ${days} ${days === 1 ? "day" : "days"}: this is not a new link. The link made earlier is reused${until ? `, open until ${until}` : ""}, because ${why}.`,
+    `           For a new link: ${sandbox ? "keep the sandbox (the claim link from init), then " : ""}revoke this one in the console (${siteOf(rec.url)}, Share with an auditor), then run npx signafaide prove${tool ? ` ${tool}` : ""} --days ${days} again.`,
+  ];
+}
 
 /** Links `prove` made, kept so a second `prove` reuses an active one (`.signafaide/auditor-links.json`). */
 function linksFile(rec: Recorder): string {
@@ -542,7 +585,7 @@ export async function auditorLinkFor(rec: Recorder, agent: string, tool: string 
   } catch {
     /* not kept: the next prove asks again */
   }
-  return { link, reused: false };
+  return { link, reused: link.reused === true };
 }
 
 /** `prove --files`: the pack (with the local rules its records name), the agent keys, the head

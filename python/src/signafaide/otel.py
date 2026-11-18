@@ -264,7 +264,7 @@ class SignafaideSpanProcessor(SpanProcessor):
         # decision itself, with its checks and, when strict, the witness's ruling (§8). The span is
         # left to it: when it ends, the wrapper's call is matched to it as for a span that says
         # only at its end that it is a tool call, and recorded here only when no wrapper ran.
-        if decorator.wrapper_records(call["tool"]) and _checks_on(rec):
+        if decorator.wrapper_records(call["tool"]) and _checks_on(rec, decorator.wrapper_protects(call["tool"])):
             self._keep(self._began, span_id, next(_ticks))
             return
         d = self._decide(rec, agent, span, call, at_start=True)
@@ -407,10 +407,11 @@ class SignafaideSpanProcessor(SpanProcessor):
         return None
 
 
-def _checks_on(rec: runtime.Recorder) -> bool:
-    """Whether tool-call checks are on for *rec* (a checks file is in place); never raises."""
+def _checks_on(rec: runtime.Recorder, protect: bool = False) -> bool:
+    """Whether tool-call checks are on for *rec* (a checks file is in place, or *protect*: a tool
+    protected in code); never raises."""
     try:
-        return rec.checks.enabled()
+        return rec.checks.enabled(protect)
     except Exception:  # noqa: BLE001
         return False
 

@@ -482,8 +482,13 @@ def cmd_claim(a: argparse.Namespace) -> int:
 def cmd_flush(a: argparse.Namespace) -> int:
     rec = _recorder()
     r = rec.flush()
+    blocked = next((e for e in r["errors"].values() if getattr(e, "blocked", False)), None)
+    if blocked is not None:
+        # The network here blocks the witness: one sentence for every chain, not one line each.
+        print(str(blocked), file=sys.stderr)
     for agent, e in r["errors"].items():
-        print(f"{agent}: {e}", file=sys.stderr)
+        if blocked is None or not getattr(e, "blocked", False):
+            print(f"{agent}: {e}", file=sys.stderr)
     if not rec.api_key:
         print(f"no API key: nothing was sent; {plural(r['left'], 'record')} stay local. Run `signafaide init` (or set SIGNAFAIDE_API_KEY) to send hashes")
         return 0

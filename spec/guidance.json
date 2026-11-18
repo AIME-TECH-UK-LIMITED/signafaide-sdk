@@ -140,7 +140,7 @@
       "code": "network",
       "status": 0,
       "means": "The service could not be reached. Records are kept in `.signafaide/outbox/` and ship later; nothing is lost.",
-      "fix": "Check SIGNAFAIDE_URL and the network, then run `signafaide flush`. Only a protected tool waits for the service."
+      "fix": "Check SIGNAFAIDE_URL and the network, then run `signafaide flush`. Only a protected tool waits for the service. When the message says the network here blocks signafaide.co.uk (a proxy or network policy refused it, common in cloud coding agents and CI sandboxes), allow `signafaide.co.uk` and `api.signafaide.co.uk` in the environment's network settings, or run from a machine that can reach them; records stay signed on this machine meanwhile."
     },
     {
       "code": "not_recorded",
@@ -206,7 +206,7 @@
       "code": "no_ruling",
       "status": 0,
       "means": "A protected tool set to Stop (`fail` is `closed`) got no ruling from the witness in time (no receipt after sending again for the whole ruling timeout, often `network`, or a witness that does not give rulings), so the tool did not run. The decision ships later and the witness still rules on it.",
-      "fix": "Fix the cause in the message, then call again. `signafaide checks status` shows each protected tool and what happens if signafAIde can't be reached (Stop or Let it run). `ruling_timeout_ms` in `signafaide.checks.json` sets how long a protected call waits, sending a failed request again (10 s by default). If the tool should run without a ruling when signafAIde can't be reached, choose Let it run for it: set `fail` to `\"open\"` for the tool in a version 1 `signafaide.checks.json`, or in the console when the rule set sets it (the rule set's wins); such calls are recorded as having had no ruling."
+      "fix": "Fix the cause in the message, then call again. When it says the network here blocks signafaide.co.uk (common in cloud coding agents and CI sandboxes), allow `signafaide.co.uk` and `api.signafaide.co.uk` in the environment's network settings, or run from a machine that can reach them. `signafaide checks status` shows each protected tool and what happens if signafAIde can't be reached (Stop or Let it run). `ruling_timeout_ms` in `signafaide.checks.json` sets how long a protected call waits, sending a failed request again (10 s by default). If the tool should run without a ruling when signafAIde can't be reached, choose Let it run for it: set `fail` to `\"open\"` for the tool in a version 1 `signafaide.checks.json`, or in the console when the rule set sets it (the rule set's wins); such calls are recorded as having had no ruling."
     },
     {
       "code": "rules_unavailable",

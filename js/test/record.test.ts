@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { flush, init, note, record, NotRecorded } from "../src/index.js";
+import { flush, init, note, record, SignafaideBlocked } from "../src/index.js";
 import { contentHash } from "../src/crypto.js";
 import { makeDraft, recordHash } from "../src/records.js";
 import { configure, getRecorder } from "../src/runtime.js";
@@ -208,7 +208,8 @@ describe("shipping", () => {
     const pay = record(async () => {
       ran = true;
     }, { name: "pay", strict: true });
-    await expect(pay()).rejects.toThrow(NotRecorded);
+    // Protected in code: checked and ruled as with a checks file (patch 0.5.1), so it is refused here as no_key.
+    await expect(pay()).rejects.toThrow(SignafaideBlocked);
     await expect(pay()).rejects.toThrow(/until a person runs `npx signafaide protect`.*no signafAIde key or sandbox/);
     expect(ran).toBe(false);
     expect(ctx.service.calls).toEqual([]);
@@ -233,8 +234,8 @@ describe("shipping", () => {
     const pay = record(async () => {
       ran = true;
     }, { name: "pay", strict: true });
-    await expect(pay()).rejects.toThrow(NotRecorded);
-    await expect(pay()).rejects.toThrow(/pay is protected and did not run/);
+    // Protected in code: no receipt means no ruling, and the tool stops (patch 0.5.1).
+    await expect(pay()).rejects.toThrow(/pay did not run: signafAIde did not rule on it .*and this tool is set to stop/);
     expect(ran).toBe(false);
   });
 

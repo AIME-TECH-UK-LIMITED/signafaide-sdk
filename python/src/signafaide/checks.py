@@ -1053,6 +1053,7 @@ _TOKEN = re.compile(r"[A-Za-z0-9_-]+")
 _TOKEN_TABLE = str.maketrans({chr(i): (chr(i) if re.match(r"[A-Za-z0-9_-]", chr(i)) else " ") for i in range(128)})
 #: The shortest token any format can match (``xox?-`` and 10 more).
 _MIN_TOKEN = 15
+_GLUE = re.compile(r"[_-]+")
 
 
 def _table_format(tok: str, hosts: List[str], witness_host: Optional[str], found: set) -> None:
@@ -1105,7 +1106,13 @@ def _formats_in(text: str, label: str, hosts: List[str], witness_host: Optional[
         for tok in scan.lookalike_tokens(text):
             _table_format(tok, hosts, witness_host, found)
     for tok in toks:
+        n = len(found)
         _table_format(tok, hosts, witness_host, found)
+        if len(found) == n and ("_" in tok or "-" in tok):
+            # A key glued to a name by "_" or "-" (aws_key_AKIA..., id-AKIA...): its parts are tokens too.
+            for part in _GLUE.split(tok):
+                if len(part) >= _MIN_TOKEN:
+                    _table_format(part, hosts, witness_host, found)
         if len(tok) >= 51 and scan.is_wif(tok):
             found.add("wallet_private_key")
         elif len(tok) >= 64 and any(scan.is_hex_key(tok, label + " " + text[max(0, m.start() - 32):m.start()])
@@ -1574,8 +1581,10 @@ def checks_file_errors(doc: Any) -> Optional[str]:
 
 
 def _proposed_errors(p: Any, v2: bool, rules: Any) -> Optional[str]:
-    """``proposed`` of a version 2 checks file: the local rules an agent run proposed with no key to
-    save them, each ``{rule, by: "agent", on: "YYYY-MM-DD"}``. A person running ``protect`` is offered them."""
+    """``proposed`` of a version 2 checks file: the rules an agent run proposed and could not save,
+    each ``{rule, by: "agent", on: "YYYY-MM-DD"}``: ``rule`` is the id of a local rule, or a rule
+    with a ``limit`` itself (only the witness counts calls, so it is never a local rule and never
+    applies here). A person running ``protect`` is offered them."""
     if not v2:
         return "proposed is for checks file version 2"
     if not isinstance(p, list) or len(p) > 1000:
@@ -1588,11 +1597,22 @@ def _proposed_errors(p: Any, v2: bool, rules: Any) -> Optional[str]:
         err = _exact(x, ("rule", "by", "on"), (), f"proposed[{i}]")
         if err:
             return err
-        if not isinstance(x["rule"], str) or x["rule"] not in ids:
-            return f"proposed[{i}].rule must be the id of a rule in rules"
-        if x["rule"] in seen:
-            return f"proposed lists {x['rule']} twice"
-        seen.add(x["rule"])
+        if isinstance(x["rule"], dict):
+            err = rule_errors(x["rule"], True, None)
+            if err:
+                return f"proposed[{i}].rule: {err}"
+            if "limit" not in x["rule"]:
+                return f"proposed[{i}].rule holds a rule only when it has a limit; any other rule is a local rule in rules, named by its id"
+            if x["rule"]["id"] in ids:
+                return f"proposed[{i}].rule has the id of a rule in rules"
+            rid = x["rule"]["id"]
+        elif not isinstance(x["rule"], str) or x["rule"] not in ids:
+            return f"proposed[{i}].rule must be the id of a rule in rules, or a rule with a limit"
+        else:
+            rid = x["rule"]
+        if rid in seen:
+            return f"proposed lists {rid} twice"
+        seen.add(rid)
         if x["by"] != "agent":
             return f'proposed[{i}].by must be "agent"'
         if not isinstance(x["on"], str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", x["on"]):

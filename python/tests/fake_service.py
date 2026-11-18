@@ -67,6 +67,9 @@ class FakeService:
         self.auditor_max_days = None
         self.auditor_max_in_body = True
         self.auditor_links_no_keys = False
+        #: As the service: a repeat for the same agent, tool and start while its link is open
+        #: answers that link again (200, ``reused: true``), whatever ``days`` asks.
+        self.auditor_reuse = False
         self.pending_roles = {}
         handler = self._handler()
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -153,8 +156,12 @@ class FakeService:
             return err(401, "invalid_key", "The API key is not valid; run `signafaide init` for a new sandbox key.")
         if method == "POST" and path == "/v1/rules":
             # An API key publishes only into its own sandbox while it is unclaimed (§6).
-            if prj["env"] != "test" or prj.get("claimed") or body.get("project") != prj["project"] or body.get("env") != prj["env"]:
+            if body.get("project") != prj["project"] or body.get("env") != prj["env"]:
                 return err(401, "invalid_key", "An API key cannot publish rules; sign in with `signafaide login`.")
+            if prj["env"] != "test" or prj.get("claimed"):
+                # As the service: where a person adds the rules instead, the project's Tools page.
+                return err(401, "invalid_key", "An API key publishes rules only into its own sandbox while nobody has claimed it.",
+                           add_in_console=f"{self.url}/app/p/{prj['project']}/{prj['env']}/tools")
             return self._publish_draft(bearer, body, "sandbox_key", None)
         if method == "POST" and path == "/v1/auditor-links":
             if self.auditor_links_off:
@@ -165,6 +172,11 @@ class FakeService:
                            "or claim the sandbox in the console.", **extra)
             if self.auditor_links_no_keys and ("agent_keys" in body or "head" in body):
                 return err(400, "bad_request", "Unknown field agent_keys.")
+            if self.auditor_reuse:
+                for i, b in enumerate(self.auditor_links):
+                    if b.get("agent") == body.get("agent") and b.get("tool") == body.get("tool") and b.get("from") == body.get("from"):
+                        return 200, {"url": f"{self.url}/audit/aud_{i + 1}", "expires_at": _rfc3339(b["at"] + b.get("days", 30) * 86_400), "reused": True, "agent_keys": True}
+                body["at"] = time.time()
             self.auditor_links.append(body)
             return 201, {"url": f"{self.url}/audit/aud_{len(self.auditor_links)}", "expires_at": _rfc3339(time.time() + body.get("days", 30) * 86_400),
                          **({"agent_keys": True} if "agent_keys" in body else {})}

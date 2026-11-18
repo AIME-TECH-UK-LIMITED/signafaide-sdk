@@ -2,7 +2,7 @@ import { tool as openaiTool } from "@openai/agents-core";
 import { tool as lcTool, StructuredTool } from "@langchain/core/tools";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { NotRecorded, wrapTool, wrapTools } from "../src/index.js";
+import { SignafaideBlocked, wrapTool, wrapTools } from "../src/index.js";
 import { getRecorder } from "../src/runtime.js";
 import { toolNote } from "../src/coverage.js";
 import { deadUrl, records, useProject } from "./helpers.js";
@@ -89,7 +89,7 @@ describe("OpenAI Agents JS", () => {
     const rec = getRecorder();
     rec._apiKey = "sfa_test_" + "x".repeat(32);
     rec._url = await deadUrl();
-    await expect(wrapTool(pay, { strict: true }).invoke(undefined as any, '{"amount":1}')).rejects.toThrow(NotRecorded);
+    await expect(wrapTool(pay, { strict: true }).invoke(undefined as any, '{"amount":1}')).rejects.toThrow(SignafaideBlocked);
     expect(ran).toBe(false);
   });
 });

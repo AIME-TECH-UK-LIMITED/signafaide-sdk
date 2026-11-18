@@ -244,8 +244,10 @@ def test_pull_asks_before_a_new_field(flow, capsys):
 def test_without_a_person_nothing_is_on_and_no_field_approved(flow, capsys):
     project, _ = flow
     code, out = run(capsys, "protect", "approve_payout", prompter=FlagPrompter(yes=True))
-    assert code == 0, out
-    assert json.loads((project / "signafaide.checks.json").read_text())["tools"]["approve_payout"] == {"protect": True}
+    assert code == 1, out  # --yes adds the default rule, Calibrating; with no key it is not saved yet (patch 0.5.1)
+    assert "  Rule: Block approve_payout when amount is above 1,000" in out
+    # No field approved without a person; watch: the kept rule blocks nothing.
+    assert json.loads((project / "signafaide.checks.json").read_text())["tools"]["approve_payout"] == {"protect": True, "mode": "watch"}
     assert "Sandbox    not made: only a person at a terminal opts in." in out
     assert not (project / ".env").exists() and ("POST", "/v1/sandbox") not in flow[1].calls
 

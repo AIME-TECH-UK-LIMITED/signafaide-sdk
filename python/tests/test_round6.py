@@ -133,7 +133,7 @@ def test_strict_refused_for_no_key_prints_one_warning(local_recorder, service, c
         ran.append(1)
 
     for tool in (refund, freeze, refund):
-        with pytest.raises(signafaide.NotRecorded):  # a framework would swallow this
+        with pytest.raises(signafaide.SignafaideBlocked):  # a framework would swallow this; ruled as with a checks file (patch 0.5.1)
             tool()
     err = capsys.readouterr().err
     lines = [line for line in err.splitlines() if "protected tool" in line]
@@ -145,4 +145,4 @@ def test_strict_refused_for_no_key_prints_one_warning(local_recorder, service, c
 
 
 def test_version_is_0_2_0():
-    assert __version__ == "0.5.0"
+    assert __version__ == "0.5.1"

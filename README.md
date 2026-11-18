@@ -17,7 +17,7 @@ signafAIde gives you audit evidence of what your AI agents did, for EU AI Act re
 | [`python/`](python/README.md) | the Python SDK and CLI (`signafaide` on PyPI) |
 | [`python-langchain/`](python-langchain/README.md) | `langchain-signafaide`: a LangChain agent middleware that records every tool call the agent makes |
 | [`js/`](js/README.md) | the TypeScript SDK, CLI and `agent setup` for coding agents (`signafaide` on npm), and the MCP server (`signafaide-mcp`, in `js/mcp`) |
-| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.5.0`) |
+| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.5.1`) |
 | [`verifier/`](verifier) | `signafaide-verify`, the standalone Rust verifier of a pack (also builds to WebAssembly) |
 | [`core/`](core) | the Rust protocol core shared by the verifier and the service |
 | [`plugin/`](plugin/README.md) | the Claude Code plugin: the MCP server and the skill |
@@ -39,7 +39,12 @@ npx signafaide status                                            # one line per 
 npx signafaide prove approve_payout                              # a read-only link for your auditor
 ```
 
-`pull` fetches the rules saved in the console, `login` signs a person in to save rules after the sandbox is kept. A runnable example: [`examples/payout-agent`](examples/payout-agent). To wrap tools by hand, see the reference sections of the [Python](python/README.md) and [TypeScript](js/README.md) READMEs.
+`pull` fetches the rules saved in the console, `login` signs a person in to save rules after the sandbox is kept. A runnable example: [`examples/payout-agent`](examples/payout-agent); starters with a protected tool in place: [`templates/`](templates). To wrap tools by hand, see the reference sections of the [Python](python/README.md) and [TypeScript](js/README.md) READMEs.
+
+- **Protected in code is protected.** A tool wrapped with `protect()` (or `@signafaide.protect`) runs every check on this machine On even without `signafaide.checks.json`, asks signafAIde for a ruling, and counts as protected in `status`, `prove`, `verify`, `check --ci` and the console.
+- **Without a terminal** (a coding agent, a script, CI), `protect --yes` protects every tool that pays, deletes, sends messages, runs commands, pushes code or edits secrets or config, and gives each a default rule that starts Calibrating (it blocks nothing until a person turns it On): above 1,000 for a tool that pays and has an amount, else a number of calls a minute. The rules are saved in a sandbox nobody has kept yet, kept in `signafaide.checks.json` with no key, or, on a project an API key cannot save rules in, kept there with one console link per tool where a person adds the rule with one click. A field a rule needs is sent only after a person approves it with `signafaide pull` at a terminal. Details: [TypeScript](js/README.md#without-a-terminal-protect---yes), [Python](python/README.md#without-a-terminal-protect---yes).
+- **Tests.** Under pytest, Vitest, Jest and `node --test` a protected tool runs without a ruling and nothing is sent; never with a live key.
+- **Networks that block the witness.** When a proxy or network policy refuses it, the SDK says so in one sentence: allow `signafaide.co.uk` and `api.signafaide.co.uk` in the environment's network settings. Both SDKs go through `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (TypeScript also `ALL_PROXY`).
 
 ## Add the MCP server to a coding agent
 
@@ -48,14 +53,14 @@ The MCP server (`signafaide-mcp`, Node.js 20 or later) lets a coding agent previ
 ```json
 {
   "mcpServers": {
-    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.5.0"] }
+    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.5.1"] }
   }
 }
 ```
 
-- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.5.0`
+- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.5.1`
 - Gemini CLI: `gemini extensions install https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk`
-- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.5.0%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
+- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.5.1%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
 
 There are no API keys or other settings. To check it works, ask the agent to call `signafaide_status`.
 

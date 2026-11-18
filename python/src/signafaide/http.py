@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,9 +16,57 @@ from .telemetry import HEADER, client_header
 #: server such as http://127.0.0.1:7474); a release test fails if this is ever a loopback address.
 DEFAULT_URL = "https://api.signafaide.co.uk"
 
+#: The hosted console's origin. The console's prompt gives it as ``SIGNAFAIDE_URL``, and it answers
+#: as the hosted witness too: it and ``DEFAULT_URL`` are one service.
+HOSTED_CONSOLE = "https://signafaide.co.uk"
+
+
+def witness_url(u: str) -> str:
+    """A witness URL as the SDK uses it: trimmed, without a trailing slash, and the hosted
+    console's origin read as the hosted witness (``DEFAULT_URL``), so either address names the
+    same witness."""
+    t = u.strip().rstrip("/")
+    return DEFAULT_URL if t.lower() in (HOSTED_CONSOLE, DEFAULT_URL) else t
+
 #: Errors the SDK cannot fix by retrying: shipping stops until the configuration changes.
 NON_RETRYABLE = frozenset({"quota_exceeded", "invalid_key", "plan_required", "bad_signature", "invalid_record", "content_mismatch",
                            "chain_conflict", "unknown_agent", "key_mismatch", "bad_response"})
+
+
+def network_blocked_words(url: str) -> str:
+    """The one sentence said when the network here does not let the witness be reached (a proxy
+    or network policy refused it, or its name does not resolve): common in cloud coding agents
+    and CI sandboxes."""
+    host = (urllib.parse.urlsplit(url).hostname or url).lower()
+    if host == "signafaide.co.uk" or host.endswith(".signafaide.co.uk"):
+        return ("The network here blocks signafaide.co.uk (common in cloud coding agents and CI sandboxes): allow signafaide.co.uk and "
+                "api.signafaide.co.uk in the environment's network settings, or run from a machine that can reach them; "
+                "records stay signed on this machine meanwhile.")
+    return (f"The network here blocks {host} (common in cloud coding agents and CI sandboxes): allow {host} in the environment's "
+            "network settings, or run from a machine that can reach it; records stay signed on this machine meanwhile.")
+
+
+def _uses_proxy(url: str) -> bool:
+    try:
+        parts = urllib.parse.urlsplit(url)
+        proxies = urllib.request.getproxies()
+        return bool(proxies.get(parts.scheme)) and not urllib.request.proxy_bypass(parts.hostname or "")
+    except Exception:  # noqa: BLE001 - no proxy settings to read
+        return False
+
+
+def blocked_by_network(url: str, reason: BaseException) -> bool:
+    """Whether a failed request was stopped by the network here rather than by the witness: a
+    proxy refused the tunnel (HTTP 403 or 407 to CONNECT), or, with no proxy in the way, the name
+    does not resolve (DNS blocked). A proxy that cannot be reached, or does not answer, has
+    refused nothing: that is said as it is."""
+    text = str(reason)
+    if "Tunnel connection failed" in text or ("407" in text and "roxy" in text):
+        return True
+    if _uses_proxy(url):
+        return False  # the witness's name is looked up by the proxy, not here
+    return isinstance(reason, socket.gaierror) or "Name or service not known" in text or "Temporary failure in name resolution" in text \
+        or "nodename nor servname" in text or "getaddrinfo failed" in text
 
 
 class SignafaideError(Exception):
@@ -34,6 +83,11 @@ class SignafaideError(Exception):
         self.status = status
         self.docs = docs
         self.body = body or {}
+
+    @property
+    def blocked(self) -> bool:
+        """The network here blocks the witness (a proxy or network policy): the message says so."""
+        return self.code == "network" and bool(self.body.get("blocked"))
 
     @property
     def retryable(self) -> bool:
@@ -83,9 +137,15 @@ class Client:
         except urllib.error.HTTPError as e:
             if e.code == 304:
                 return None
-            raise _service_error(e.code, e.read()) from None
+            err = _service_error(e.code, e.read())
+            # A proxy's refusal, not the witness's: 407, or a 403 that is not the witness's JSON error.
+            if e.code == 407 or (e.code == 403 and err.code == "http_error"):
+                raise SignafaideError(network_blocked_words(self.url), code="network", status=0, body={"blocked": True}) from None
+            raise err from None
         except (urllib.error.URLError, OSError) as e:
             reason = getattr(e, "reason", e)
+            if isinstance(reason, BaseException) and blocked_by_network(url, reason):
+                raise SignafaideError(network_blocked_words(self.url), code="network", body={"blocked": True}) from None
             if "timed out" in str(reason):
                 reason = self.timeout_label or f"no answer within {self.timeout:g} s"
             raise SignafaideError(

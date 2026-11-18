@@ -18,13 +18,14 @@ import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Client, DEFAULT_URL, SignafaideError } from "./http.js";
+import { Client, DEFAULT_URL, HOSTED_CONSOLE, SignafaideError, witnessUrl } from "./http.js";
+import { atomicWrite } from "./state.js";
 import { VERSION } from "./version.js";
 
 export const SESSION_RE = /^sfa_user_[0-9A-Za-z]{32}$/;
 
 /** The console of the hosted witness (`DEFAULT_URL`): its sign-in page is on this origin. */
-export const DEFAULT_CONSOLE = "https://signafaide.co.uk";
+export const DEFAULT_CONSOLE = HOSTED_CONSOLE;
 
 export interface Session {
   session: string;
@@ -36,13 +37,12 @@ export interface Session {
   store?: string;
 }
 
-const trimUrl = (u: string): string => u.trim().replace(/\/+$/, "");
 
 /** The witness a person signs in to and publishes rules with (§8): `given` (`--url`), else
  * `SIGNAFAIDE_URL` in the process environment, else the hosted service. Never the project's
  * `.env`: a file in a project must not choose where a person's sign-in or session goes. */
 export function personWitness(given?: string, env: NodeJS.ProcessEnv = process.env): string {
-  const u = trimUrl(given || env.SIGNAFAIDE_URL || DEFAULT_URL);
+  const u = witnessUrl(given || env.SIGNAFAIDE_URL || DEFAULT_URL);
   let parsed: URL;
   try {
     parsed = new URL(u);
@@ -61,7 +61,7 @@ export function consoleOrigin(witness: string, given?: string): string {
     if (u.protocol !== "https:" && u.protocol !== "http:") throw new SignafaideError(`--console ${given} is not an http(s) origin.`, { code: "bad_request" });
     return u.origin;
   }
-  if (trimUrl(witness) === DEFAULT_URL) return DEFAULT_CONSOLE;
+  if (witnessUrl(witness) === DEFAULT_URL) return DEFAULT_CONSOLE;
   return new URL(witness).origin;
 }
 
@@ -179,10 +179,7 @@ function allSessions(env: NodeJS.ProcessEnv): Record<string, Session> {
 function writeSessions(sessions: Record<string, Session>, env: NodeJS.ProcessEnv): void {
   const file = sessionFile(env);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ sessions }, null, 2) + "\n", { mode: 0o600 });
-  fs.chmodSync(tmp, 0o600);
-  fs.renameSync(tmp, file);
+  atomicWrite(file, JSON.stringify({ sessions }, null, 2) + "\n", { mode: 0o600 });
 }
 
 /** The held session for the witness at `url`, or null (none, another witness's, malformed or
@@ -285,7 +282,7 @@ export interface LoginOptions {
 export async function login(o: LoginOptions): Promise<Session> {
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const env = o.env ?? process.env;
-  const url = trimUrl(o.url);
+  const url = witnessUrl(o.url);
   const origin = consoleOrigin(url, o.console);
   const client = new Client(url, undefined, 10_000, o.clientId);
   const host = (os.hostname() || "this machine").slice(0, 100);
@@ -333,7 +330,7 @@ export async function login(o: LoginOptions): Promise<Session> {
 
 /** `signafaide logout`: end the session at the witness it was made for and forget it here. */
 export async function logout(url: string, clientId: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
-  url = trimUrl(url);
+  url = witnessUrl(url);
   const s = loadSession(url, env);
   if (s) {
     try {
