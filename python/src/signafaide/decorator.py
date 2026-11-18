@@ -22,12 +22,14 @@ import threading
 import uuid
 import weakref
 from pathlib import PurePath
-from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple
+
+from . import notes as _notes
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from . import checks as checks_lib
 from . import jcs, runtime, telemetry
 from ._version import __version__
-from .checks_runtime import CheckError, Plan, ToolInfo
+from .checks_runtime import CheckError, Plan, SignafaideBlocked, ToolInfo, call_link
 from .coverage import declared_name
 from .http import SignafaideError
 from .records import record_hash
@@ -38,7 +40,7 @@ _LC_EXTRA = ("run_manager", "config", "callbacks")  # injected by LangChain, not
 
 
 class NotRecorded(SignafaideError):
-    """Strict mode: the decision got no receipt, so the tool did not run."""
+    """The tool is protected and its decision got no receipt, so the tool did not run."""
 
 
 # --- the agent's tool list (§2.6) -------------------------------------------------
@@ -181,6 +183,12 @@ class _Spec:
     #: What the agent is shown of the tool, for its fingerprints (§11.1): a framework tool's
     #: description and input schema; a plain function has none.
     tool: Optional[ToolInfo] = None
+    #: ``protect``: strict and fail closed, whatever a version 1 checks file says.
+    protect: bool = False
+    #: Names of the positional arguments (spec 1.1), when given.
+    args: Optional[Tuple[str, ...]] = None
+    #: Called with each note of this tool's calls (§8 notes: a possible hidden instruction).
+    on_note: Optional[Callable[[dict], None]] = None
 
     def __post_init__(self) -> None:
         _BY_WRAPPER.add(self.name)
@@ -189,6 +197,13 @@ class _Spec:
         _remember(_WRAPPED, self.agent, self.name)
         if self.listed:
             _remember(_LISTED, self.agent, self.name)
+        # The agent is shown the tool from now on: its fingerprints are approved the first time (§8).
+        if self.tool is not None and not runtime.recording_disabled():
+            try:
+                rec = runtime.get()
+                rec.checks.seen(self.tool, self.agent or rec.default_agent, declared_name(self.name))
+            except Exception:  # the first call reports what is wrong
+                pass
 
     def decide(self, args: Any, plan: Optional[Plan] = None) -> tuple:
         rec = runtime.get()
@@ -210,7 +225,7 @@ class _Spec:
         # The checks name the tool as the envelope does (the wrapper's name, declared, §2.6); the
         # fingerprints cover what the agent is shown of it (§11.1).
         plan = rec.checks.plan(self.tool_info(), self.agent or rec.default_agent, to_jsonable(args), strict_code=self.strict, call_id=call_id,
-                               declared=declared_name(self.name))
+                               declared=declared_name(self.name), protect=self.protect)
         # With checks on the wrapper never takes over a span's decision: it writes its own, with
         # the checks, and asks for the ruling of a strict call (§8).
         return self._begin(args, call_id, lambda a: self.decide(a, plan), adopt=False), plan
@@ -225,6 +240,9 @@ class _Spec:
 
     def _refused(self, rec: runtime.Recorder, d: dict, err: CheckError, ruling: str) -> CheckError:
         """The outcome of a call that did not run (§8 steps 3 and 4), and the error to raise."""
+        if isinstance(err, SignafaideBlocked):
+            h = record_hash(d)
+            err.attach(h, call_link(rec, h))
         e: Dict[str, Any] = {"type": "Blocked" if err.code == "blocked" else "NotRun", "message": err.message}
         if err.code != "blocked":
             e["code"] = err.code
@@ -237,54 +255,74 @@ class _Spec:
             rec.note_strict_refused(self.name, err)
         return err
 
-    def _ran(self, rec: runtime.Recorder, d: dict, ruling: str, value: Any) -> None:
-        results = rec.checks.result_entries(value)
+    def _notify(self, rec: runtime.Recorder, found: List[dict], result: Any = None, has_result: bool = False) -> None:
+        """Hand the call's notes to the caller (§8 notes); with a result, keep them for ``notes(result)``."""
+        _notes.deliver(found, own=self.on_note, development=_notes.development(rec), result=result, has_result=has_result)
+
+    def _ran(self, rec: runtime.Recorder, d: dict, ruling: str, value: Any, plan: Optional[Plan] = None, returned: Any = None) -> None:
+        results = rec.checks.result_entries(value, tool=declared_name(self.name))
+        withheld = rec.checks.withheld(self.name, results)
+        found = (plan.notes if plan is not None else []) + rec.checks.result_notes(declared_name(self.name), results)
+        self._notify(rec, found, returned, has_result=withheld is None)
+        if withheld is not None:
+            # The result holds a secret: the agent gets this error instead, and the record keeps
+            # the finding, never the result (§8 step 5).
+            h = record_hash(d)
+            withheld.attach(h, call_link(rec, h))
+            self.outcome_checked(rec, d, {"error": {"type": "Withheld", "message": withheld.message, "check": withheld.check}}, ran=True, ruling=ruling, results=results)
+            raise withheld
         self.outcome_checked(rec, d, {"output": value}, ran=True, ruling=ruling, results=results)
 
     def _checked_call(self, rec: runtime.Recorder, d: dict, plan: Plan, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]], claimed: Any) -> Any:
         try:
             if plan.blocked is not None:
+                self._notify(rec, plan.notes)
                 raise self._refused(rec, d, plan.blocked, "not_asked")
             ruling = "not_asked"
             if plan.strict:
                 rec.strict_used = True
                 ruling, err = rec.checks.ruling(d, plan, self.name)
                 if err is not None:
+                    self._notify(rec, plan.notes)
                     raise self._refused(rec, d, err, ruling)
             token = runtime.RECORDING.set(self.name)
             try:
                 out = fn()
             except BaseException as e:
                 self.outcome_checked(rec, d, _error(e), ran=True, ruling=ruling)
+                self._notify(rec, plan.notes)
                 raise
             finally:
                 runtime.RECORDING.reset(token)
         finally:
             self._ended(claimed)
-        self._ran(rec, d, ruling, to_jsonable(output(out) if output else out))
+        self._ran(rec, d, ruling, to_jsonable(output(out) if output else out), plan, out)
         return out
 
     async def _checked_acall(self, rec: runtime.Recorder, d: dict, plan: Plan, fn: Callable[[], Any], output: Optional[Callable[[Any], Any]], claimed: Any) -> Any:
         try:
             if plan.blocked is not None:
+                self._notify(rec, plan.notes)
                 raise self._refused(rec, d, plan.blocked, "not_asked")
             ruling = "not_asked"
             if plan.strict:
                 rec.strict_used = True
                 ruling, err = await asyncio.get_running_loop().run_in_executor(None, rec.checks.ruling, d, plan, self.name)
                 if err is not None:
+                    self._notify(rec, plan.notes)
                     raise self._refused(rec, d, err, ruling)
             token = runtime.RECORDING.set(self.name)
             try:
                 out = await fn()
             except BaseException as e:
                 self.outcome_checked(rec, d, _error(e), ran=True, ruling=ruling)
+                self._notify(rec, plan.notes)
                 raise
             finally:
                 runtime.RECORDING.reset(token)
         finally:
             self._ended(claimed)
-        self._ran(rec, d, ruling, to_jsonable(output(out) if output else out))
+        self._ran(rec, d, ruling, to_jsonable(output(out) if output else out), plan, out)
         return out
 
     def outcome(self, rec: runtime.Recorder, d: dict, content: dict) -> None:
@@ -303,7 +341,7 @@ class _Spec:
             # Agent frameworks often swallow a tool's error (the model just sees a failed tool):
             # say once, on stderr, that a strict tool did not run and how to fix it.
             rec.note_strict_refused(self.name, e)
-            raise NotRecorded(f"{e.message} (strict mode: {self.name} did not run)", code=e.code, status=e.status, docs=e.docs, body=e.body) from None
+            raise NotRecorded(f"{e.message} ({self.name} is protected and did not run)", code=e.code, status=e.status, docs=e.docs, body=e.body) from None
 
     def _begin(self, args: Any, call_id: Optional[str], decide: Optional[Callable[[Any], tuple]] = None, *, adopt: bool = True) -> Optional[tuple]:
         """The decision of this call, or None when the telemetry plug-in has already written it for
@@ -387,17 +425,67 @@ def record(
     strict: bool = False,
     store_content: Optional[bool] = None,
     meta: Optional[dict] = None,
+    args: Optional[Iterable[str]] = None,
+    on_note: Optional[Callable[[dict], None]] = None,
 ) -> Any:
     """Record every call of *fn*: a ``decision`` before it runs, an ``outcome`` after.
     ``agent`` names the chain (default: the project folder's name; give one explicitly in
     production, one name per running instance).
 
     Use as ``@record`` or ``@record(agent=..., name=..., strict=True)``. Works on
-    sync and async functions. Errors are recorded and re-raised unchanged.
+    sync and async functions. Errors are recorded and re-raised unchanged. *on_note* is called
+    with each note of the tool's calls (a possible hidden instruction in the arguments or the
+    result); :func:`signafaide.notes` gives those of a returned value.
     """
+    names = _arg_names(args)
     if fn is None:
-        return lambda f: record(f, agent=agent, name=name, strict=strict, store_content=store_content, meta=meta)
-    return _record_with(_Spec(name or fn.__name__, agent, strict, store_content, meta), fn)
+        return lambda f: record(f, agent=agent, name=name, strict=strict, store_content=store_content, meta=meta, args=names, on_note=on_note)
+    return _record_with(_Spec(name or fn.__name__, agent, strict, store_content, meta, args=names, on_note=on_note), fn)
+
+
+def protect(
+    fn: Optional[Callable] = None,
+    *,
+    agent: Optional[str] = None,
+    name: Optional[str] = None,
+    args: Optional[Iterable[str]] = None,
+    store_content: Optional[bool] = None,
+    meta: Optional[dict] = None,
+    on_note: Optional[Callable[[dict], None]] = None,
+) -> Any:
+    """Protect a tool (spec 1.1): record every call of *fn*, and run it only when signafAIde
+    allows it. Each call waits for the witness's ruling under the project's rules
+    and, if signafAIde can't be reached, stops (Stop, unless the rule set chooses Let it run for the tool), and sends the
+    witness only the fields of the call that the rules can use and that ``signafaide.checks.json``
+    lists for the tool (``signafaide pull`` asks before it adds one). A blocked call raises
+    :class:`SignafaideBlocked`, whose message says why in one sentence, with the rule in words and
+    a link to the call. The arguments are named by the function's signature; *args* names them
+    when the signature cannot (``*args`` functions, builtins).
+
+    Use as ``@protect`` or ``protect(fn, args=["payee", "amount", "currency"])``."""
+    names = _arg_names(args)
+    if fn is None:
+        return lambda f: protect(f, agent=agent, name=name, args=names, store_content=store_content, meta=meta, on_note=on_note)
+    return _record_with(_Spec(name or fn.__name__, agent, True, store_content, meta, protect=True, args=names, on_note=on_note), fn)
+
+
+def _arg_names(args: Optional[Iterable[str]]) -> Optional[Tuple[str, ...]]:
+    if args is None:
+        return None
+    names = tuple(args)
+    if not names or not all(isinstance(n, str) and n for n in names) or len(set(names)) != len(names):
+        raise TypeError('args names the positional arguments: distinct non-empty strings, for example args=["payee", "amount", "currency"]')
+    return names
+
+
+def _named(names: Tuple[str, ...], args: tuple, kwargs: dict) -> dict:
+    """The decision's input when *names* names the positional arguments (spec 1.1); arguments past
+    the names are kept, in order, under ``"_rest"``."""
+    out = {n: a for n, a in zip(names, args)}
+    if len(args) > len(names):
+        out["_rest"] = list(args[len(names):])
+    out.update(kwargs)
+    return out
 
 
 def _record_with(spec: _Spec, fn: Callable) -> Any:
@@ -405,18 +493,26 @@ def _record_with(spec: _Spec, fn: Callable) -> Any:
         sig: Optional[inspect.Signature] = inspect.signature(fn)
     except (TypeError, ValueError):
         sig = None
+    if spec.args is not None:
+        names = spec.args
+
+        def bind(a: tuple, kw: dict) -> Any:
+            return _named(names, a, kw)
+    else:
+        def bind(a: tuple, kw: dict) -> Any:
+            return _bind(sig, a, kw)
 
     if inspect.iscoroutinefunction(fn):
 
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            return await spec.acall(_bind(sig, args, kwargs), lambda: fn(*args, **kwargs))
+            return await spec.acall(bind(args, kwargs), lambda: fn(*args, **kwargs))
 
         return async_wrapper
 
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        return spec.call(_bind(sig, args, kwargs), lambda: fn(*args, **kwargs))
+        return spec.call(bind(args, kwargs), lambda: fn(*args, **kwargs))
 
     return wrapper
 
@@ -430,7 +526,8 @@ def note(name: str, content: dict, *, agent: Optional[str] = None, store_content
     return record_hash(rec)
 
 
-def wrap_tools(tools: Any, *, agent: Optional[str] = None, strict: bool = False, store_content: Optional[bool] = None, declare_tools: bool = True) -> Any:
+def wrap_tools(tools: Any, *, agent: Optional[str] = None, strict: bool = False, store_content: Optional[bool] = None, declare_tools: bool = True,
+               on_note: Optional[Callable[[dict], None]] = None) -> Any:
     """Record every tool in a dict (key = tool name) or a list.
 
     Accepts plain functions, LangChain tools (``BaseTool`` / ``@tool``) and
@@ -438,7 +535,7 @@ def wrap_tools(tools: Any, *, agent: Optional[str] = None, strict: bool = False,
     as the agent's recorded tools (SPEC §2.6, see :func:`declare_tools`) with the first recorded
     call, unless ``declare_tools=False``; ``SIGNAFAIDE_DECLARE_TOOLS=0`` turns it off everywhere.
     """
-    opts = {"agent": agent, "strict": strict, "store_content": store_content, "declare_tools": declare_tools}
+    opts = {"agent": agent, "strict": strict, "store_content": store_content, "declare_tools": declare_tools, "on_note": on_note}
     if isinstance(tools, dict):
         return {k: wrap_tool(v, name=k, **opts) for k, v in tools.items()}
     if isinstance(tools, (list, tuple)):
@@ -447,16 +544,17 @@ def wrap_tools(tools: Any, *, agent: Optional[str] = None, strict: bool = False,
 
 
 def wrap_tool(
-    tool: Any, *, name: Optional[str] = None, agent: Optional[str] = None, strict: bool = False, store_content: Optional[bool] = None, declare_tools: bool = True
+    tool: Any, *, name: Optional[str] = None, agent: Optional[str] = None, strict: bool = False, store_content: Optional[bool] = None, declare_tools: bool = True,
+    on_note: Optional[Callable[[dict], None]] = None,
 ) -> Any:
     """Record one tool. See :func:`wrap_tools`."""
     if _is_openai_agents_tool(tool):
         info = ToolInfo(tool.name, getattr(tool, "description", "") or "", getattr(tool, "params_json_schema", None))
-        return _wrap_openai_agents(tool, _Spec(name or tool.name, agent, strict, store_content, listed=declare_tools, tool=info))
+        return _wrap_openai_agents(tool, _Spec(name or tool.name, agent, strict, store_content, listed=declare_tools, tool=info, on_note=on_note))
     if _is_langchain_tool(tool):
-        return _wrap_langchain(tool, _Spec(name or tool.name, agent, strict, store_content, listed=declare_tools, tool=_langchain_info(tool)))
+        return _wrap_langchain(tool, _Spec(name or tool.name, agent, strict, store_content, listed=declare_tools, tool=_langchain_info(tool), on_note=on_note))
     if callable(tool):
-        return _record_with(_Spec(name or tool.__name__, agent, strict, store_content, listed=declare_tools), tool)
+        return _record_with(_Spec(name or tool.__name__, agent, strict, store_content, listed=declare_tools, on_note=on_note), tool)
     raise TypeError(f"wrap_tools cannot record {type(tool).__name__}: pass a function, a LangChain tool or an OpenAI Agents FunctionTool")
 
 

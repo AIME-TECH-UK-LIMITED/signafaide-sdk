@@ -273,7 +273,7 @@ class Recorder:
         names in production (one per running instance); see the production guide."""
         return agent_name(self.state.root.name)
 
-    def create_sandbox(self) -> str:
+    def create_sandbox(self, write_url: bool = True) -> str:
         """Return the API key; create a sandbox project if there is none. Only an explicit
         human opt-in calls this (``signafaide init``): records never create a sandbox by
         themselves."""
@@ -305,7 +305,7 @@ class Recorder:
             env_file = self.state.root / ".env"
             append_env_file(env_file, "SIGNAFAIDE_API_KEY", key)
             # A sandbox key only works on the service that issued it: keep that service with the key.
-            if self.url != DEFAULT_URL and not read_env_file(env_file).get("SIGNAFAIDE_URL"):
+            if write_url and self.url != DEFAULT_URL and not read_env_file(env_file).get("SIGNAFAIDE_URL"):
                 append_env_file(env_file, "SIGNAFAIDE_URL", self.url)
             self.state.ignore_in_git(".env")  # the key must not be committed
             self.state.learn_project(key, resp["project"], "test")
@@ -671,18 +671,21 @@ class Recorder:
         if self._told_strict:
             return
         self._told_strict = True
-        fix = ("there is no API key, and strict mode needs the witness's receipt. Fix: run `signafaide init` (a free sandbox) or set "
-               "SIGNAFAIDE_API_KEY, or drop strict for this tool") if err.code == "no_key" else err.message
-        print(f"signafaide: WARNING strict tool \"{tool}\" was refused and did not run ({err.code}): {fix}. Later strict refusals in this process are not printed again.",
+        from .checks_runtime import NO_KEY_WHY
+
+        fix = NO_KEY_WHY.rstrip(".") if err.code == "no_key" else err.message
+        print(f"signafaide: protected tool \"{tool}\" was refused and did not run ({err.code}): {fix}. Later refusals of protected tools in this process are not printed again.",
               file=sys.stderr)
 
     def ensure_receipt(self, rec: dict, timeout: float = 10.0) -> dict:
-        """Strict mode: ship *rec*'s chain now and return its receipt, or raise."""
+        """Protected tool: ship *rec*'s chain now and return its receipt, or raise."""
         agent, h = rec["envelope"]["agent"], record_hash(rec)
         api_key = self.api_key
         if not api_key:
+            from .checks_runtime import NO_KEY_WHY
+
             raise SignafaideError(
-                "Strict mode needs the service's receipt, and there is no API key: run `signafaide init` (a free sandbox) or set SIGNAFAIDE_API_KEY.",
+                NO_KEY_WHY[0].upper() + NO_KEY_WHY[1:],
                 code="no_key",
             )
         self.resolve_project(api_key)

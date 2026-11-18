@@ -177,6 +177,40 @@ export class Client {
     return this.request("GET", "/v1/rules", { query: { version: version === undefined ? undefined : String(version) }, headers: etag ? { "If-None-Match": `"${etag}"` } : {} });
   }
 
+  /** §6 (1.1): start a device sign-in. No auth. */
+  deviceCode(client: string, host: string): Promise<{ device_code: string; user_code: string; verification_uri: string; verification_uri_complete?: string; expires_in: number; interval: number }> {
+    return this.request("POST", "/v1/device/code", { body: { client, host }, auth: false });
+  }
+
+  /** §6 (1.1): poll a device sign-in. Always 200 with `{status}`. No auth. */
+  deviceToken(deviceCode: string): Promise<{ status: string; session?: string; expires_at?: string; person?: { email?: string }; organisation?: { name?: string } }> {
+    return this.request("POST", "/v1/device/token", { body: { device_code: deviceCode }, auth: false });
+  }
+
+  /** §6 (1.1): who a person session is, and the projects they can see (the client's key is the session). */
+  session(): Promise<{ person: { email: string }; organisation: { name: string }; expires_at: string; projects: { project: string; name?: string; env: string; role: "owner" | "admin" | "developer" }[] }> {
+    return this.request("GET", "/v1/session");
+  }
+
+  /** §6 (1.1): end a person session (`signafaide logout`). */
+  endSession(): Promise<unknown> {
+    return this.request("DELETE", "/v1/session");
+  }
+
+  /** §6 (1.1): publish the next version of a project's rule set: with a person session, or the
+   * key of an unclaimed sandbox. Returns `{rules, sig, service_key_id}`. */
+  publishRules(body: { project: string; env: string; after: number | null; draft: Record<string, unknown> }): Promise<any> {
+    return this.request("POST", "/v1/rules", { body });
+  }
+
+  /** §6 (1.1) `POST /v1/auditor-links`: a read-only auditor link (`signafaide prove`), body
+   * `{agent, tool?, from?, days, agent_keys?, head?}`, answer `{url, expires_at, agent_keys?}`
+   * (`agent_keys: true` when the witness keeps the manifest for the auditor's browser check). A
+   * witness without it answers `not_found`, and prove points at files instead. */
+  auditorLink(body: { agent?: string; tool?: string; from?: string | null; days?: number; agent_keys?: unknown; head?: unknown }): Promise<{ url: string; expires_at?: string; agent_keys?: boolean }> {
+    return this.request("POST", "/v1/auditor-links", { body });
+  }
+
   /** The shared fingerprint list (§6, §11.2): `{snapshot, updates}`. */
   fingerprints(since?: number | null): Promise<any> {
     return this.request("GET", "/v1/fingerprints", { query: { since: since == null ? undefined : String(since) } });

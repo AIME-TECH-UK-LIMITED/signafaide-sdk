@@ -12,6 +12,8 @@ pub mod fingerprints;
 pub mod report;
 pub mod rules;
 pub mod ruling;
+pub mod words;
+pub mod file;
 
 use crate::hash::hash_json;
 use crate::{jcs, sha256, Hash};

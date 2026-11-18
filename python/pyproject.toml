@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "signafaide"
-version = "0.4.0"
+version = "0.5.0"
 description = "Audit evidence for AI agents: signed, independently co-signed records of every tool call, verifiable offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
-dependencies = ["cryptography>=41", "py_ecc>=7"]
+dependencies = ["cryptography>=41"]
 keywords = ["ai-agents", "audit-trail", "tamper-evident", "verifiable", "eu-ai-act", "provenance", "opentelemetry"]
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
@@ -26,8 +26,8 @@ Changelog = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/blob/main/CH
 Issues = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues"
 
 [project.optional-dependencies]
-# Kept so `pip install "signafaide[bls]"` still works; BLS is now a regular dependency.
-bls = []
+# drand's BLS signature (verify check 9). Without it that one check says NOT CHECKED, never pass.
+bls = ["py_ecc>=7"]
 # The OpenTelemetry span processor (`signafaide.otel`).
 otel = ["opentelemetry-sdk>=1.20"]
 

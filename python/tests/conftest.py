@@ -22,6 +22,8 @@ def project(tmp_path, monkeypatch):
             monkeypatch.delenv(k)  # tests decide which coding agent they run under
     # The SDK turns test mode on by itself under pytest; these tests exercise the real recorder.
     monkeypatch.setenv("SIGNAFAIDE_TEST", "0")
+    # Sessions stay in a temporary session.json, never in this machine's credential store.
+    monkeypatch.setenv("SIGNAFAIDE_CREDENTIAL_STORE", "file")
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
     monkeypatch.setattr(telemetry, "ADAPTERS", set())
     decorator._reset_tool_registry()  # tools wrapped by an earlier test are not this test's tool list

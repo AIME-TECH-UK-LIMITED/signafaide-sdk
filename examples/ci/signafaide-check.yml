@@ -1,0 +1,24 @@
+# Copy to .github/workflows/signafaide-check.yml.
+# Fails a pull request that adds an agent tool that pays, deletes, sends, runs commands, pushes
+# code or edits secrets or config without signafAIde protect. No account, no API key.
+name: signafaide check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the pull request's base commit, for the changed tools only
+      - uses: AIME-TECH-UK-LIMITED/signafaide-sdk/action@0e85f63ccb66497322ebd56015d52733d842e1c6 # signafaide 0.5.0
+        # with:
+        #   working-directory: agent        # where signafaide.checks.json is
+        #   allow: run_migration            # reviewed exceptions; better in the checks file's ci.allow, with the reason

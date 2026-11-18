@@ -198,6 +198,11 @@ export function createServer(root: string = process.cwd()): McpServer {
         out.push(`Language: ${p.language}; framework: ${p.framework === "plain" ? "none detected (plain functions)" : p.framework}`);
         out.push(await keyLine(rec, false)); // a preview: the witness is not asked and nothing is saved
         out.push("", steps(p.language, p.framework, p.installed ? `already a dependency (${p.install.split(",")[0]} updates it)` : p.install, p.verify));
+        out.push(
+          "",
+          `Or let protect write the code: ${p.verify.replace(/ verify$/, " protect")} --yes --tool <name> --limit-field amount --above 1000. ` +
+            "Its rule starts Calibrating (it blocks nothing until a person turns it On), and protected tools stop until a person runs protect once in a terminal.",
+        );
         if (p.candidates.length) out.push("", "Functions that look like actions (check which ones the agent calls):", ...p.candidates.map((c) => `- ${c}`));
         out.push(
           "",
@@ -261,6 +266,7 @@ export function createServer(root: string = process.cwd()): McpServer {
     {
       title: "signafAIde snippet for a language and framework",
       description:
+        "Use when adding or changing a tool that pays, deletes, sends messages, runs commands, pushes code, or edits secrets or config, in a stack that is not the open project. " +
         "A reference snippet for a language and framework you name: returns the install command, the canonical code to record an agent's tool calls with signafAIde, and the verify command. " +
         "It reads nothing in the project, detects nothing, changes nothing and sends nothing; the same arguments always give the same answer. " +
         "Use it to answer a question about a stack that is not the open project, or when signafaide_setup could not tell the language. " +
@@ -439,7 +445,7 @@ export function createServer(root: string = process.cwd()): McpServer {
     {
       title: "Show the tool-call rules this project holds",
       description:
-        "Shows the rules in force for this project's tool-call checks: the held rule set (version, mode, default, each rule on one line), the local rules and mode of the checks file, the fail mode of each strict tool, and the fields each strict tool discloses to the witness. " +
+        "Shows the rules in force for this project's tool-call checks: the held rule set (version, mode, default, each rule on one line), the local rules and whether the checks file has them On or Calibrating, what happens to each protected tool if signafAIde can't be reached (Stop or Let it run), and the fields each protected tool discloses to the witness. " +
         "Use it before explaining a ruling, or to see what a call would meet. " +
         "Read-only: it reads local files, makes no request and changes nothing; `signafaide rules pull` fetches a newer version.",
       inputSchema: z.object({ directory }),

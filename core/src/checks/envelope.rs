@@ -22,12 +22,20 @@ fn found_codes(check: &str) -> &'static [&'static str] {
             "google_api_key",
             "signafaide_key",
             "private_key",
+            "wallet_private_key",
+            "seed_phrase",
+            // spec 1.1, benchmark batch 2: secrets known by where they stand (arguments only)
+            "bearer_token",
+            "jwt",
+            "named_secret",
+            "card_number",
             "high_entropy",
+            "wallet_address",
         ],
         "address" => &["loopback", "private", "shared", "link_local", "unique_local", "unspecified", "metadata", "internal_name"],
         "changed_tool" => &["description_changed", "schema_changed", "not_approved"],
         "fingerprint" => &["tool", "description", "server"],
-        "hidden_instruction" => &["invisible_characters", "instruction_phrase"],
+        "hidden_instruction" => &["invisible_characters", "instruction_phrase", "encoded_content", "tool_shadowing", "look_alike_name", "possible_hidden_instruction"],
         _ => &[],
     }
 }
@@ -72,9 +80,6 @@ pub fn validate(kind: Kind, name: &str, checks: &Value) -> Result<(), String> {
         if !ran && n > 0 {
             return Err("checks.results must be empty when the tool did not run".into());
         }
-        if !matches!(o["result"].as_str(), Some("allow" | "note")) {
-            return Err("checks.result of an outcome must be allow or note".into());
-        }
         return Ok(());
     }
     exact_keys(o, &DECISION_KEYS, "the checks of a decision")?;
@@ -105,11 +110,11 @@ pub fn validate(kind: Kind, name: &str, checks: &Value) -> Result<(), String> {
     if !(o["fingerprints"].is_null() || safe_int(&o["fingerprints"]).is_some_and(|n| n >= 0)) {
         return Err("checks.fingerprints must be null or the seq of the shared list".into());
     }
-    let strict = o["strict"].as_bool().ok_or("checks.strict must be true or false")?;
+    let strict = o["strict"].as_bool().ok_or("checks.strict must be true (Protected) or false (Not protected)")?;
     match (strict, &o["fail"]) {
         (true, f) if str_in(f, &["open", "closed"]).is_some() => {}
         (false, Value::Null) => {}
-        _ => return Err("checks.fail is open or closed when strict is true, and null otherwise".into()),
+        _ => return Err("checks.fail is \"open\" (Let it run) or \"closed\" (Stop) when checks.strict is true (Protected), and null otherwise".into()),
     }
     let d = o["disclosed"].as_array().filter(|a| a.len() <= 64).ok_or("checks.disclosed must be a list of at most 64 pointers")?;
     let mut prev: Option<&str> = None;
@@ -122,7 +127,7 @@ pub fn validate(kind: Kind, name: &str, checks: &Value) -> Result<(), String> {
         prev = Some(p);
     }
     if !d.is_empty() && !strict {
-        return Err("checks.disclosed must be empty on a call that is not strict".into());
+        return Err("checks.disclosed must be empty on a call that is not protected".into());
     }
     if d.is_empty() != o["disclosed_hash"].is_null() || !(o["disclosed_hash"].is_null() || is_hex64(&o["disclosed_hash"])) {
         return Err("checks.disclosed_hash is 64 hex exactly when checks.disclosed is not empty, and null otherwise".into());
@@ -149,8 +154,8 @@ fn results(o: &Map<String, Value>, kind: Kind) -> Result<usize, String> {
         let e = e.as_object().ok_or("each checks.results entry is an object")?;
         let check = e.get("check").and_then(Value::as_str).ok_or("each entry names its check")?;
         let allowed: &[&str] = match kind {
-            Kind::Decision => &["secret", "address", "changed_tool", "fingerprint", "rule"],
-            _ => &["hidden_instruction"],
+            Kind::Decision => &["secret", "address", "changed_tool", "fingerprint", "rule", "hidden_instruction"],
+            _ => &["secret", "hidden_instruction"],
         };
         if !allowed.contains(&check) {
             return Err(format!("the check '{check}' is not a check of {}", if kind == Kind::Decision { "a decision" } else { "an outcome" }));
@@ -162,28 +167,51 @@ fn results(o: &Map<String, Value>, kind: Kind) -> Result<usize, String> {
         }
         if check == "rule" {
             keys.extend(["set", "matched"]);
+            // Spec 1.1: written only when not empty.
+            for k in ["would_block", "excepted"] {
+                if e.contains_key(k) {
+                    keys.push(k);
+                }
+            }
         } else {
             keys.push("found");
         }
         exact_keys(e, &keys, &format!("the '{check}' entry"))?;
         if str_in(&e["mode"], &["watch", "enforce"]).is_none() {
-            return Err("an entry's mode is watch or enforce".into());
+            return Err("an entry's `mode` is \"watch\" (Calibrating) or \"enforce\" (On)".into());
         }
         let result = e["result"].as_str().filter(|r| rank(r).is_some()).ok_or("an entry's result is allow, note or block")?;
         if watch {
             let er = e["enforce_result"].as_str().filter(|r| rank(r).is_some()).ok_or("enforce_result is allow, note or block")?;
             if result != if er == "block" { "note" } else { er } {
-                return Err("in watch mode an entry's result equals its enforce_result, except that block is written as note".into());
+                return Err("when an entry's `mode` is \"watch\" (Calibrating), its result equals its enforce_result, except that block is written as note".into());
             }
         }
-        if check == "hidden_instruction" && (result == "block" || e.get("enforce_result").and_then(Value::as_str) == Some("block")) {
-            return Err("hidden_instruction never blocks".into());
+        if kind == Kind::Outcome && check == "hidden_instruction" && (result == "block" || e.get("enforce_result").and_then(Value::as_str) == Some("block")) {
+            return Err("hidden_instruction never blocks on a result".into());
         }
         let set = if check == "rule" {
             let set = e["set"].as_str().filter(|s| *s == "local" || is_set_id(s)).ok_or("a rule entry's set is local or the rule set's id")?;
             let m = e["matched"].as_array().filter(|a| a.len() <= 16).ok_or("a rule entry's matched is a list of at most 16 rule ids")?;
             if !m.iter().all(|r| r.as_str().is_some_and(is_rule_id)) {
                 return Err("a rule entry's matched holds rule ids".into());
+            }
+            let mut lists: Vec<(&str, Vec<&str>)> = vec![("matched", m.iter().filter_map(Value::as_str).collect())];
+            for k in ["would_block", "excepted"] {
+                let Some(l) = e.get(k) else { continue };
+                let l = l.as_array().filter(|l| (1..=16).contains(&l.len())).ok_or_else(|| format!("a rule entry's {k} is a list of 1 to 16 rule ids, written only when not empty"))?;
+                let ids: Vec<&str> = l.iter().filter_map(|x| x.as_str().filter(|s| is_rule_id(s))).collect();
+                if ids.len() != l.len() || ids.iter().enumerate().any(|(i, x)| ids[..i].contains(x)) {
+                    return Err(format!("a rule entry's {k} holds rule ids, each once"));
+                }
+                lists.push((k, ids));
+            }
+            for (i, (a, x)) in lists.iter().enumerate() {
+                for (b, y) in &lists[i + 1..] {
+                    if let Some(id) = x.iter().find(|id| y.contains(id)) {
+                        return Err(format!("the rule {id} is in both {a} and {b} of a rule entry"));
+                    }
+                }
             }
             Some(set.to_string())
         } else {
@@ -194,6 +222,11 @@ fn results(o: &Map<String, Value>, kind: Kind) -> Result<usize, String> {
                 if f[..i].iter().any(|x| x.as_str() == Some(c)) {
                     return Err(format!("the '{check}' entry repeats a found code"));
                 }
+            }
+            // Spec 1.1, benchmark batch 2: a hidden instruction in arguments or a result is a note.
+            let er = e.get("enforce_result").and_then(Value::as_str);
+            if check == "hidden_instruction" && f.iter().any(|c| c.as_str() == Some("possible_hidden_instruction")) && (result != "note" || (watch && er != Some("note"))) {
+                return Err("a hidden_instruction entry with possible_hidden_instruction (arguments or a result) is a note, never a block".into());
             }
             None
         };

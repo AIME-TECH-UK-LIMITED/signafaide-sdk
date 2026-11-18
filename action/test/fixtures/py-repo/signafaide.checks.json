@@ -1,0 +1,8 @@
+{
+  "format": "signafaide-checks/2",
+  "checks": { "secret": true, "address": true, "changed_tool": true, "fingerprint": true, "hidden_instruction": true },
+  "tools": { "send_receipt": { "protect": true } },
+  "addresses": { "hosts": [], "cidrs": [], "resolve": false },
+  "rules": null,
+  "ci": { "allow": [{ "tool": "run_migration", "reason": "runs only the migration files kept in this repository; reviewed 18 Nov 2026" }] }
+}

@@ -182,7 +182,7 @@ def test_strict_without_a_key_refuses_and_sends_nothing(local_recorder, service)
     def pay():
         ran.append(1)
 
-    with pytest.raises(signafaide.NotRecorded, match="no API key"):
+    with pytest.raises(signafaide.NotRecorded, match="until a person runs `signafaide protect`.*no signafAIde key or sandbox"):
         pay()
     assert ran == [] and service.calls == []
 

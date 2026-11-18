@@ -87,14 +87,15 @@ def test_init_then_a_call_meets_the_generated_file_and_a_rule_edited_into_it_tak
 def test_init_says_what_is_on_the_mode_that_nothing_blocks_and_how_to_change_it(cli, project):
     _, out = cli("init")
     file = project / "signafaide.checks.json"
-    assert "tool-call checks: on in watch mode" in out
+    assert "tool-call checks: on, Calibrating" in out
     assert "secret, address, changed_tool, fingerprint, hidden_instruction" in out
     assert "never block" in out
-    assert "No tool is strict and no field of a tool's arguments leaves the machine" in out
+    assert "No tool is protected and no field of a tool's arguments leaves the machine" in out
     assert f"change it in {file}" in out
-    assert '"mode": "enforce" blocks' in out and '"strict": true' in out and '"disclose"' in out
+    assert '`"mode": "enforce"` is On' in out and '"strict": true' in out and '"disclose"' in out
     assert "`signafaide checks status`" in out
-    assert len(out.splitlines()) == 7  # ready + claim link, why claim, time left, terms, what is sent, which checks are on, how to change them
+    # ready + claim link, why claim, time left, terms, what is sent, which checks are on, how to change them, the project note and its file
+    assert len(out.splitlines()) == 10
 
 
 def test_init_with_a_file_in_place_says_what_that_file_does(cli, project):
@@ -106,12 +107,12 @@ def test_init_with_a_file_in_place_says_what_that_file_does(cli, project):
     file.write_text(json.dumps(doc))
     code, out = cli("init")
     assert code == 0
-    assert "tool-call checks: on, enforce mode" in out
-    assert "strict tool pay: fail closed; discloses /amount" in out
+    assert "tool-call checks: on, On" in out
+    assert "protected tool pay: if signafAIde can't be reached: Stop; discloses /amount" in out
     assert f"change it in {file}" in out and "`signafaide checks status`" in out
     doc["tools"] = {}
     file.write_text(json.dumps(doc))
-    assert "no tool is strict; only tool fingerprints leave the machine" in cli("init")[1]
+    assert "no tool is protected; only tool fingerprints leave the machine" in cli("init")[1]
 
 
 def test_init_with_checks_off_says_so(cli, project, monkeypatch):

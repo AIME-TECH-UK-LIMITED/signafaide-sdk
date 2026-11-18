@@ -33,26 +33,26 @@
   },
   "snippets": {
     "python": {
-      "plain": "import signafaide\n\n@signafaide.record\ndef approve_payout(claim_id: str, amount: float): ...\n\n# or wrap existing functions without touching their definitions:\napprove_payout, escalate = signafaide.wrap_tools([approve_payout, escalate])\n\n# a decision that is not a tool call:\nsignafaide.note(\"routing\", {\"reason\": \"amount over limit\"})",
-      "langchain": "import signafaide\n\n# @tool functions or BaseTool instances; the copies record every invoke and still work with bind_tools\ntools = signafaide.wrap_tools([lookup_order, refund])\nagent = create_agent(model, tools=tools)",
-      "openai-agents": "import signafaide\nfrom agents import Agent\n\nagent = Agent(name=\"support\", tools=signafaide.wrap_tools([lookup_order, refund]))  # @function_tool tools"
+      "plain": "import signafaide\n\n# one agent name in every call, so one project is one agent in the console and in proofs\n@signafaide.record(agent=\"<agent name>\")\ndef approve_payout(claim_id: str, amount: float): ...\n\n# or wrap existing functions without touching their definitions:\napprove_payout, escalate = signafaide.wrap_tools([approve_payout, escalate], agent=\"<agent name>\")\n\n# a decision that is not a tool call:\nsignafaide.note(\"routing\", {\"reason\": \"amount over limit\"}, agent=\"<agent name>\")",
+      "langchain": "import signafaide\n\n# @tool functions or BaseTool instances; the copies record every invoke and still work with bind_tools\ntools = signafaide.wrap_tools([lookup_order, refund], agent=\"<agent name>\")\nagent = create_agent(model, tools=tools)",
+      "openai-agents": "import signafaide\nfrom agents import Agent\n\nagent = Agent(name=\"support\", tools=signafaide.wrap_tools([lookup_order, refund], agent=\"<agent name>\"))  # @function_tool tools"
     },
     "typescript": {
-      "plain": "import { note, record, wrapTools } from \"signafaide\";\n\nconst approvePayout = record(async (claimId: string, amount: number) => {\n  /* ... */\n}, { name: \"approve_payout\" });\n\n// or wrap existing functions (object key = recorded name):\nconst tools = wrapTools({ approve_payout: approvePayout, escalate });\n\n// a decision that is not a tool call:\nnote(\"routing\", { reason: \"amount over limit\" });",
-      "langchain": "import { wrapTools } from \"signafaide\";\n\n// tool(), DynamicStructuredTool or StructuredTool instances; the copies are still StructuredTools\nconst tools = wrapTools([lookupOrder, refund]);\nconst modelWithTools = model.bindTools(tools);",
-      "openai-agents": "import { wrapTools } from \"signafaide\";\n\nconst agent = new Agent({ name: \"support\", tools: wrapTools([lookupOrder, refund]) }); // tool({...}) from @openai/agents",
-      "vercel-ai": "import { wrapTools } from \"signafaide\";\n\nconst result = await generateText({ model, tools: wrapTools({ weather: tool({ inputSchema, execute }) }), prompt });"
+      "plain": "import { note, record, wrapTools } from \"signafaide\";\n\nconst approvePayout = record(async (claimId: string, amount: number) => {\n  /* ... */\n}, { name: \"approve_payout\", agent: \"<agent name>\" });\n\n// one agent name in every call, so one project is one agent in the console and in proofs\n// or wrap existing functions (object key = recorded name):\nconst tools = wrapTools({ approve_payout: approvePayout, escalate }, { agent: \"<agent name>\" });\n\n// a decision that is not a tool call:\nnote(\"routing\", { reason: \"amount over limit\" }, { agent: \"<agent name>\" });",
+      "langchain": "import { wrapTools } from \"signafaide\";\n\n// tool(), DynamicStructuredTool or StructuredTool instances; the copies are still StructuredTools\nconst tools = wrapTools([lookupOrder, refund], { agent: \"<agent name>\" });\nconst modelWithTools = model.bindTools(tools);",
+      "openai-agents": "import { wrapTools } from \"signafaide\";\n\nconst agent = new Agent({ name: \"support\", tools: wrapTools([lookupOrder, refund], { agent: \"<agent name>\" }) }); // tool({...}) from @openai/agents",
+      "vercel-ai": "import { wrapTools } from \"signafaide\";\n\nconst result = await generateText({ model, tools: wrapTools({ weather: tool({ inputSchema, execute }) }, { agent: \"<agent name>\" }), prompt });"
     },
     "javascript": {
-      "plain": "import { note, record, wrapTools } from \"signafaide\";\n\nconst approvePayout = record(async (claimId, amount) => {\n  /* ... */\n}, { name: \"approve_payout\" });\n\n// or wrap existing functions (object key = recorded name):\nconst tools = wrapTools({ approve_payout: approvePayout, escalate });\n\n// a decision that is not a tool call:\nnote(\"routing\", { reason: \"amount over limit\" });",
-      "langchain": "import { wrapTools } from \"signafaide\";\n\n// tool(), DynamicStructuredTool or StructuredTool instances; the copies are still StructuredTools\nconst tools = wrapTools([lookupOrder, refund]);\nconst modelWithTools = model.bindTools(tools);",
-      "openai-agents": "import { wrapTools } from \"signafaide\";\n\nconst agent = new Agent({ name: \"support\", tools: wrapTools([lookupOrder, refund]) }); // tool({...}) from @openai/agents",
-      "vercel-ai": "import { wrapTools } from \"signafaide\";\n\nconst result = await generateText({ model, tools: wrapTools({ weather: tool({ inputSchema, execute }) }), prompt });"
+      "plain": "import { note, record, wrapTools } from \"signafaide\";\n\nconst approvePayout = record(async (claimId, amount) => {\n  /* ... */\n}, { name: \"approve_payout\", agent: \"<agent name>\" });\n\n// one agent name in every call, so one project is one agent in the console and in proofs\n// or wrap existing functions (object key = recorded name):\nconst tools = wrapTools({ approve_payout: approvePayout, escalate }, { agent: \"<agent name>\" });\n\n// a decision that is not a tool call:\nnote(\"routing\", { reason: \"amount over limit\" }, { agent: \"<agent name>\" });",
+      "langchain": "import { wrapTools } from \"signafaide\";\n\n// tool(), DynamicStructuredTool or StructuredTool instances; the copies are still StructuredTools\nconst tools = wrapTools([lookupOrder, refund], { agent: \"<agent name>\" });\nconst modelWithTools = model.bindTools(tools);",
+      "openai-agents": "import { wrapTools } from \"signafaide\";\n\nconst agent = new Agent({ name: \"support\", tools: wrapTools([lookupOrder, refund], { agent: \"<agent name>\" }) }); // tool({...}) from @openai/agents",
+      "vercel-ai": "import { wrapTools } from \"signafaide\";\n\nconst result = await generateText({ model, tools: wrapTools({ weather: tool({ inputSchema, execute }) }, { agent: \"<agent name>\" }), prompt });"
     }
   },
   "steps": [
     "1. Install: {install}",
-    "2. Wrap the functions that act (pay, send, approve, delete, change). Each call then writes a signed decision record before it runs and an outcome record after:",
+    "2. Wrap the functions that act (pay, send, approve, delete, change), with the same agent name in every call. Each call then writes a signed decision record before it runs and an outcome record after. At a terminal, `npx signafaide protect` (Python: `signafaide protect`) finds the tools, asks what to block and writes this for you:",
     "",
     "```{fence}",
     "{snippet}",
@@ -97,8 +97,8 @@
     {
       "code": "quota_exceeded",
       "status": 429,
-      "means": "The monthly record quota of this project is used up. Records stay in the local outbox and nothing is lost. The SDK stops sending in the background until the API key or SIGNAFAIDE_URL changes, so it never floods the service.",
-      "fix": "Claim the sandbox (`signafaide claim`) and use a live key, or wait for the next month; then `signafaide flush`. `signafaide status` shows the quota."
+      "means": "The monthly record quota of this project (or this sandbox) is used up. Records stay in the local outbox and nothing is lost. The SDK stops sending in the background until the API key or SIGNAFAIDE_URL changes, so it never floods the service. A protected tool set to Stop does not run until then: its error says the records for the month are used up.",
+      "fix": "Keep the sandbox and choose a plan (the claim link, `signafaide claim`) or upgrade a live project in the console, or wait for the next month; then `signafaide flush`. `signafaide status` shows the quota."
     },
     {
       "code": "plan_required",
@@ -140,18 +140,18 @@
       "code": "network",
       "status": 0,
       "means": "The service could not be reached. Records are kept in `.signafaide/outbox/` and ship later; nothing is lost.",
-      "fix": "Check SIGNAFAIDE_URL and the network, then run `signafaide flush`. Only strict mode waits for the service."
+      "fix": "Check SIGNAFAIDE_URL and the network, then run `signafaide flush`. Only a protected tool waits for the service."
     },
     {
       "code": "not_recorded",
       "status": 0,
-      "means": "Strict mode: the decision got no receipt from the service, so the function did not run.",
-      "fix": "Fix the cause in the message (often `network`), then call again. Use strict mode only where an action must never run unrecorded."
+      "means": "The tool is protected and its decision got no receipt from the service, so the function did not run.",
+      "fix": "Fix the cause in the message (often `network`), then call again. Protect a tool only where an action must never run unrecorded."
     },
     {
       "code": "not_written",
       "status": 0,
-      "means": "The gateway could not write the decision record on this machine, so it did not forward the tool call to the MCP server (it fails closed).",
+      "means": "The gateway could not write the decision record on this machine, so it did not forward the tool call to the MCP server (it stops the call rather than let it run unrecorded).",
       "fix": "Fix the cause in the message, usually a folder that cannot be written: set SIGNAFAIDE_HOME to a writable folder for the gateway, then call the tool again."
     },
     {
@@ -181,8 +181,8 @@
     {
       "code": "no_key",
       "status": 0,
-      "means": "Strict mode needs the service's receipt before the function runs, and there is no API key. Without a key records stay local and nothing is sent, so a strict call cannot proceed.",
-      "fix": "A person opts in with `signafaide init` (a free sandbox, no account) or by setting SIGNAFAIDE_API_KEY (and SIGNAFAIDE_URL for a self-hosted witness). Or turn strict mode off for that tool."
+      "means": "A protected tool needs the service's receipt before the function runs, and there is no API key. Without a key records stay local and nothing is sent, so a protected call cannot proceed.",
+      "fix": "A person opts in with `signafaide init` (a free sandbox, no account) or by setting SIGNAFAIDE_API_KEY (and SIGNAFAIDE_URL for a self-hosted witness). Or stop protecting that tool (in the checks file, set `protect` to `false` for it: Not protected)."
     },
     {
       "code": "too_old",
@@ -199,20 +199,26 @@
     {
       "code": "blocked",
       "status": 0,
-      "means": "A tool-call check on this machine, or the witness's ruling on a strict tool, blocked the call, so the tool did not run. The decision and an outcome saying it did not run are recorded. The message names the check or rule, the rule set version, and what was found (never the value itself).",
-      "fix": "If the call should run: for a rule, change it in the console's Rules page (or in `signafaide.checks.json` for a local rule) and publish; for an internal address, add the host or network to the allowlist; for a changed tool, re-approve it in the console or with `signafaide checks approve <tool>`; for a field the rule set needs that this machine does not disclose, add the pointers the message names to the tool's `disclose` list in `signafaide.checks.json` (nothing leaves the machine unless listed there); for a secret, send it only to the service that issued it. `signafaide rules test <tool> '<arguments JSON>'` shows what a call would get. To see findings without blocking anything, use watch mode."
+      "means": "A tool-call check on this machine, or the witness's ruling on a protected tool, blocked the call, so the tool did not run. A protected tool always asks the witness, which rules with the newest rules; only when there is no ruling do the rules held here block it, and the message then says signafAIde did not rule on it. The decision and an outcome saying it did not run are recorded. The message names the check or rule, the rule set version, and what was found (never the value itself).",
+      "fix": "If the call should run: for a rule, change it in the console's Rules page (or in `signafaide.checks.json` for a local rule) and publish; for an internal address, add the host or network to the allowlist; for a changed tool, re-approve it in the console or with `signafaide checks approve <tool>`; for a field the rule set needs that this machine does not disclose, add the pointers the message names to the tool's `disclose` list in `signafaide.checks.json` (nothing leaves the machine unless listed there); for a secret, send it only to the service that issued it. `signafaide rules test <tool> '<arguments JSON>'` shows what a call would get. To see findings without blocking anything, set the tool's `mode` to `\"watch\"` in `signafaide.checks.json` (Calibrating: findings are noted and nothing is blocked; `\"enforce\"` is On)."
     },
     {
       "code": "no_ruling",
       "status": 0,
-      "means": "A strict tool with fail mode closed got no ruling from the witness in time (no receipt, often `network`, or a witness that does not give rulings), so the tool did not run. The decision ships later and the witness still rules on it.",
-      "fix": "Fix the cause in the message, then call again. `signafaide checks status` shows each strict tool and its fail mode. `ruling_timeout_ms` in `signafaide.checks.json` sets how long a strict call waits (10 s by default). If the tool should run without a ruling when the witness cannot be reached, set its fail mode to open in `signafaide.checks.json`, or in the console when the rule set sets the tool's fail mode (the rule set's wins); such calls are recorded as having had no ruling."
+      "means": "A protected tool set to Stop (`fail` is `closed`) got no ruling from the witness in time (no receipt after sending again for the whole ruling timeout, often `network`, or a witness that does not give rulings), so the tool did not run. The decision ships later and the witness still rules on it.",
+      "fix": "Fix the cause in the message, then call again. `signafaide checks status` shows each protected tool and what happens if signafAIde can't be reached (Stop or Let it run). `ruling_timeout_ms` in `signafaide.checks.json` sets how long a protected call waits, sending a failed request again (10 s by default). If the tool should run without a ruling when signafAIde can't be reached, choose Let it run for it: set `fail` to `\"open\"` for the tool in a version 1 `signafaide.checks.json`, or in the console when the rule set sets it (the rule set's wins); such calls are recorded as having had no ruling."
     },
     {
       "code": "rules_unavailable",
       "status": 0,
-      "means": "The witness accepted the decision of a strict tool but could not load or sign the project's rule set, so it gave no ruling. With fail mode closed the tool did not run; with fail mode open it ran and is recorded as having had no ruling.",
+      "means": "The witness accepted the decision of a protected tool but could not load or sign the project's rule set, so it gave no ruling. If signafAIde can't be reached is set to Stop (`closed`) the tool did not run; set to Let it run (`open`) it ran and is recorded as having had no ruling.",
       "fix": "Nothing to change on this machine: call again shortly. If it persists, report it with the output of `signafaide checks status`."
+    },
+    {
+      "code": "withheld",
+      "status": 0,
+      "means": "The tool ran, but its result held a secret (a key, token, private key, wallet key or seed phrase, read inside encoded text too), so, with the tool On (`mode` is `\"enforce\"`), the agent was given this error instead of the result. What the tool did stands. The outcome is recorded with the finding and without the result, so the secret is neither recorded nor sent.",
+      "fix": "Find out why the tool returns a secret and stop it at the source (redact it in the tool). If the agent must see such results, set the tool's `mode` to `\"watch\"` in `signafaide.checks.json` (Calibrating: the finding is then a note), or turn the `secret` check off. The message names what was found, never the value."
     }
   ]
 }

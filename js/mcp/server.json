@@ -2,19 +2,19 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "uk.co.signafaide/signafaide",
   "title": "signafAIde",
-  "description": "Audit evidence for AI agent tool calls: signed, independently co-signed, verifiable offline.",
+  "description": "Use when adding a tool that pays, deletes, sends, runs commands or pushes code: checks calls first.",
   "websiteUrl": "https://signafaide.co.uk",
   "repository": {
     "url": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk",
     "source": "github",
     "subfolder": "js/mcp"
   },
-  "version": "0.4.0",
+  "version": "0.5.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "signafaide-mcp",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "transport": {
         "type": "stdio"
       }

@@ -13,7 +13,7 @@ A decision is written when the span starts, before the tool runs, when the span 
 start that it is a tool call. When the span only says so at its end, the decision and the
 outcome are both written then, after the tool ran. Every record says which it was (SPEC §2.7).
 
-Running a tool only once it is recorded (strict mode) is a feature of wrapping the tool with
+Running a tool only once it is recorded (a protected tool) is a feature of wrapping the tool with
 the SDK, not of this processor: when a record cannot be written the tool still runs.
 
 Needs ``opentelemetry-sdk``: install ``signafaide[otel]``.

@@ -4,9 +4,11 @@
  *   cd js && npx vite-node ../bench/checks-bench.ts            # prints a table
  *   cd js && npx vite-node ../bench/checks-bench.ts --json     # one JSON line
  *
- * Measured: `ChecksState.plan()`, which runs the five decision checks (secret, address,
- * changed_tool, fingerprint, rule) of a call and builds the `checks` of its decision, and
- * `resultEntries()`, the sixth check (hidden_instruction) on the result. The checks file is
+ * Measured: `ChecksState.plan()`, which runs the decision checks (secret, address, changed_tool,
+ * fingerprint, rule, and from spec 1.1 hidden_instruction on the tool's definition) of a call and
+ * builds the `checks` of its decision, and `resultEntries()`, the result checks (secret and
+ * hidden_instruction) on the result. The last row's call also carries a 3 KB base64 attachment,
+ * which the secret check decodes (spec 1.1). The checks file is
  * on, with a 50-rule local rule set. The "connected" case adds a held project rule set of 50
  * rules and a shared fingerprint list. Nothing is sent: the fake service only signs the
  * rule set and the list once, before timing. Run under `systemd-run --user --scope -p MemoryMax=8G`.
@@ -50,6 +52,9 @@ const args = {
   currency: "GBP",
   callback: "https://api.example.com/v1/claims/48213/status",
 };
+/** A call with a 3 KB base64 attachment and a hex digest: the secret check decodes both (spec 1.1). */
+const attachment = Buffer.from("Quarterly claims summary. ".repeat(118), "utf8").toString("base64");
+const encodedArgs = { ...args, attachment, digest: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" };
 const output = { id: "msg_93f1", status: "queued", detail: "The message was accepted for delivery and will be sent within a minute." };
 
 function pct(xs: number[], p: number): number {
@@ -68,7 +73,7 @@ function time(fn: () => void): { p50: number; p95: number; p99: number; mean: nu
   return { p50: pct(us, 50), p95: pct(us, 95), p99: pct(us, 99), mean: us.reduce((a, b) => a + b, 0) / us.length };
 }
 
-async function scenario(name: string, connected: boolean, listSize: number): Promise<Record<string, unknown>> {
+async function scenario(name: string, connected: boolean, listSize: number, callArgs: Record<string, unknown> = args): Promise<Record<string, unknown>> {
   const root = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfa-bench-")), "bench-project");
   fs.mkdirSync(path.join(root, ".git"), { recursive: true });
   const cwd = process.cwd();
@@ -88,9 +93,9 @@ async function scenario(name: string, connected: boolean, listSize: number): Pro
     await rec.checks.pullList();
     if (connected) await rec.checks.pullRules();
     rec.checks.forget();
-    const plan = rec.checks.plan(tool, "claims-bot", args)!;
+    const plan = rec.checks.plan(tool, "claims-bot", callArgs)!;
     const kinds = plan.checks.results.map((r: any) => r.check).join(",");
-    const decision = time(() => void rec.checks.plan(tool, "claims-bot", args));
+    const decision = time(() => void rec.checks.plan(tool, "claims-bot", callArgs));
     const result = time(() => void rec.checks.resultEntries(output));
     return { name, listSize, checks: kinds, decision, result };
   } finally {
@@ -101,7 +106,7 @@ async function scenario(name: string, connected: boolean, listSize: number): Pro
   }
 }
 
-const out = [await scenario("local rules only (50 local rules, list of 1,000)", false, 1000), await scenario("connected (50 local + 50 held rules, list of 1,000)", true, 1000), await scenario("connected, list of 20,000", true, 20000)];
+const out = [await scenario("local rules only (50 local rules, list of 1,000)", false, 1000), await scenario("connected (50 local + 50 held rules, list of 1,000)", true, 1000), await scenario("connected, list of 20,000", true, 20000), await scenario("local rules, list of 1,000, a 3 KB base64 attachment", false, 1000, encodedArgs)];
 if (process.argv.includes("--json")) console.log(JSON.stringify({ sdk: "typescript", node: process.version, iterations: N, scenarios: out }));
 else {
   console.log(`typescript, node ${process.version}, ${N} calls per row, microseconds`);

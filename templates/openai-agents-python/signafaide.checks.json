@@ -1,0 +1,42 @@
+{
+  "format": "signafaide-checks/2",
+  "checks": {
+    "secret": true,
+    "address": true,
+    "changed_tool": true,
+    "fingerprint": true,
+    "hidden_instruction": true
+  },
+  "tools": {
+    "approve_payout": {
+      "protect": false,
+      "mode": "enforce"
+    }
+  },
+  "addresses": {
+    "hosts": [],
+    "cidrs": [],
+    "resolve": false
+  },
+  "rules": {
+    "default": "allow",
+    "rules": [
+      {
+        "id": "approve_payout-amount",
+        "about": "approve_payout: amount above 1000.",
+        "action": "block",
+        "tools": [
+          "approve_payout"
+        ],
+        "agents": null,
+        "when": [
+          {
+            "field": "/amount",
+            "op": "gt",
+            "value": 1000
+          }
+        ]
+      }
+    ]
+  }
+}

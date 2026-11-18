@@ -28,7 +28,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import * as os from "node:os";
 import type { Readable, Writable } from "node:stream";
-import { CheckError, outcomeChecks, refusedContent, type Plan } from "./checks-runtime.js";
+import { CheckError, SignafaideBlocked, callLink, outcomeChecks, refusedContent, type Plan } from "./checks-runtime.js";
 import { declaredName } from "./coverage.js";
 import { sha256Hex } from "./crypto.js";
 import { SignafaideError } from "./http.js";
@@ -36,6 +36,8 @@ import { toJsonable } from "./record.js";
 import { recordHash, type SignedRecord } from "./records.js";
 import { configure, recordingDisabled, type Recorder } from "./runtime.js";
 import { VERSION } from "./version.js";
+import type { CallNote } from "./checks.js";
+import { noteLine } from "./notes.js";
 
 export interface GatewayOptions {
   /** The MCP server to run, and its arguments. */
@@ -94,6 +96,8 @@ interface Call {
    * call was forwarded. */
   checked?: boolean;
   ruling?: string;
+  /** Notes on the call's arguments (§8 notes), returned with its answer. */
+  notes?: CallNote[];
 }
 
 interface Listing {
@@ -159,7 +163,9 @@ class Gateway {
   private inits = new Set<string>();
   /** The server's `serverInfo` and what the client was shown of each tool (§11.1). */
   private serverInfo: { name?: unknown; version?: unknown } | null = null;
-  private toolInfo = new Map<string, { description: string; inputSchema: unknown }>();
+  private toolInfo = new Map<string, { description: string; inputSchema: unknown; definition: unknown }>();
+  /** Why the session was refused (the server's instructions hold hidden instructions, §8). */
+  private refused: string | null = null;
   /** The listing the client is paging through, and the tools of the last one it finished. */
   private listing: Listing | null = null;
   private shown: Set<string> | null = null;
@@ -182,6 +188,14 @@ class Gateway {
     // else its command line, so two servers of one agent never replace each other's tools.
     this.source = `gateway:${this.prefix || sha256Hex(new TextEncoder().encode([opts.command, ...(opts.args ?? [])].join("\0"))).slice(0, 8)}`;
     this.rec = opts.recorder ?? configure({ via: "gateway", storeContent: opts.storeContent });
+  }
+
+  /** Which server this is, for the tools' local approvals: its `serverInfo.name`, or else the
+   * upstream command with a short hash of its arguments (never the arguments themselves). */
+  private serverId(): string {
+    const n = this.serverInfo?.name;
+    if (typeof n === "string" && n) return n;
+    return `${this.opts.command}#${sha256Hex(new TextEncoder().encode([this.opts.command, ...(this.opts.args ?? [])].join("\0"))).slice(0, 8)}`;
   }
 
   private diag(msg: string): void {
@@ -298,6 +312,8 @@ class Gateway {
     // No method: an answer to a request the server made (sampling, roots). Not ours to read.
     if (!isObject(msg) || typeof msg.method !== "string") return FORWARD;
     const key = idKey(msg.id);
+    // The session was refused: nothing more reaches the server.
+    if (this.refused) return "id" in msg ? { reply: this.refusal(msg.id) } : { drop: true };
     if (msg.method === "tools/list" && key !== undefined) {
       // No cursor: the client starts a new listing. A cursor continues the one it is paging through.
       const cursor = isObject(msg.params) ? msg.params.cursor : undefined;
@@ -329,15 +345,15 @@ class Gateway {
     // A strict call needs an id to be answered by: one that is not a string or a number cannot
     // be tracked while it waits for its receipt, so it is refused as an invalid request.
     if (strictCode && !checksOn && key === undefined && "id" in msg) {
-      this.diag(`${tool} was not run: a strict call's id must be a string or a number`);
-      return { reply: { jsonrpc: "2.0", id: null, error: { code: INVALID_REQUEST, message: `signafaide gateway: ${tool} was not run: a strict call's id must be a string or a number`, data: { signafaide: "invalid_request" } } } };
+      this.diag(`${tool} was not run: the id of a protected call must be a string or a number`);
+      return { reply: { jsonrpc: "2.0", id: null, error: { code: INVALID_REQUEST, message: `signafaide gateway: ${tool} was not run: the id of a protected call must be a string or a number`, data: { signafaide: "invalid_request" } } } };
     }
     let plan: Plan | null = null;
     if (checksOn) {
       try {
         const info = this.toolInfo.get(tool);
         plan = this.rec.checks.plan(
-          { name: tool, description: info?.description ?? "", inputSchema: info?.inputSchema ?? null, serverInfo: this.serverInfo },
+          { name: tool, description: info?.description ?? "", inputSchema: info?.inputSchema ?? null, serverInfo: this.serverInfo, server: this.serverId(), definition: info?.definition, others: [...this.toolInfo.keys()].filter((n) => n !== tool) },
           this.opts.agent || this.rec.defaultAgent,
           toJsonable(params.arguments) ?? null,
           { strictCode, callId: msg.id, declared: name },
@@ -394,7 +410,7 @@ class Gateway {
         this.rec.noteStrictRefused(name, err);
         if (call.state === "cancelled") return gone();
         this.calls.delete(key);
-        return { reply: this.error(msg.id, `${err.message} (strict mode: ${name} did not run)`, err.code) };
+        return { reply: this.error(msg.id, `${err.message} (${name} is protected and did not run)`, err.code) };
       },
     );
   }
@@ -403,16 +419,21 @@ class Gateway {
    * forwarded once the witness rules `allow` when it is strict, else forwarded at once. */
   private checked(msg: Json, key: string | undefined, name: string, decision: SignedRecord, plan: Plan): Route | Promise<Route> {
     const refuse = (err: CheckError, ruling: string, call?: Call): Route => {
+      if (err instanceof SignafaideBlocked) {
+        const h = recordHash(decision);
+        err.attach(h, callLink(this.rec, h));
+      }
       this.write(name, decision, refusedContent(err), outcomeChecks(false, ruling));
       if (call && this.calls.get(call.key) === call) this.calls.delete(call.key);
       return key === undefined ? { drop: true } : { reply: this.checkError(msg.id, err) };
     };
+    for (const n of plan.notes) this.diag(noteLine(n).replace(/^signafaide: /, ""));
     if (plan.blocked) return refuse(plan.blocked, "not_asked");
     let call: Call | undefined;
     if (key !== undefined) {
       const old = this.calls.get(key);
       if (old && old.state !== "cancelled") this.outcome(old, { error: { type: "NoAnswer", message: "the client used this request id again before the server answered" } });
-      call = { key, name, decision, state: "forwarded", checked: true, ruling: "not_asked" };
+      call = { key, name, decision, state: "forwarded", checked: true, ruling: "not_asked", notes: plan.notes };
       this.calls.set(key, call);
     }
     if (!plan.strict) return FORWARD;
@@ -448,52 +469,111 @@ class Gateway {
   private fromServer(line: Buffer): void {
     const msg = this.off ? undefined : parse(line);
     if (msg === undefined) return this.toClient(Buffer.concat([line, NL]));
-    const answers = (Array.isArray(msg) ? msg : [msg]).filter((m): m is Json => isObject(m) && typeof m.method !== "string" && idKey(m.id) !== undefined);
-    for (const m of answers) this.answer(m);
+    const batch = Array.isArray(msg);
+    const isAnswer = (m: unknown): m is Json => isObject(m) && typeof m.method !== "string" && idKey(m.id) !== undefined;
+    const items: unknown[] = batch ? msg : [msg];
+    const answers = items.filter(isAnswer);
+    // An answer the checks change (a tool withheld from a list, a result withheld, a refused
+    // session) is sent as the gateway's own serialisation; every other line as it came.
+    let changed = false;
+    const sent = items.map((m) => {
+      if (!isAnswer(m)) return m;
+      const r = this.answer(m);
+      if (r !== m) changed = true;
+      return r;
+    });
     // Answers held for a client batch join the server's answer to the rest of that batch.
     const groups = new Set(answers.flatMap((m) => (this.held.has(idKey(m.id)!) ? [this.held.get(idKey(m.id)!)!] : [])));
     for (const m of answers) this.held.delete(idKey(m.id)!);
     const extra = [...groups].flatMap((g) => g.replies.splice(0));
-    if (!extra.length) return this.toClient(Buffer.concat([line, NL]));
-    if (Array.isArray(msg)) return this.toClient(JSON.stringify([...msg, ...extra]) + "\n");
-    this.toClient(Buffer.concat([line, NL]));
+    const own = (): Buffer | string => (changed ? JSON.stringify(batch ? sent : sent[0]) + "\n" : Buffer.concat([line, NL]));
+    if (!extra.length) return this.toClient(own());
+    if (batch) return this.toClient(JSON.stringify([...sent, ...extra]) + "\n");
+    this.toClient(own());
     this.toClient(JSON.stringify(extra) + "\n");
   }
 
-  /** An answer from the server to a request of the client's. */
-  private answer(m: Json): void {
+  /** The refusal of a session whose server instructions hold hidden instructions (§8 gateway). */
+  private refusal(id: unknown): Json {
+    return this.error(id, `signafaide gateway: ${this.refused}`, "blocked", { check: "hidden_instruction" });
+  }
+
+  /** An answer from the server to a request of the client's: what the client is sent. */
+  private answer(m: Json): Json {
     const key = idKey(m.id)!;
-    if (this.inits.delete(key) && isObject(m.result) && isObject(m.result.serverInfo)) {
-      this.serverInfo = { name: m.result.serverInfo.name, version: m.result.serverInfo.version };
+    let out = m;
+    if (this.inits.delete(key) && isObject(m.result)) {
+      if (isObject(m.result.serverInfo)) this.serverInfo = { name: m.result.serverInfo.name, version: m.result.serverInfo.version };
+      if (typeof m.result.instructions === "string" && this.rec.checks.enabled()) {
+        const r = this.rec.checks.reviewInstructions(m.result.instructions);
+        if (r.line) this.diag(r.line);
+        if (r.withhold) this.refused = r.line;
+      }
     }
     const listing = this.lists.get(key);
     if (listing) {
       this.lists.delete(key);
-      this.listed(listing, m);
+      out = this.listed(listing, m) ?? m;
     }
     const call = this.calls.get(key);
     if (call && call.state === "forwarded") {
       this.calls.delete(key);
       // The result checks run on what the tool returned (§8 step 5); an error answer has none.
-      const results = call.checked && !isObject(m.error) ? this.rec.checks.resultEntries(toJsonable(m.result) ?? null) : [];
-      this.outcome(call, outcomeContent(m), { ran: true, results });
+      const results = call.checked && !isObject(m.error) ? this.rec.checks.resultEntries(toJsonable(m.result) ?? null, false, call.name) : [];
+      const withheld = call.checked ? this.rec.checks.withheld(call.name, results) : null;
+      if (withheld) {
+        // The result holds a secret: the client gets an error instead, and the outcome keeps
+        // the finding, never the result.
+        const h = recordHash(call.decision);
+        withheld.attach(h, callLink(this.rec, h));
+        this.diag(withheld.message);
+        this.outcome(call, { error: { type: "Withheld", message: withheld.message, check: withheld.check } }, { ran: true, results });
+        out = this.checkError(m.id, withheld);
+      } else {
+        this.outcome(call, outcomeContent(m), { ran: true, results });
+        const resultNotes = call.checked ? this.rec.checks.resultNotes(call.name, results) : [];
+        for (const n of resultNotes) this.diag(noteLine(n).replace(/^signafaide: /, ""));
+        out = withNotes(m, [...(call.notes ?? []), ...resultNotes]);
+      }
     }
+    return this.refused ? this.refusal(m.id) : out;
   }
 
-  private listed(listing: Listing, m: Json): void {
+  /** A `tools/list` answer: the tools the client is shown, for the declaration and the tool
+   * fingerprints. With checks on, each tool is approved the first time it is shown and checked
+   * every time (§8): in enforce mode one a check blocks is withheld. Returns the answer without
+   * the withheld tools, or null when it is sent as it came. */
+  private listed(listing: Listing, m: Json): Json | null {
     const result = m.result;
-    if (!isObject(result) || !Array.isArray(result.tools)) return;
+    if (!isObject(result) || !Array.isArray(result.tools)) return null;
+    const review = this.rec.checks.enabled();
+    const agent = this.opts.agent || this.rec.defaultAgent;
+    const kept: unknown[] = [];
+    // The names of every tool of this page and those shown before: a description that names one
+    // of them in an instruction about it is an instruction about another tool (§8 tool_shadowing).
+    const listedNames = [...new Set([...this.toolInfo.keys(), ...result.tools.flatMap((t: unknown) => (isObject(t) && typeof t.name === "string" && t.name ? [t.name] : []))])];
     for (const t of result.tools) {
-      if (!isObject(t) || typeof t.name !== "string" || !t.name) continue;
-      listing.names.add(t.name);
-      // What the client is shown of the tool: its fingerprints are taken from these (§11.1).
-      this.toolInfo.set(t.name, { description: typeof t.description === "string" ? t.description : "", inputSchema: isObject(t.inputSchema) ? toJsonable(t.inputSchema) : null });
+      const name = isObject(t) && typeof t.name === "string" && t.name ? t.name : null;
+      if (isObject(t)) {
+        // What the client is shown of the tool: its fingerprints are taken from these (§11.1).
+        const info = { description: typeof t.description === "string" ? t.description : "", inputSchema: isObject(t.inputSchema) ? toJsonable(t.inputSchema) : null, definition: toJsonable(t) };
+        if (name) this.toolInfo.set(name, info);
+        if (review) {
+          const r = this.rec.checks.reviewTool({ name: name ?? "", ...info, serverInfo: this.serverInfo, server: this.serverId(), others: listedNames.filter((n) => n !== name) }, agent, name ? declaredName(this.prefix + name) : "");
+          if (r.line) this.diag(r.line);
+          if (r.withhold) continue;
+        }
+      }
+      kept.push(t);
+      if (name) listing.names.add(name);
     }
     this.undeclared = true;
-    if (typeof result.nextCursor === "string" && result.nextCursor) return; // more pages to come
+    const out = kept.length === result.tools.length ? null : { ...m, result: { ...result, tools: kept } };
+    if (typeof result.nextCursor === "string" && result.nextCursor) return out; // more pages to come
     listing.complete = true;
     this.shown = listing.names;
     this.declareShown();
+    return out;
   }
 
   /** Declare the tools the client has been shown: the last finished listing, with the pages of
@@ -613,6 +693,15 @@ class Gateway {
 }
 
 const NL = Buffer.from("\n");
+
+/** A tool call's answer with its notes (§8 notes) in the result's `_meta.signafaide.notes`, the
+ * result's content unchanged; the answer as it came when there are none or it has no result. */
+export function withNotes(m: Json, list: CallNote[]): Json {
+  if (!list.length || !isObject(m.result)) return m;
+  const meta = isObject(m.result._meta) ? m.result._meta : {};
+  const own = isObject(meta.signafaide) ? meta.signafaide : {};
+  return { ...m, result: { ...m.result, _meta: { ...meta, signafaide: { ...own, notes: list } } } };
+}
 
 /** Splits a byte stream into lines at `\n`, whole bytes kept (a UTF-8 character may span chunks). */
 class Lines {

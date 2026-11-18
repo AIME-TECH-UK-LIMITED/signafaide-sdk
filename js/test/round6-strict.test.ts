@@ -1,4 +1,4 @@
-/** Fix round 6 (#52): the first strict refusal in a process prints one warning line. */
+/** Fix round 6 (#52): the first strict refusal in a process prints one stderr line. */
 import { describe, expect, it } from "vitest";
 import { NotRecorded, record } from "../src/index.js";
 import { useProject } from "./helpers.js";
@@ -20,11 +20,11 @@ describe("#52: a strict tool refused for no_key", () => {
       console.warn = warn;
     }
     expect(ran).toBe(0);
-    const lines = said.filter((l) => l.includes("strict tool"));
+    const lines = said.filter((l) => l.includes("protected tool"));
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain('signafaide: WARNING strict tool "refund_payment" was refused and did not run (no_key)');
-    expect(lines[0]).toContain("npx signafaide init");
-    expect(lines[0]).toContain("SIGNAFAIDE_API_KEY");
+    expect(lines[0]).toContain('signafaide: protected tool "refund_payment" was refused and did not run (no_key)');
+    expect(lines[0]).toContain("protected tools stop until a person runs `npx signafaide protect` in this project");
+    expect(lines[0]).not.toMatch(/WARN/i);
     expect(ctx.service.calls).toEqual([]);
   });
 });

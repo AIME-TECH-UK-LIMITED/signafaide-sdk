@@ -136,12 +136,13 @@ def test_strict_refused_for_no_key_prints_one_warning(local_recorder, service, c
         with pytest.raises(signafaide.NotRecorded):  # a framework would swallow this
             tool()
     err = capsys.readouterr().err
-    lines = [line for line in err.splitlines() if "strict tool" in line]
+    lines = [line for line in err.splitlines() if "protected tool" in line]
     assert len(lines) == 1, err
-    assert 'signafaide: WARNING strict tool "refund_payment" was refused and did not run (no_key)' in lines[0]
-    assert "signafaide init" in lines[0] and "SIGNAFAIDE_API_KEY" in lines[0]
+    assert 'signafaide: protected tool "refund_payment" was refused and did not run (no_key)' in lines[0]
+    assert "protected tools stop until a person runs `signafaide protect` in this project" in lines[0]
+    assert "WARN" not in lines[0].upper()
     assert not ran and service.calls == []
 
 
 def test_version_is_0_2_0():
-    assert __version__ == "0.4.0"
+    assert __version__ == "0.5.0"

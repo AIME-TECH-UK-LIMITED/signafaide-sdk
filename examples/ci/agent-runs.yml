@@ -1,0 +1,40 @@
+# Copy to .github/workflows/agent-runs.yml. Optional (issue #61): record an agent's tool calls in
+# a CI job, then export a verification pack of the job's records, verify it, and upload it.
+# Without the SIGNAFAIDE_API_KEY secret, the job records into a new sandbox (test records, kept
+# 30 days, no account).
+name: agent runs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: npm ci
+
+      - name: Start recording
+        uses: AIME-TECH-UK-LIMITED/signafaide-sdk/action@0e85f63ccb66497322ebd56015d52733d842e1c6 # signafaide 0.5.0
+        with:
+          check: false
+          record-runs: start
+          api-key: ${{ secrets.SIGNAFAIDE_API_KEY }}
+
+      # The agent: its tools recorded with the signafaide SDK (record / protect), or an MCP
+      # server run through `npx signafaide gateway -- <server command>`.
+      - run: npm run agent
+
+      - name: Verify the job's records
+        if: always()
+        uses: AIME-TECH-UK-LIMITED/signafaide-sdk/action@0e85f63ccb66497322ebd56015d52733d842e1c6 # signafaide 0.5.0
+        with:
+          check: false
+          record-runs: finish
+          agent: release-bot

@@ -15,7 +15,8 @@ import { AGENT_RE, CLEAN_RESTART_NOTE, INSTANCE_NOTE, INSTANCE_START, INSTANCE_S
 import { plural } from "./plural.js";
 import { coverage, coverageLines, telemetry, telemetryLines, type Coverage, type Telemetry } from "./coverage.js";
 import { checkHeader, type BlockRoots } from "./timestamps.js";
-import { acceptRules, agentChecks, asksForRuling, checksLines, disclosedErrors, rulingErrors, type AgentChecks } from "./checks.js";
+import { acceptRules, agentChecks, asksForRuling, checksLines, disclosedErrors, localRulesErrors, rulingErrors, type AgentChecks } from "./checks.js";
+import { ruleSetLines, ruleSetWords, type RuleSetWords } from "./words.js";
 
 export const CHECKS = [
   ["schema", "Envelope schema"],
@@ -122,6 +123,8 @@ export const SHORT_NAMES: Record<string, string> = {
 /** The checks of the witness's part: locally, while nothing is co-signed, they are named together (§7). */
 const WITNESS_CHECKS = ["record_hash", "merkle", "batch_sig", "batch_chain", "head_sig", "drand", "anchor", "ots"];
 export const NOTHING_COSIGNED = "nothing co-signed yet";
+/** The scope a local PASS leads with while nothing is co-signed (§7). */
+export const LOCAL_ONLY = "local checks only";
 
 /** How many checks passed, failed, are pending and were not checked (§7 result line). */
 export function countsText(checks: { id: string; status: Status }[], nothingCosigned = false): string {
@@ -212,6 +215,9 @@ export class Report {
   /** Tool-call checks per agent (§7; per chain for local state), for agents with a line: what
    * the checks of the agent's records found and the rulings on their receipts. A report, never a failure. */
   toolChecks: Record<string, AgentChecks> = {};
+  /** Rules in words (§7, §10.5, spec 1.1): each valid `rule_sets` entry, then each valid
+   * `local_rules` entry, in pack order. A report, never a failure. */
+  rules: RuleSetWords[] = [];
 
   constructor(
     readonly checks: Check[],
@@ -232,7 +238,11 @@ export class Report {
     if (this.blocked.length) counts = `${plural(this.blocked.length, "chain")} cannot ship (${this.blocked.map((b) => b.split(":")[0]).join(", ")}); ${counts}`;
     else if (this.notSent) counts = `${plural(this.notSent, "record")} not sent yet (--fail-on-pending-send); ${counts}`;
     // Local state: the only way keys are not independent there is plain http on this machine.
-    if (!s) return resultLine(this.result, this.independent.service_keys ? "independent" : "fetched over plain http", "independent", false, null, counts);
+    if (!s) {
+      const line = resultLine(this.result, this.independent.service_keys ? "independent" : "fetched over plain http", "independent", false, null, counts);
+      // Nothing co-signed yet: the scope leads, so a PASS pasted elsewhere never reads stronger than it is.
+      return this.nothingCosigned && this.result === "PASS" ? line.replace(/^PASS/, `PASS (${LOCAL_ONLY})`) : line;
+    }
     return resultLine(this.result, s.sources[0], s.sources[1], s.byService, scopeText(s.filter, s.generated), counts);
   }
 
@@ -269,6 +279,11 @@ export class Report {
     return Object.entries(this.toolChecks).flatMap(([agent, j]) => checksLines(agent, j));
   }
 
+  /** The rules in words (§7, §10.5), rule set by rule set. */
+  rulesLines(): string[] {
+    return this.rules.flatMap(ruleSetLines);
+  }
+
   lines(): string[] {
     const out = [...this.notes];
     if (this.project && this.env) {
@@ -289,6 +304,7 @@ export class Report {
     out.push(...this.coverageLines().map((l) => `coverage: ${l}`));
     out.push(...this.telemetryLines().map((l) => `telemetry: ${l}`));
     out.push(...this.toolChecksLines().map((l) => `tool-call checks: ${l}`));
+    out.push(...this.rulesLines().map((l) => `rules: ${l}`));
     out.push(...this.after);
     out.push(...this.blocked.map((b) => `BLOCKED ${b}`));
     out.push(this.resultLine);
@@ -316,6 +332,7 @@ export class Report {
       coverage: this.coverage,
       telemetry: this.telemetry,
       tool_call_checks: this.toolChecks,
+      rules: this.rules,
       ...(this.after.length ? { not_yet: this.after } : {}),
       ...(this.blocked.length ? { blocked: this.blocked } : {}),
     };
@@ -514,6 +531,7 @@ export function verifyPack(pack: any, serviceKeys: KeyDoc[] | null, opts: PackOp
   report.coverage = v.coverage;
   report.telemetry = v.telemetry;
   report.toolChecks = v.toolChecks;
+  report.rules = v.rules;
   return report;
 }
 
@@ -570,12 +588,13 @@ function packError(pack: any): string | null {
   const fields = ["format", "generated", "project", "env", "service_keys", "agent_keys", "filter", "heads", "records", "anchors", "export_sig"];
   for (const k of fields) if (!(k in pack)) return `missing field \`${k}\``;
   const extra = Object.keys(pack)
-    .filter((k) => !fields.includes(k) && k !== "project_name" && k !== "rule_sets")
+    .filter((k) => !fields.includes(k) && k !== "project_name" && k !== "rule_sets" && k !== "local_rules")
     .sort();
   if (extra.length) return `unknown field \`${extra[0]}\``;
   for (const k of ["service_keys", "agent_keys", "heads", "records", "anchors"]) if (!Array.isArray(pack[k])) return `\`${k}\` must be a list`;
   if (typeof pack.export_sig !== "string") return "`export_sig` must be a string";
   if ("rule_sets" in pack && !Array.isArray(pack.rule_sets)) return "`rule_sets` must be a list";
+  if ("local_rules" in pack && !Array.isArray(pack.local_rules)) return "`local_rules` must be a list";
   if (pack.env !== "test" && pack.env !== "live") return "env must be test or live";
   if (!validProjectId(pack.project)) return "project is not a valid project id";
   if ("project_name" in pack) {
@@ -691,6 +710,8 @@ class Verifier {
   telemetry: Record<string, Telemetry> = {};
   /** Tool-call checks per chain (§7), filled by `run`. */
   toolChecks: Record<string, AgentChecks> = {};
+  /** Rules in words (§7), filled by check 8. */
+  rules: RuleSetWords[] = [];
   /** Local state: chain id -> the witness's signed head a chain continues after (§8). */
   localBases: Record<string, { head: any; head_sig: string; stop?: any }> = {};
 
@@ -1328,7 +1349,35 @@ class Verifier {
       const doc = e.rules;
       if (versions.has(doc.version)) acc.fail(item, `two rule_sets entries hold version ${doc.version}`);
       versions.add(doc.version);
-      held.set(`${doc.set}\n${doc.version}`, hashJson(doc));
+      const h = hashJson(doc);
+      held.set(`${doc.set}\n${doc.version}`, h);
+      this.rules.push(ruleSetWords(doc, h, false));
+    });
+    // The local rules a client added (spec 1.1): each the rules object of a hash that a record of
+    // the pack names in its checks.rules.
+    const namedLocal = new Set<string>();
+    for (const { r } of this.recs) {
+      for (const x of Array.isArray(r.envelope.checks?.rules) ? r.envelope.checks.rules : []) if (x && x.set === "local" && typeof x.hash === "string") namedLocal.add(x.hash);
+    }
+    const seenLocal = new Set<string>();
+    const locals: any[] = Array.isArray(this.x.pack?.local_rules) ? this.x.pack.local_rules : [];
+    locals.forEach((e, i) => {
+      const item = `local_rules[${i}]`;
+      acc.checked++;
+      if (!exactKeys(e, ["hash", "rules"]) || typeof e.hash !== "string") return acc.fail(item, "a local_rules entry is {hash, rules}");
+      const bad = e.rules === null ? "rules must be {default, rules}" : localRulesErrors(e.rules);
+      if (bad) return acc.fail(item, `not valid local rules: ${bad}`);
+      let h: string;
+      try {
+        h = hashJson(e.rules);
+      } catch (err) {
+        return acc.fail(item, `not valid local rules: ${(err as Error).message}`);
+      }
+      if (h !== e.hash) return acc.fail(item, "the local rules do not hash to the entry's hash");
+      if (!namedLocal.has(h)) return acc.fail(item, "no record of the pack names these local rules in its checks.rules");
+      if (seenLocal.has(h)) return acc.fail(item, "two local_rules entries hold the same rules");
+      seenLocal.add(h);
+      this.rules.push(ruleSetWords(e.rules, h, true));
     });
     for (const { label, r } of this.recs) {
       const named: any[] = [...(Array.isArray(r.envelope.checks?.rules) ? r.envelope.checks.rules : [])];

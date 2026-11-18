@@ -1,15 +1,15 @@
 {
   "name": "signafaide-mcp",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "mcpName": "uk.co.signafaide/signafaide",
   "description": "signafAIde MCP server: audit evidence for AI agent tool calls, signed, independently co-signed and verifiable offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "bin": {
-    "signafaide-mcp": "./dist/cli.js"
+    "signafaide-mcp": "dist/cli.js"
   },
   "exports": {
     ".": {

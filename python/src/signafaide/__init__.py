@@ -22,8 +22,10 @@ from ._plural import plural
 from . import runtime
 from ._version import __version__
 from .drand import load_verifier as load_drand_verifier
-from .decorator import NotRecorded, auto_declare_tools, declare_tools, note, record, to_jsonable, wrap_tool, wrap_tools
+from .checks_runtime import CheckError, SignafaideBlocked
+from .decorator import NotRecorded, auto_declare_tools, declare_tools, note, protect, record, to_jsonable, wrap_tool, wrap_tools
 from .experiments import ExperimentReport, VerificationFailed, compare
+from .notes import notes, on_note
 from .http import SignafaideError
 from .replay import Replay, replay
 from .runtime import Recorder, recording_disabled, test_mode
@@ -39,11 +41,16 @@ __all__ = [
     "test_mode",
     "init",
     "record",
+    "protect",
+    "SignafaideBlocked",
+    "CheckError",
     "wrap_tools",
     "wrap_tool",
     "declare_tools",
     "auto_declare_tools",
     "note",
+    "notes",
+    "on_note",
     "flush",
     "stop",
     "verify",

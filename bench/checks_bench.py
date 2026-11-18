@@ -3,9 +3,11 @@
     cd python && .venv/bin/python ../bench/checks_bench.py            # prints a table
     cd python && .venv/bin/python ../bench/checks_bench.py --json     # one JSON line
 
-Measured: ``ChecksState.plan()``, which runs the five decision checks (secret, address,
-changed_tool, fingerprint, rule) of a call and builds the ``checks`` of its decision, and
-``result_entries()``, the sixth check (hidden_instruction) on the result. The checks file is on,
+Measured: ``ChecksState.plan()``, which runs the decision checks (secret, address, changed_tool,
+fingerprint, rule, and from spec 1.1 hidden_instruction on the tool's definition) of a call and
+builds the ``checks`` of its decision, and ``result_entries()``, the result checks (secret and
+hidden_instruction) on the result. The last row's call also carries a 3 KB base64 attachment,
+which the secret check decodes (spec 1.1). The checks file is on,
 with a 50-rule local rule set. The "connected" case adds a held project rule set of 50 rules and
 a shared fingerprint list. Nothing is sent: the fake service of the tests only signs the rule set
 and the list once, before timing. Run under ``systemd-run --user --scope -p MemoryMax=8G``.
@@ -52,6 +54,9 @@ TOOL = ToolInfo("send_email", "Send an email to a customer on behalf of the clai
 ARGS = {"to": "customer@example.org", "subject": "Your claim 48213 has been approved",
         "body": "Hello, your claim has been approved and the payment of 120.00 GBP will reach your account within three working days. Reply to this message if anything looks wrong. Regards, the claims team.",
         "amount": 120, "currency": "GBP", "callback": "https://api.example.com/v1/claims/48213/status"}
+#: A call with a 3 KB base64 attachment and a hex digest: the secret check decodes both (spec 1.1).
+ENCODED_ARGS = {**ARGS, "attachment": __import__("base64").b64encode(("Quarterly claims summary. " * 118).encode()).decode(),
+                "digest": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}
 OUTPUT = {"id": "msg_93f1", "status": "queued", "detail": "The message was accepted for delivery and will be sent within a minute."}
 
 
@@ -69,7 +74,7 @@ def timed(fn):
     return {"p50": pick(50), "p95": pick(95), "p99": pick(99), "mean": sum(us) / len(us)}
 
 
-def scenario(name, connected, list_size):
+def scenario(name, connected, list_size, args=ARGS):
     root = Path(tempfile.mkdtemp(prefix="sfa-bench-")) / "bench-project"
     (root / ".git").mkdir(parents=True)
     cwd = os.getcwd()
@@ -89,9 +94,9 @@ def scenario(name, connected, list_size):
         rec.checks.pull_list()
         if connected:
             rec.checks.pull_rules()
-        plan = rec.checks.plan(TOOL, "claims-bot", ARGS, strict_code=False)
+        plan = rec.checks.plan(TOOL, "claims-bot", args, strict_code=False)
         kinds = ",".join(r["check"] for r in plan.checks["results"])
-        decision = timed(lambda: rec.checks.plan(TOOL, "claims-bot", ARGS, strict_code=False))
+        decision = timed(lambda: rec.checks.plan(TOOL, "claims-bot", args, strict_code=False))
         result = timed(lambda: rec.checks.result_entries(OUTPUT))
         return {"name": name, "listSize": list_size, "checks": kinds, "decision": decision, "result": result}
     finally:
@@ -105,7 +110,8 @@ def scenario(name, connected, list_size):
 
 out = [scenario("local rules only (50 local rules, list of 1,000)", False, 1000),
        scenario("connected (50 local + 50 held rules, list of 1,000)", True, 1000),
-       scenario("connected, list of 20,000", True, 20000)]
+       scenario("connected, list of 20,000", True, 20000),
+       scenario("local rules, list of 1,000, a 3 KB base64 attachment", False, 1000, ENCODED_ARGS)]
 if "--json" in sys.argv:
     print(json.dumps({"sdk": "python", "python": platform.python_version(), "iterations": N, "scenarios": out}))
 else:

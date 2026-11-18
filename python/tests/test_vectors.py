@@ -1,6 +1,6 @@
 """Every entry of spec/vectors.json, byte for byte.
 
-The drand BLS checks use ``py_ecc`` (a dependency; also a dev
+The drand BLS checks use ``py_ecc`` (the ``bls`` extra; also a dev
 dependency here); without it they are skipped and check 9 says "not checked".
 """
 
@@ -256,6 +256,11 @@ def test_variants(v, bls):
         assert all(f"tool-call checks: {line}" in str(r).splitlines() for line in case["expect"]["tool_call_checks_lines"]), case["name"]
         for line in case["expect"]["coverage_lines"]:
             assert f"coverage: {line}" in str(r).split("\n"), (case["name"], str(r))
+        # Rules in words (§7, §10.5, spec 1.1): likewise.
+        assert r.to_dict()["rules"] == case["expect"]["rules"], case["name"]
+        assert r.rules_lines() == case["expect"]["rules_lines"], case["name"]
+        assert all(f"rules: {line}" in str(r).splitlines() for line in case["expect"]["rules_lines"]), case["name"]
+    assert sum(1 for c in v["variants"] if c["expect"]["rules_lines"]) >= 2
     assert sum(1 for c in v["variants"] if any(x["declared_at_seq"] is not None for x in c["expect"]["coverage"].values())) == 7
     assert sum(1 for c in v["variants"] if c["expect"]["telemetry"]) == 2
     assert sum(1 for c in v["variants"] if "chain_note" in c["expect"]) == 3  # an unclean start, a clean restart, a clean restart cut by the window
@@ -268,7 +273,7 @@ def test_pack_without_bls_says_not_checked(v):
 
 
 def test_tampered_packs(v, bls):
-    assert len(v["tampered"]) == 57
+    assert len(v["tampered"]) == 59
     for case in v["tampered"]:
         keys, o = options(case, v, drand=bls)
         r = verify_pack(case["pack"], keys, **o)
@@ -289,5 +294,18 @@ def test_verify_says_plainly_when_drand_is_not_checked(v, recorder, monkeypatch,
     monkeypatch.setattr(signafaide, "load_drand_verifier", lambda: None)
     r = signafaide.verify(v["pack"]["pack"], keys=v["keys_document"], agent_keys=v["agent_keys_document"], offline=True)
     assert r.ok and r.check("drand").status == "not_checked"
-    assert DRAND_NOT_CHECKED == "drand: not checked (BLS library not installed; pip install py_ecc)"
+    assert DRAND_NOT_CHECKED == "drand: not checked (BLS library not installed; pip install 'signafaide[bls]')"
     assert DRAND_NOT_CHECKED in str(r).splitlines()
+
+
+def test_the_published_service_keys_ship_with_the_package():
+    """SPEC §5 (spec 1.1): the PyPI package ships spec/service-keys.json unchanged, and the SDK
+    pins exactly those keys."""
+    from importlib import resources
+
+    from signafaide.checks_runtime import DEFAULT_SERVICE_KEYS
+
+    spec = (Path(__file__).resolve().parents[2] / "spec" / "service-keys.json").read_text()
+    shipped = resources.files("signafaide").joinpath("service-keys.json").read_text()
+    assert shipped == spec
+    assert json.loads(spec)["keys"] == list(DEFAULT_SERVICE_KEYS)

@@ -6,6 +6,7 @@
 
 pub mod bitcoin;
 pub mod checks;
+pub mod confusables_letters;
 pub mod coverage;
 pub mod drand;
 pub mod hash;

@@ -6,6 +6,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import * as C from "../src/checks.js";
+import { COLLECT_PATTERNS, CONCEAL_PATTERNS, INSTRUCTION_PATTERNS, NAME_SCRIPTS, SHADOW_PATTERNS, SHADOW_REF_PATTERNS } from "../src/scan.js";
+import { INSTRUCTION_CONFUSABLES } from "../src/confusables.js";
+import * as W from "../src/words.js";
 import { hashJson, sha256Hex, signedMessage, verifySig } from "../src/crypto.js";
 import { canonicalize, parseJson } from "../src/jcs.js";
 import { envelopeErrors, receiptErrors, recordErrors, recordHash } from "../src/records.js";
@@ -59,7 +62,10 @@ describe("vectors.json checks", () => {
             return same && now - lim.seconds * 1000 < at && at <= now;
           }).length;
       }
-      expect(plain(C.evaluate(doc, t.agent, t.tool, (p) => C.resolve(t.input, p), count)), t.name).toEqual(plain(t.expect));
+      const e = C.evaluate(doc, t.agent, t.tool, (p) => C.resolve(t.input, p), count);
+      expect(plain({ result: e.result, basis: e.basis, matched: e.matched }), t.name).toEqual(plain(t.expect));
+      // A document without states and exceptions never names a rule in the 1.1 lists.
+      expect([e.would_block, e.not_calibrated, e.excepted], t.name).toEqual([[], [], []]);
     }
     for (const m of c.modes) expect(C.applyMode(m.check_result, m.mode)).toEqual(plain(m.expect));
     const cre = c.client_rule_entries;
@@ -156,7 +162,7 @@ describe("vectors.json checks", () => {
   it("local checks: secret, address, hidden instruction", () => {
     const lc = c.local_checks;
     for (const [tid, t] of Object.entries<any>(lc.tokens)) expect(sha256Hex(new TextEncoder().encode(t.parts.join(""))), tid).toBe(t.sha256);
-    expect(lc.secret_formats.map((f: any) => f.id)).toEqual([...C.SECRET_FORMATS.map((f) => f[0]), "private_key"]);
+    expect(lc.secret_formats.map((f: any) => f.id)).toEqual([...C.SECRET_FORMATS.map((f) => f[0]), ...C.TEXT_FORMATS, ...C.CONTEXT_FORMATS]);
     C.SECRET_FORMATS.forEach(([fid, pat, issuers], i) => {
       const f = lc.secret_formats[i];
       expect(f.pattern, fid).toBe(pat);
@@ -165,6 +171,22 @@ describe("vectors.json checks", () => {
     for (const t of lc.secret) expect(C.secretFindings(rebuild(t.input, lc.tokens), "witness.example"), t.name).toEqual(plain(t.expect));
     for (const t of lc.address) expect(C.addressFindings(t.input, t.allow.hosts, t.allow.cidrs), t.name).toEqual(plain(t.expect));
     for (const t of lc.hidden_instruction) expect(C.hiddenFindings(t.result), t.name).toEqual(plain(t.expect));
+    // spec 1.1
+    for (const t of lc.secret_result) expect(C.secretFindings(rebuild(t.result, lc.tokens), "witness.example", true), t.name).toEqual(plain(t.expect));
+    for (const t of lc.definitions) expect(C.definitionFindings(t.definition, { others: t.others ?? [], approved: t.approved ?? [] }), t.name).toEqual(plain(t.expect));
+    expect(lc.instruction_patterns).toEqual([...INSTRUCTION_PATTERNS]);
+    // spec 1.1, benchmark batch 2
+    for (const t of lc.arguments) expect(C.argumentFindings(t.input), t.name).toEqual(plain(t.expect));
+    for (const t of lc.notes) {
+      const f = t.in === "arguments" ? C.argumentFindings(t.value) : C.hiddenFindings(t.value);
+      expect(C.callNotes(t.tool, t.in, f), t.name).toEqual(plain(t.expect));
+    }
+    expect(lc.shadow_patterns).toEqual([...SHADOW_PATTERNS]);
+    expect(lc.shadow_ref_patterns).toEqual([...SHADOW_REF_PATTERNS]);
+    expect(lc.instruction_confusables).toEqual(INSTRUCTION_CONFUSABLES.map(([c, l]) => [c, l]));
+    // spec 1.1, benchmark batch 3
+    expect(lc.covert_patterns).toEqual({ collect: [...COLLECT_PATTERNS], conceal: [...CONCEAL_PATTERNS] });
+    expect(lc.name_scripts).toEqual(NAME_SCRIPTS.map(([n, rs]) => [n, rs.map(([a, b]) => [a, b])]));
   });
 
   it("the secret check's issuer rule for signafAIde keys", () => {
@@ -178,7 +200,7 @@ describe("vectors.json checks", () => {
     const vl = c.verifier_lines;
     const out: Record<string, unknown> = {};
     const lines: string[] = [];
-    for (const agent of ["agent-a", "agent-b"]) {
+    for (const agent of ["agent-a", "agent-b", "agent-c"]) {
       const items = vl.records
         .filter((r: any) => r.record.agent === agent)
         .map((r: any) => ({ seq: r.record.seq, kind: r.record.kind, checks: r.record.checks, decision_seq: r.record.ref_seq ?? null, ruling: r.ruling }));
@@ -190,6 +212,63 @@ describe("vectors.json checks", () => {
     }
     expect(lines).toEqual(vl.expect.checks_lines);
     expect(plain(out)).toEqual(plain(vl.expect.checks));
+  });
+
+  it("spec 1.1: rule states, exceptions, rulings, client entries and disclosure", () => {
+    const rs = c.rule_states;
+    for (const t of rs.states) {
+      const doc = rs.rule_sets[t.rule_set];
+      expect(C.ruleSetErrors(doc), t.name).toBeNull();
+      expect(Object.fromEntries(doc.rules.map((r: any) => [r.id, C.ruleState(doc, r)])), t.name).toEqual(t.expect);
+    }
+    for (const t of rs.evaluation) {
+      const doc = rs.rule_sets[t.rule_set];
+      const e =
+        t.where === "witness"
+          ? C.evaluate(doc, "agent-a", t.tool, (p) => (p in t.input ? t.input[p] : C.ABSENT), () => 0, (p) => t.available.includes(p))
+          : C.evaluate(doc, "agent-a", t.tool, (p) => C.resolve(t.input, p));
+      expect(plain(e), t.name).toEqual(plain(t.expect));
+    }
+    for (const t of rs.client_rule_entries) {
+      const doc = rs.rule_sets[t.rule_set];
+      const e = C.clientRuleEntry(doc, C.entryMode(doc.mode, t.strict, false), doc.set, "agent-a", "approve_payout", t.input);
+      expect(plain(e), t.name).toEqual(plain(t.expect));
+    }
+    for (const t of rs.disclosure) expect(C.disclosure(rs.rule_sets[t.rule_set], "agent-a", "approve_payout", t.disclose), t.name).toEqual(plain(t.expect));
+    for (const t of rs.ruling_shapes.valid) expect(C.rulingErrors(t.ruling), t.name).toBeNull();
+    for (const t of rs.ruling_shapes.invalid) expect(C.rulingErrors(t.ruling), t.name).not.toBeNull();
+    for (const t of rs.rulings) {
+      const g = { v: 1, record_hash: "00".repeat(32), batch_hash: "11".repeat(32), server_time: rs.now, reason: t.reason, ...t.expect };
+      expect(C.rulingErrors(g), t.name).toBeNull();
+    }
+  });
+
+  it("spec 1.1: rules in words and the checks file", () => {
+    const w = c.rule_words;
+    for (const t of w.conditions) expect(W.conditionWords(t.condition), t.name ?? t.expect).toBe(t.expect);
+    const v3 = c.rule_states.rule_sets.v3;
+    for (const t of w.rules) {
+      const doc = { ...v3, version: 1, prev: null, mode: "enforce", default: "allow", fail: {}, addresses: { hosts: [], cidrs: [] }, approved: null, rules: [t.rule] };
+      delete (doc as any).fingerprint_exceptions;
+      expect(C.ruleSetErrors(doc), t.name).toBeNull();
+      expect(W.ruleWords(t.rule), t.name).toBe(t.expect);
+    }
+    for (const t of w.rule_sets) {
+      const local = "local_rules" in t;
+      const words = local ? W.ruleSetWords(t.local_rules.rules, t.local_rules.hash, true) : W.ruleSetWords(t.rule_set.rules, t.rule_set.hash, false);
+      expect(plain(words), t.name).toEqual(plain(t.expect.words));
+      expect(W.ruleSetLines(words), t.name).toEqual(t.expect.lines);
+    }
+    const f = c.checks_files;
+    for (const t of f.valid) {
+      expect(C.checksFileErrors(t.file), t.name).toBeNull();
+      for (const [name, want] of Object.entries<any>(t.expect.tools)) {
+        const s = C.toolSettings(t.file, name);
+        expect({ strict: s.strict, fail: s.fail, mode: s.mode, disclose: s.disclose }, `${t.name} ${name}`).toEqual(plain(want));
+      }
+      expect(t.file.rules === null ? null : hashJson(t.file.rules), t.name).toBe(t.expect.local_rules_hash);
+    }
+    for (const t of f.invalid) expect(C.checksFileErrors(t.file), t.name).not.toBeNull();
   });
 
   it("the checks file schema", () => {

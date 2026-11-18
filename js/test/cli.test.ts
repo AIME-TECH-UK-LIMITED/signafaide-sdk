@@ -29,14 +29,16 @@ async function cli(...args: string[]): Promise<[number, string, string]> {
 
 describe("cli", () => {
   it("has the same commands as the Python CLI, plus the coding-agent ones and the MCP gateway", () => {
-    expect(Object.keys(COMMANDS).filter((c) => !["agent", "mcp", "gateway"].includes(c))).toEqual(["init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush", "checks", "rules"]);
+    expect(Object.keys(COMMANDS).filter((c) => !["agent", "mcp", "gateway"].includes(c))).toEqual(["protect", "check", "pull", "prove", "start-fresh", "login", "logout", "whoami", "init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush", "checks", "rules"]);
   });
 
   it("init, then claim", async () => {
     const [code, out] = await cli("init");
     expect(code).toBe(0);
-    expect(out.split("\n")).toHaveLength(7); // ready + claim link, why claim, time left, terms, what is sent, which tool-call checks are on, how to change them
-    expect(out).toContain("tool-call checks: on in watch mode");
+    expect(out.split("\n")).toHaveLength(10); // ready + claim link, why claim, time left, terms, what is sent, which tool-call checks are on, how to change them, the project note and the file it went in, and CLAUDE.md importing it
+    expect(out).toContain("agents: AGENTS.md created, with the signafAIde note for coding agents (a marked block)");
+    expect(out).toContain("agents: CLAUDE.md created");
+    expect(out).toContain("tool-call checks: on, Calibrating");
     expect(out).toContain(`claim it at ${ctx.service.url}/app/claim/`);
     expect(out).toContain(`By creating a sandbox you agree to the signafAIde Terms (${ctx.service.url}/legal/terms) and Privacy notice (${ctx.service.url}/legal/privacy).`);
     expect(out).toContain("records written before now ship with their original times");
@@ -58,7 +60,7 @@ describe("cli", () => {
     [code, out] = await cli("verify");
     expect(code).toBe(0);
     const lines = out.split("\n");
-    expect(lines.at(-1)).toBe("PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)");
+    expect(lines.at(-1)).toBe("PASS (local checks only): 4 of 12 checks passed, 8 not checked (nothing co-signed yet)");
     expect(lines.at(-2)).toBe("co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, or self-host (SIGNAFAIDE_URL)");
     expect(out).toMatch(/^ 3\. Client signatures +PASS +2 records/m);
     expect(ctx.service.calls).toEqual([]);

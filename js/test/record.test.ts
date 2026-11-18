@@ -209,7 +209,7 @@ describe("shipping", () => {
       ran = true;
     }, { name: "pay", strict: true });
     await expect(pay()).rejects.toThrow(NotRecorded);
-    await expect(pay()).rejects.toThrow(/no API key/);
+    await expect(pay()).rejects.toThrow(/until a person runs `npx signafaide protect`.*no signafAIde key or sandbox/);
     expect(ran).toBe(false);
     expect(ctx.service.calls).toEqual([]);
   });
@@ -234,7 +234,7 @@ describe("shipping", () => {
       ran = true;
     }, { name: "pay", strict: true });
     await expect(pay()).rejects.toThrow(NotRecorded);
-    await expect(pay()).rejects.toThrow(/strict mode: pay did not run/);
+    await expect(pay()).rejects.toThrow(/pay is protected and did not run/);
     expect(ran).toBe(false);
   });
 

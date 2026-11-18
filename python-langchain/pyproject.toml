@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "AIME TECH UK LIMITED" }]
-dependencies = ["signafaide>=0.4.0,<0.5", "langchain>=1.0,<2"]
+dependencies = ["signafaide>=0.4,<1", "langchain>=1.0,<2"]
 keywords = ["langchain", "middleware", "ai-agents", "audit-trail", "tamper-evident", "eu-ai-act"]
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
@@ -27,6 +27,11 @@ Issues = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues"
 
 [dependency-groups]
 dev = ["pytest>=7"]
+
+# Tests run against the SDK in this repository (../python), not the release on PyPI, so a change
+# to both packages is tested together. Only uv reads this; the published metadata keeps the range.
+[tool.uv.sources]
+signafaide = { path = "../python", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/langchain_signafaide"]

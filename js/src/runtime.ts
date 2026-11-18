@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { b64url, hashJson, type SigningKey } from "./crypto.js";
 import { Client, DEFAULT_URL, SignafaideError, type Transport } from "./http.js";
 import { nodeTransport } from "./nodehttp.js";
-import { ChecksState } from "./checks-runtime.js";
+import { ChecksState, NO_KEY_WHY } from "./checks-runtime.js";
 import { plural } from "./plural.js";
 import { claimNotes, daysLeft, parseExpiry } from "./claim.js";
 import {
@@ -354,7 +354,7 @@ export class Recorder {
   /** Return the API key; create a sandbox project if there is none. Only an explicit human
    * opt-in calls this (`signafaide init`, the MCP `signafaide_init` tool): records never
    * create a sandbox by themselves. */
-  async createSandbox(): Promise<string> {
+  async createSandbox(opts: { writeUrl?: boolean } = {}): Promise<string> {
     const raw = this.rawApiKey;
     if (raw && !API_KEY_RE.test(raw)) {
       throw new SignafaideError(`SIGNAFAIDE_API_KEY (${raw.slice(0, 8)}...) is not a signafAIde key (sfa_test_ or sfa_live_ and 32 letters or digits): fix it, or remove it to create a sandbox.`, { code: "invalid_key" });
@@ -380,8 +380,8 @@ export class Recorder {
       if (raced) return raced;
       const envFile = path.join(this.state.root, ".env");
       appendEnvFile(envFile, "SIGNAFAIDE_API_KEY", resp.api_key);
-      // A sandbox key only works on the service that issued it: keep that service with the key.
-      if (this.url !== DEFAULT_URL && !readEnvFile(envFile).SIGNAFAIDE_URL) appendEnvFile(envFile, "SIGNAFAIDE_URL", this.url);
+      // A sandbox key only works on the service that issued it: `init` keeps that service with the key; `protect` writes only the key.
+      if (opts.writeUrl !== false && this.url !== DEFAULT_URL && !readEnvFile(envFile).SIGNAFAIDE_URL) appendEnvFile(envFile, "SIGNAFAIDE_URL", this.url);
       this.state.ignoreInGit(".env"); // the key must not be committed
       this.state.learnProject(resp.api_key, resp.project, "test");
       const legal = legalLinks(resp, this.url);
@@ -752,9 +752,9 @@ export class Recorder {
     this.toldStrict = true;
     const fix =
       err.code === "no_key"
-        ? "there is no API key, and strict mode needs the witness's receipt. Fix: run `npx signafaide init` (a free sandbox) or set SIGNAFAIDE_API_KEY, or drop strict for this tool"
+        ? NO_KEY_WHY.replace(/\.$/, "")
         : err.message;
-    console.warn(`signafaide: WARNING strict tool "${tool}" was refused and did not run (${err.code}): ${fix}. Later strict refusals in this process are not printed again.`);
+    console.warn(`signafaide: protected tool "${tool}" was refused and did not run (${err.code}): ${fix}. Later refusals of protected tools in this process are not printed again.`);
   }
 
   /** Strict mode: ship `rec`'s chain now and return its receipt, or throw. */
@@ -764,7 +764,7 @@ export class Recorder {
       const apiKey = this.apiKey;
       if (!apiKey) {
         throw new SignafaideError(
-          "Strict mode needs the service's receipt, and there is no API key: run `npx signafaide init` (a free sandbox) or set SIGNAFAIDE_API_KEY.",
+          NO_KEY_WHY[0].toUpperCase() + NO_KEY_WHY.slice(1),
           { code: "no_key" },
         );
       }

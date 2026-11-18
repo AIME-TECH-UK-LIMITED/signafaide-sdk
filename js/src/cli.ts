@@ -12,11 +12,15 @@ import { plural } from "./plural.js";
 import { CLAIM_DONE, claimLines, claimNotes, sandboxGone, sandboxJson, sandboxView } from "./claim.js";
 import { configure, envOf, termsNotice, type Recorder } from "./runtime.js";
 import { StateError, findRoot } from "./state.js";
-import { AGENT_IDS, SETUP_NOTES, setup } from "./agents.js";
+import { AGENT_IDS, NOTE_QUESTION, SETUP_NOTES, noteWhat, offerNote, setup } from "./agents.js";
 import { runGateway } from "./gateway.js";
 import { KeysRequired } from "./verifier.js";
 import { FILE_CHECKS, defaultChecksFile } from "./checks.js";
 import { checksPath } from "./checks-runtime.js";
+import { CiError, ciCheck, ciLines } from "./ci-check.js";
+import { flagPrompter, runProtect, runRulesPublish, terminalPrompter, type Prompter } from "./protect.js";
+import { loadSession, login, logout, personWitness } from "./session.js";
+import { runCheck, runProve, runPull, startFresh, statusTable } from "./tool-commands.js";
 import { VERSION } from "./version.js";
 
 export interface Command {
@@ -31,10 +35,26 @@ const err = (s: string): void => console.error(s);
 const recorder = (): Recorder => configure({ quiet: true, via: "cli" });
 const mask = (k?: string | null): string => (k ? `${k.slice(0, 13)}...` : "none");
 
+/** Say so when the project's `.env` names a witness that signing in does not use (§8). */
+function envUrlNote(rec: Recorder, url: string): void {
+  if (rec.url !== url) err(`note: SIGNAFAIDE_URL in the project's .env names ${rec.url}; signing in and saving rules use ${url} (--url, or SIGNAFAIDE_URL in the environment), never a project file.`);
+}
+
 /** The website of a witness: https://api.signafaide.co.uk -> https://signafaide.co.uk. */
 export function siteOf(url: string): string {
   const u = new URL(url);
   return `${u.protocol}//${u.host.replace(/^api\./, "")}`;
+}
+
+/** How `protect`, `pull` and `prove` ask: a person at a terminal, else nobody (defaults only,
+ * never On, never a new field). Tests set their own. */
+let makePrompter: ((yes: boolean) => Prompter & { close?(): void }) | null = null;
+export function setPrompter(f: ((yes: boolean) => Prompter & { close?(): void }) | null): void {
+  makePrompter = f;
+}
+function prompter(yes = false): Prompter & { close?(): void } {
+  if (makePrompter) return makePrompter(yes);
+  return process.stdin.isTTY ? terminalPrompter() : flagPrompter({ yes });
 }
 
 /** One plain line each, never in --json output. The verify one shows at most once a week. */
@@ -137,6 +157,183 @@ export async function flushReport(rec: Recorder): Promise<{ lines: string[]; err
 }
 
 export const COMMANDS: Record<string, Command> = {
+  protect: {
+    help:
+      "find your agent's tools, ask what to block, write protect(...) into the code, make a free sandbox and save the rules; " +
+      "a rule is On only when you answer On at the terminal, every other rule starts Calibrating",
+    usage:
+      "protect [tool] [--tool <name>] [--limit-field <field> --above <number>] [--local] [--yes] [--url <witness url>]\n" +
+      "  tool, --tool: protect this one tool (default: proposes the tools that pay, delete or send)\n" +
+      "  --limit-field, --above: block the tool when that field is above the number, without asking what to block\n" +
+      "  --local: rules only on this machine (the checks file); no account, signafAIde does not rule\n" +
+      "  --yes: without a terminal, accept the code change and the project note; rules then start Calibrating, no field is sent until `signafaide pull` at a terminal, and no sandbox is made\n" +
+      "  --url: the witness that saves the rules (else SIGNAFAIDE_URL in the environment, else the hosted service; never the project's .env)",
+    options: {
+      local: { type: "boolean" },
+      yes: { type: "boolean" },
+      dir: { type: "string" },
+      url: { type: "string" },
+      tool: { type: "string" },
+      "limit-field": { type: "string" },
+      above: { type: "string" },
+    },
+    async run(v, pos) {
+      const tool: string | undefined = v.tool ?? pos[0];
+      if (v.tool && pos[0] && v.tool !== pos[0]) {
+        err(`signafaide protect: two tools named (${pos[0]} and --tool ${v.tool}); name one`);
+        return 2;
+      }
+      let limit: { field: string; above: number } | undefined;
+      if (v["limit-field"] !== undefined || v.above !== undefined) {
+        const above = Number(v.above);
+        if (!v["limit-field"] || v.above === undefined || !(above > 0 && Number.isFinite(above)) || !tool) {
+          err("signafaide protect: --limit-field <field> and --above <number above 0> go together, with the tool: protect --tool <name> --limit-field amount --above 1000");
+          return 2;
+        }
+        limit = { field: String(v["limit-field"]), above };
+      }
+      const root = v.dir ? path.resolve(v.dir) : findRoot();
+      const rec = configure({ quiet: true, via: "cli", root, url: v.url ? personWitness(v.url) : undefined });
+      const p = prompter(!!v.yes);
+      try {
+        const r = await runProtect({ rec, root, tool, local: !!v.local, limit, prompt: p, out });
+        return r.code;
+      } finally {
+        p.close?.();
+      }
+    },
+  },
+
+  check: {
+    help: "a dry run of a tool call against the rules: records nothing, runs nothing; exit 1 when the call would be blocked. check --ci: exit 1 when a risky tool is not protected (for CI)",
+    usage:
+      "check <tool> <field>=<value>... [--agent X]   (a value is JSON when it reads as JSON, else text; a/b=v sets a field inside an object)\n" +
+      "check --ci [--diff <base-ref>] [--allow <tool>]... [--dir <folder>] [--json]\n" +
+      "  --ci: list the tools that pay, delete, send, run commands, push code or edit secrets or config and are not protected, one line each with the fix; exit 1 when there is one, 0 when none. Reads the code and the checks file only: no account, no key, nothing sent\n" +
+      "  --diff: only the tools added or changed since this git base (a pull request's base commit)\n" +
+      "  --allow: a reviewed exception (or list it with its reason in signafaide.checks.json: \"ci\": { \"allow\": [{ \"tool\", \"reason\" }] })",
+    options: { agent: { type: "string" }, ci: { type: "boolean" }, diff: { type: "string" }, allow: { type: "string", multiple: true }, dir: { type: "string" }, json: { type: "boolean" } },
+    async run(v, pos) {
+      if (v.ci) {
+        if (pos.length) {
+          err(`signafaide check --ci takes no tool; usage: signafaide check --ci [--diff <base-ref>] [--allow <tool>]... [--json]`);
+          return 2;
+        }
+        try {
+          const r = ciCheck({ root: v.dir ? path.resolve(v.dir) : process.cwd(), base: v.diff ?? null, allow: v.allow ?? [] });
+          if (v.json) out(JSON.stringify(r, null, 2));
+          else for (const l of ciLines(r)) out(l);
+          return r.ok ? 0 : 1;
+        } catch (e) {
+          if (!(e instanceof CiError)) throw e;
+          err(`signafaide check --ci: ${e.message}`);
+          return 2;
+        }
+      }
+      if (v.diff !== undefined || v.allow !== undefined || v.json || v.dir !== undefined) {
+        err("signafaide check: --diff, --allow, --dir and --json go with --ci");
+        return 2;
+      }
+      if (!pos[0]) {
+        err(`usage: signafaide ${COMMANDS.check.usage}`);
+        return 2;
+      }
+      const [lines, code] = await runCheck(recorder(), pos[0], pos.slice(1), v.agent);
+      for (const l of lines) out(l);
+      return code;
+    },
+  },
+
+  pull: {
+    help: "fetch the project's rules and update the checks file; asks before any new field of a protected tool is sent to signafAIde",
+    async run() {
+      const p = prompter(false);
+      try {
+        return await runPull(recorder(), p, out);
+      } finally {
+        p.close?.();
+      }
+    },
+  },
+
+  prove: {
+    help: "what to give your auditor: a read-only link (or files with --files), with the calls, the rules in words, what ran before protection and the tool coverage",
+    usage:
+      "prove [tool] [--agent X] [--days N] [--files] [--content] [--all]\n  --days: how long the link works (default 30, or the longest your plan allows); an active link for the same tool is reused unless --days is given\n  --files: write proof/<tool>/ (pack, agent keys, head, and the content when you say so)\n  --all: from the agent's first record, not from `signafaide start-fresh`",
+    options: { agent: { type: "string" }, days: { type: "string" }, files: { type: "boolean" }, content: { type: "boolean" }, all: { type: "boolean" } },
+    async run(v, pos) {
+      let days: number | undefined;
+      if (v.days !== undefined) {
+        days = Number(v.days);
+        if (!Number.isInteger(days) || days < 1 || days > 3650) {
+          err("signafaide prove: --days takes a whole number of days from 1, e.g. --days 7");
+          return 2;
+        }
+      }
+      const p = prompter(false);
+      try {
+        return await runProve(recorder(), { tool: pos[0], agent: v.agent, days, files: !!v.files, content: v.content ? true : undefined, all: !!v.all, out, prompt: p });
+      } finally {
+        p.close?.();
+      }
+    },
+  },
+
+  "start-fresh": {
+    help: "start the agent's proofs from now (the calls before stay recorded and can still be proved with prove --all)",
+    usage: "start-fresh <agent>",
+    async run(_v, pos) {
+      if (!pos[0]) {
+        err(`usage: signafaide ${COMMANDS["start-fresh"].usage}`);
+        return 2;
+      }
+      const t = startFresh(recorder(), pos[0]);
+      out(`${pos[0]}: proofs start at ${t} from now on. The old record is kept and can still be proved: npx signafaide prove --agent ${pos[0]} --all`);
+      return 0;
+    },
+  },
+
+  login: {
+    help: "sign in to the console from this terminal (device code), so you can save rules; the session is kept outside the project",
+    usage:
+      "login [--url <witness url>] [--console <console origin>]\n" +
+      "  the witness is --url, else SIGNAFAIDE_URL in the environment, else the hosted service (never the project's .env);\n" +
+      "  --console: where a self-hosted witness's sign-in page is, when not on the witness's own origin",
+    options: { url: { type: "string" }, console: { type: "string" } },
+    async run(v) {
+      const rec = recorder();
+      const url = personWitness(v.url);
+      envUrlNote(rec, url);
+      const s = await login({ url, console: v.console, clientId: rec.clientId(), out });
+      out(`Signed in as ${s.person?.email ?? "you"}${s.organisation?.name ? ` (${s.organisation.name})` : ""} at ${url} until ${s.expires_at}. Rules you save from this terminal name you.`);
+      return 0;
+    },
+  },
+
+  logout: {
+    help: "end the console session this terminal holds",
+    usage: "logout [--url <witness url>]",
+    options: { url: { type: "string" } },
+    async run(v) {
+      const rec = recorder();
+      const url = personWitness(v.url);
+      const had = await logout(url, rec.clientId());
+      out(had ? `Signed out of ${url}.` : `No session was held here for ${url}.`);
+      return 0;
+    },
+  },
+
+  whoami: {
+    help: "who is signed in on this terminal (signafaide login), and until when",
+    usage: "whoami [--url <witness url>]",
+    options: { url: { type: "string" } },
+    async run(v) {
+      const s = loadSession(personWitness(v.url));
+      out(s ? `${s.person?.email ?? "signed in"}${s.organisation?.name ? ` (${s.organisation.name})` : ""} until ${s.expires_at}` : "not signed in (signafaide login)");
+      return s ? 0 : 1;
+    },
+  },
+
   init: {
     help:
       "opt in to the witness: create a free sandbox if there is no API key (no account, email or card), print the claim link and how long an unclaimed sandbox is kept. " +
@@ -162,14 +359,23 @@ export const COMMANDS: Record<string, Command> = {
         for (const line of rest) out(line);
       } else out(`key found (${mask(key)}, env ${envOf(key)}); nothing to create`);
       initChecks(rec);
+      const p = prompter();
+      try {
+        for (const c of await offerNote(rec.state.root, p, out)) out(`agents: ${c.file} ${c.result}, with ${noteWhat(c, true)}`);
+      } finally {
+        p.close?.();
+      }
       return 0;
     },
   },
 
   status: {
-    help: "key and env, agents, last receipt, outbox size, quota; BLOCKED chains (exit 1 when any)",
+    help: "one line per tool (recorded, protected, proof), then key and env, agents, last receipt, outbox size, quota; BLOCKED chains (exit 1 when any)",
     async run() {
       const rec = recorder();
+      const table = await statusTable(rec);
+      for (const line of table) out(line);
+      if (table.length) out("");
       const lines = await statusLines(rec);
       for (const line of lines) out(line);
       return lines.some((l) => l.startsWith("BLOCKED ")) ? 1 : 0;
@@ -424,7 +630,21 @@ export const COMMANDS: Record<string, Command> = {
       }
       const dry = !!v["dry-run"];
       const root = v.dir ? path.resolve(v.dir) : findRoot();
-      const results = setup({ root, agents: v.agent, dryRun: dry, url: v.url });
+      // The note in CLAUDE.md and AGENTS.md: asked at a terminal; without one, running this command is the request.
+      let note = true;
+      if (!dry) {
+        const preview = setup({ root, agents: v.agent, dryRun: true, url: v.url });
+        const files = [...new Set(preview.flatMap((r) => r.changes).filter((c) => /^(CLAUDE|AGENTS)\.md$/.test(c.file) && c.result !== "unchanged").map((c) => c.file))];
+        if (files.length) {
+          const p = prompter();
+          try {
+            if (p.person) note = await p.confirm(`${NOTE_QUESTION} ${files.join(" and ")} (a short marked block that tells coding agents to protect the tools that pay, delete, send, run commands or push code)?`, true);
+          } finally {
+            p.close?.();
+          }
+        }
+      }
+      const results = setup({ root, agents: v.agent, dryRun: dry, url: v.url, note });
       if (!dry && results.length) {
         // Set-up time: the coding agent is remembered once here (telemetry), and the local state
         // is kept out of git here, never at runtime.
@@ -473,7 +693,7 @@ export const COMMANDS: Record<string, Command> = {
       "  In the agent's MCP configuration, start the gateway in place of the server: {\"command\": \"npx\", \"args\": [\"-y\", \"signafaide\", \"gateway\", \"--agent\", \"support-bot\", \"--\", \"npx\", \"-y\", \"@modelcontextprotocol/server-filesystem\", \"/data\"]}\n" +
       "  --agent: the agent's chain name (default: the project folder's name)\n" +
       "  --name-prefix: put before each recorded tool name, for an agent with several servers (--name-prefix github.)\n" +
-      "  --strict: forward a call only once the witness has co-signed its decision; --strict-tools a,b: only for those tools\n" +
+      "  --strict: protect every tool (forward a call only once the witness has co-signed its decision); --strict-tools a,b: protect only those tools\n" +
       "  --store-content: send inputs and outputs to the witness too (default: hash-only)\n" +
       "  A remote (HTTP) server: put a stdio bridge after the --, for example `signafaide gateway -- npx -y mcp-remote https://mcp.example.com/mcp`\n" +
       "  A call that cannot be recorded is not forwarded. The gateway records every call that goes through it; a call the application makes around it is still not recorded, " +
@@ -520,7 +740,7 @@ export const COMMANDS: Record<string, Command> = {
     help: "tool-call checks: `checks status` (exit 1 on a problem), `checks approve <tool>`",
     usage:
       "checks status | checks approve <tool> [--agent X]\n" +
-      "  status: whether checks are on, the mode, each strict tool with its fail mode and the fields it discloses, the held rule set and list, any problem\n" +
+      "  status: whether checks are on and whether each tool is On or Calibrating, each protected tool with what happens if signafAIde can't be reached (Stop or Let it run) and the fields it discloses, the held rule set and list, any problem\n" +
       "  approve <tool>: re-approve a changed tool (local approvals): its next call approves the description and schema it has then",
     options: { agent: { type: "string" } },
     async run(v, pos) {
@@ -555,16 +775,30 @@ export const COMMANDS: Record<string, Command> = {
   },
 
   rules: {
-    help: "the project's rule set: `rules pull`, `rules show`, `rules test <tool> <arguments JSON>`",
+    help: "the project's rule set: `rules pull`, `rules show`, `rules test <tool> <arguments JSON>`, `rules publish <file>`",
     usage:
-      "rules pull | rules show | rules test <tool> '<arguments JSON>' [--agent X]\n" +
-      "  pull: fetch the project's rule set now; show: print the held one; test: evaluate a call as the client does",
-    options: { agent: { type: "string" } },
+      "rules pull | rules show | rules test <tool> '<arguments JSON>' [--agent X] | rules publish <file>\n" +
+      "  pull: fetch the project's rule set now; show: print the held one; test: evaluate a call as the client does;\n" +
+      "  publish: save the file's rules as the next version, signed in (signafaide login), after you say yes at this terminal;\n" +
+      "  --url: the witness to publish to (else SIGNAFAIDE_URL in the environment, else the hosted service; never the project's .env)",
+    options: { agent: { type: "string" }, url: { type: "string" } },
     async run(v, pos) {
-      const rec = recorder();
+      const rec = v.url ? configure({ quiet: true, via: "cli", url: personWitness(v.url) }) : recorder();
       if (pos[0] === "pull") {
         out(await rec.checks.pullRules());
         return "rules" in rec.checks.problems ? 1 : 0;
+      }
+      if (pos[0] === "publish") {
+        if (!pos[1]) {
+          err(`usage: signafaide rules publish <file>`);
+          return 2;
+        }
+        const p = prompter(false);
+        try {
+          return await runRulesPublish(rec, path.resolve(pos[1]), p, out);
+        } finally {
+          p.close?.();
+        }
       }
       if (pos[0] === "show") {
         const item = rec.checks.heldRulesItem();
@@ -600,20 +834,20 @@ function initChecks(rec: Recorder): void {
     return;
   }
   const how =
-    `tool-call checks: change it in ${p}: "mode": "enforce" blocks instead of noting, "strict": true on a tool asks the witness for a ruling, "disclose" lists the fields of its arguments that may leave the machine; ` +
-    "`signafaide checks status` shows what is on, which tools are strict and which fields leave";
+    `tool-call checks: change it in ${p}: \`"mode": "enforce"\` is On (it blocks) and \`"watch"\` is Calibrating (it only notes), \`"strict": true\` on a tool protects it (it asks the witness for a ruling; \`false\` is Not protected), \`"fail": "closed"\` is Stop and \`"open"\` is Let it run if signafAIde can't be reached, \`"disclose"\` lists the fields of its arguments that may leave the machine; ` +
+    "`signafaide checks status` shows what is on, which tools are protected and which fields leave";
   if (!fs.existsSync(p)) {
     fs.writeFileSync(p, JSON.stringify(defaultChecksFile(), null, 2) + "\n");
     out(
-      `tool-call checks: on in watch mode (${path.basename(p)}, commit it with the code): ${FILE_CHECKS.join(", ")} and your rules note what they find and never block. ` +
-        "No tool is strict and no field of a tool's arguments leaves the machine; only tool fingerprints do.",
+      `tool-call checks: on, Calibrating (${path.basename(p)}, commit it with the code): ${FILE_CHECKS.join(", ")} and your rules note what they find and never block. ` +
+        "No tool is protected and no field of a tool's arguments leaves the machine; only tool fingerprints do.",
     );
   } else {
     const [lines] = rec.checks.status();
     out("tool-call checks: " + lines[0].replace(/^checks: /, ""));
     // Which tools are strict and which fields leave the machine, as the file says.
-    for (const l of lines.slice(1)) if (/^(strict tool |PROBLEM)/.test(l)) out("tool-call checks: " + l);
-    if (!lines.some((l) => /^strict tool /.test(l))) out("tool-call checks: no tool is strict; only tool fingerprints leave the machine unless a tool lists fields in disclose");
+    for (const l of lines.slice(1)) if (/^(protected tool |PROBLEM)/.test(l)) out("tool-call checks: " + l);
+    if (!lines.some((l) => /^protected tool /.test(l))) out("tool-call checks: no tool is protected; only tool fingerprints leave the machine unless a tool lists fields in disclose");
   }
   out(how);
 }

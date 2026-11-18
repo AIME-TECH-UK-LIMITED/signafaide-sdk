@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import _claim, runtime
 from . import KeysRequired
@@ -17,6 +18,18 @@ from .http import SignafaideError
 from .state import StateError
 
 Handler = Callable[[argparse.Namespace], int]
+
+#: How ``protect``, ``pull`` and ``prove`` ask: a person at a terminal, else nobody (defaults only,
+#: never On, never a new field). Tests set their own.
+make_prompter: Optional[Callable[[bool], "Any"]] = None
+
+
+def _prompter(yes: bool = False) -> Any:
+    from .protect_cli import FlagPrompter, TerminalPrompter
+
+    if make_prompter is not None:
+        return make_prompter(yes)
+    return TerminalPrompter() if sys.stdin.isatty() else FlagPrompter(yes)
 COMMANDS: Dict[str, Tuple[str, Callable[[argparse.ArgumentParser], None], Handler]] = {}
 
 
@@ -109,6 +122,10 @@ def cmd_init(a: argparse.Namespace) -> int:
     else:
         print(f"key found ({_mask(key)}, env {runtime._env_of(key)}); nothing to create")
     _init_checks(rec)
+    from .agent_note import note_what, offer_note
+
+    for f, what in offer_note(Path(rec.state.root), _prompter(), print):
+        print(f"agents: {f} {what}, with {note_what(f, what, True)}")
     return 0
 
 
@@ -122,27 +139,34 @@ def _init_checks(rec: runtime.Recorder) -> None:
     if path is None:
         print("tool-call checks: off (SIGNAFAIDE_CHECKS=0)")
         return
-    how = (f'tool-call checks: change it in {path}: "mode": "enforce" blocks instead of noting, "strict": true on a tool asks the witness for a ruling, "disclose" lists the fields of its '
-           "arguments that may leave the machine; `signafaide checks status` shows what is on, which tools are strict and which fields leave")
+    how = (f'tool-call checks: change it in {path}: `"mode": "enforce"` is On (it blocks) and `"watch"` is Calibrating (it only notes), `"strict": true` on a tool protects it (it asks the witness for a ruling; `false` is Not protected), `"fail": "closed"` is Stop and `"open"` is Let it run if signafAIde can\'t be reached, `"disclose"` lists the fields of its '
+           "arguments that may leave the machine; `signafaide checks status` shows what is on, which tools are protected and which fields leave")
     if not path.exists():
         path.write_text(json.dumps(default_checks_file(), indent=2) + "\n")
-        print(f"tool-call checks: on in watch mode ({path.name}, commit it with the code): {', '.join(FILE_CHECKS)} and your rules note what they find and never block. "
-              "No tool is strict and no field of a tool's arguments leaves the machine; only tool fingerprints do.")
+        print(f"tool-call checks: on, Calibrating ({path.name}, commit it with the code): {', '.join(FILE_CHECKS)} and your rules note what they find and never block. "
+              "No tool is protected and no field of a tool's arguments leaves the machine; only tool fingerprints do.")
     else:
         lines, _ = rec.checks.status()
         print("tool-call checks: " + lines[0].removeprefix("checks: "))
         # Which tools are strict and which fields leave the machine, as the file says.
         for line in lines[1:]:
-            if line.startswith(("strict tool ", "PROBLEM")):
+            if line.startswith(("protected tool ", "PROBLEM")):
                 print("tool-call checks: " + line)
-        if not any(line.startswith("strict tool ") for line in lines):
-            print("tool-call checks: no tool is strict; only tool fingerprints leave the machine unless a tool lists fields in disclose")
+        if not any(line.startswith("protected tool ") for line in lines):
+            print("tool-call checks: no tool is protected; only tool fingerprints leave the machine unless a tool lists fields in disclose")
     print(how)
 
 
-@command("status", "key and env, agents, last receipt, outbox size, quota; BLOCKED chains (exit 1 when any)")
+@command("status", "one line per tool (recorded, protected, proof), then key and env, agents, last receipt, outbox size, quota; BLOCKED chains (exit 1 when any)")
 def cmd_status(a: argparse.Namespace) -> int:
+    from .tool_commands import status_table
+
     rec = _recorder()
+    table = status_table(rec)
+    for line in table:
+        print(line)
+    if table:
+        print()
     s = rec.status()
     if s["test_mode"]:
         print("test mode: records go to a temporary folder and nothing is sent (SIGNAFAIDE_TEST, or pytest); SIGNAFAIDE_TEST=0 turns it off")
@@ -474,7 +498,7 @@ def cmd_flush(a: argparse.Namespace) -> int:
 
 
 def _checks_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("action", choices=["status", "approve"], help="status: what is on, the strict tools, the held rule set and list, any problem; "
+    p.add_argument("action", choices=["status", "approve"], help="status: what is on and whether each tool is On or Calibrating, the protected tools, the held rule set and list, any problem; "
                    "approve <tool>: re-approve a changed tool (local approvals)")
     p.add_argument("tool", nargs="?", help="approve: the tool's declared name")
     p.add_argument("--agent", help="approve: only this agent's approvals (default: every agent's)")
@@ -504,16 +528,26 @@ def cmd_checks(a: argparse.Namespace) -> int:
 
 
 def _rules_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("action", choices=["pull", "show", "test"], help="pull: fetch the project's rule set now; show: print the held one; "
-                   "test <tool> <arguments JSON>: evaluate a call as the client does")
-    p.add_argument("tool", nargs="?", help="test: the tool's name")
+    p.add_argument("action", choices=["pull", "show", "test", "publish"], help="pull: fetch the project's rule set now; show: print the held one; "
+                   "test <tool> <arguments JSON>: evaluate a call as the client does; publish <file>: save the file's rules as the next version, "
+                   "signed in (signafaide login), after you say yes at this terminal")
+    p.add_argument("tool", nargs="?", help="test: the tool's name; publish: the file")
     p.add_argument("arguments", nargs="?", help="test: the call's arguments, as JSON")
     p.add_argument("--agent", help="test: the agent (default: the project's default agent)")
+    _url_arg(p)
 
 
-@command("rules", "the project's rule set: `rules pull`, `rules show`, `rules test <tool> <arguments JSON>`", _rules_args)
+@command("rules", "the project's rule set: `rules pull`, `rules show`, `rules test <tool> <arguments JSON>`, `rules publish <file>`", _rules_args)
 def cmd_rules(a: argparse.Namespace) -> int:
-    rec = _recorder()
+    from .session import person_witness
+
+    rec = runtime.configure(quiet=True, via="cli", url=person_witness(a.url)) if a.url else _recorder()
+    if a.action == "publish":
+        if not a.tool:
+            print("usage: signafaide rules publish <file>", file=sys.stderr)
+            return 2
+        from .protect_cli import run_rules_publish
+        return run_rules_publish(rec, a.tool, _prompter(False))
     if a.action == "pull":
         print(rec.checks.pull_rules())
         return 1 if "rules" in rec.checks.problems else 0
@@ -531,6 +565,183 @@ def cmd_rules(a: argparse.Namespace) -> int:
     for line in rec.checks.test_call(a.tool, args, a.agent or rec.default_agent):
         print(line)
     return 0
+
+
+def _protect_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("tool", nargs="?", help="protect this one tool (default: proposes the tools that pay, delete or send)")
+    p.add_argument("--tool", dest="tool_opt", metavar="NAME", help="the same as the tool argument")
+    p.add_argument("--limit-field", metavar="FIELD", help="with --above: block the tool when this field is above the number, without asking what to block")
+    p.add_argument("--above", metavar="NUMBER", help="with --limit-field: the limit")
+    p.add_argument("--local", action="store_true", help="rules only on this machine (the checks file); no account, signafAIde does not rule")
+    p.add_argument("--yes", action="store_true", help="without a terminal, accept the code change and the project note; rules then start Calibrating, "
+                   "no field is sent until `signafaide pull` at a terminal, and no sandbox is made")
+    p.add_argument("--dir", help="the project folder (default: this one)")
+    _url_arg(p)
+
+
+@command("protect", "find your agent's tools, ask what to block, add @signafaide.protect to the code, make a free sandbox and save the rules; "
+         "a rule is On only when you answer On at the terminal, every other rule starts Calibrating", _protect_args)
+def cmd_protect(a: argparse.Namespace) -> int:
+    from .protect_cli import run_protect
+
+    tool = a.tool_opt or a.tool
+    if a.tool_opt and a.tool and a.tool_opt != a.tool:
+        print(f"signafaide protect: two tools named ({a.tool} and --tool {a.tool_opt}); name one", file=sys.stderr)
+        return 2
+    limit = None
+    if a.limit_field is not None or a.above is not None:
+        try:
+            above = float(a.above) if a.above is not None else 0.0
+        except ValueError:
+            above = 0.0
+        if not a.limit_field or not (above > 0 and math.isfinite(above)) or not tool:
+            print("signafaide protect: --limit-field <field> and --above <number above 0> go together, with the tool: "
+                  "protect --tool <name> --limit-field amount --above 1000", file=sys.stderr)
+            return 2
+        limit = (a.limit_field, above)
+    root = Path(a.dir).resolve() if a.dir else None
+    from .session import person_witness
+
+    rec = runtime.configure(quiet=True, via="cli", **({"root": root} if root else {}), **({"url": person_witness(a.url)} if a.url else {}))
+    code, _ = run_protect(rec, Path(rec.state.root), _prompter(a.yes), print, tool=tool, local=a.local, limit=limit)
+    return code
+
+
+def _check_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("tool", nargs="?")
+    p.add_argument("fields", nargs="*", help="name=value (a value is JSON when it reads as JSON, else text; a/b=v sets a field inside an object)")
+    p.add_argument("--agent")
+    p.add_argument("--ci", action="store_true", help="list the tools that pay, delete, send, run commands, push code or edit secrets or config and are "
+                   "not protected, one line each with the fix; exit 1 when there is one, 0 when none. Reads the code and the checks file only: "
+                   "no account, no key, nothing sent")
+    p.add_argument("--diff", metavar="BASE_REF", help="with --ci: only the tools added or changed since this git base (a pull request's base commit)")
+    p.add_argument("--allow", action="append", metavar="TOOL", help='with --ci: a reviewed exception (or list it with its reason in '
+                   'signafaide.checks.json: "ci": {"allow": [{"tool", "reason"}]})')
+    p.add_argument("--dir", help="with --ci: the folder to check (default: this one)")
+    p.add_argument("--json", action="store_true", help="with --ci: the result as JSON")
+
+
+@command("check", "a dry run of a tool call against the rules: records nothing, runs nothing; exit 1 when the call would be blocked. "
+         "check --ci: exit 1 when a risky tool is not protected (for CI)", _check_args)
+def cmd_check(a: argparse.Namespace) -> int:
+    from .tool_commands import run_check
+
+    if a.ci:
+        from .ci_check import CiError, ci_check, ci_lines
+
+        if a.tool is not None:
+            print("signafaide check --ci takes no tool; usage: signafaide check --ci [--diff BASE_REF] [--allow TOOL]... [--json]", file=sys.stderr)
+            return 2
+        try:
+            r = ci_check(Path(a.dir) if a.dir else Path.cwd(), base=a.diff, allow=a.allow or ())
+        except CiError as e:
+            print(f"signafaide check --ci: {e}", file=sys.stderr)
+            return 2
+        if a.json:
+            print(json.dumps(r.to_json(), indent=2))
+        else:
+            for line in ci_lines(r):
+                print(line)
+        return 0 if r.ok else 1
+    if a.diff is not None or a.allow or a.json or a.dir is not None:
+        print("signafaide check: --diff, --allow, --dir and --json go with --ci", file=sys.stderr)
+        return 2
+    if a.tool is None:
+        print("usage: signafaide check <tool> <field>=<value>... [--agent X], or signafaide check --ci", file=sys.stderr)
+        return 2
+    lines, code = run_check(_recorder(), a.tool, a.fields, a.agent)
+    for line in lines:
+        print(line)
+    return code
+
+
+@command("pull", "fetch the project's rules and update the checks file; asks before any new field of a protected tool is sent to signafAIde")
+def cmd_pull(a: argparse.Namespace) -> int:
+    from .tool_commands import run_pull
+
+    return run_pull(_recorder(), _prompter(), print)
+
+
+def _prove_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("tool", nargs="?")
+    p.add_argument("--agent")
+    p.add_argument("--files", action="store_true", help="write proof/<tool>/ (pack, agent keys, head, and the content when you say so)")
+    p.add_argument("--content", action="store_true", default=None, help="with --files: include what the calls said")
+    p.add_argument("--all", action="store_true", help="from the agent's first record, not from `signafaide start-fresh`")
+    p.add_argument("--days", type=int, help="how long the link works (default 30, or the longest your plan allows); an active link for the same "
+                   "tool is reused unless --days is given")
+
+
+@command("prove", "what to give your auditor: a read-only link (or files with --files), with the calls, the rules in words, "
+         "what ran before protection and the tool coverage", _prove_args)
+def cmd_prove(a: argparse.Namespace) -> int:
+    from .tool_commands import run_prove
+
+    if a.days is not None and not 1 <= a.days <= 3650:
+        print("signafaide prove: --days takes a whole number of days from 1, e.g. --days 7", file=sys.stderr)
+        return 2
+    return run_prove(_recorder(), _prompter(), print, tool=a.tool, agent=a.agent, files=a.files, content=a.content, all_=a.all, days=a.days)
+
+
+@command("start-fresh", "start the agent's proofs from now (the calls before stay recorded and can still be proved with prove --all)",
+         lambda p: p.add_argument("agent"))
+def cmd_start_fresh(a: argparse.Namespace) -> int:
+    from .tool_commands import start_fresh
+
+    t = start_fresh(_recorder(), a.agent)
+    print(f"{a.agent}: proofs start at {t} from now on. The old record is kept and can still be proved: signafaide prove --agent {a.agent} --all")
+    return 0
+
+
+def _url_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--url", help="the witness (else SIGNAFAIDE_URL in the environment, else the hosted service; never the project's .env)")
+
+
+def _login_args(p: argparse.ArgumentParser) -> None:
+    _url_arg(p)
+    p.add_argument("--console", help="where a self-hosted witness's sign-in page is, when not on the witness's own origin")
+
+
+@command("login", "sign in to the console from this terminal (device code), so you can save rules; the session is kept outside the project", _login_args)
+def cmd_login(a: argparse.Namespace) -> int:
+    from .session import login, person_witness
+
+    rec = _recorder()
+    url = person_witness(a.url)
+    if rec.url != url:
+        print(f"note: SIGNAFAIDE_URL in the project's .env names {rec.url}; signing in and saving rules use {url} "
+              "(--url, or SIGNAFAIDE_URL in the environment), never a project file.", file=sys.stderr)
+    s = login(url, rec.client_id(), print, console=a.console)
+    org = (s.get("organisation") or {}).get("name")
+    print(f"Signed in as {(s.get('person') or {}).get('email') or 'you'}{f' ({org})' if org else ''} at {url} until {s['expires_at']}. Rules you save from this terminal name you.")
+    return 0
+
+
+@command("logout", "end the console session this terminal holds", _url_arg)
+def cmd_logout(a: argparse.Namespace) -> int:
+    from .session import logout, person_witness
+
+    url = person_witness(a.url)
+    print(f"Signed out of {url}." if logout(url, _recorder().client_id()) else f"No session was held here for {url}.")
+    return 0
+
+
+@command("whoami", "who is signed in on this terminal (signafaide login), and until when", _url_arg)
+def cmd_whoami(a: argparse.Namespace) -> int:
+    from .session import load_session, person_witness
+
+    s = load_session(person_witness(a.url))
+    if s is None:
+        print("not signed in (signafaide login)")
+        return 1
+    org = (s.get("organisation") or {}).get("name")
+    print(f"{(s.get('person') or {}).get('email') or 'signed in'}{f' ({org})' if org else ''} until {s['expires_at']}")
+    return 0
+
+
+# The spec 1.1 commands first in the help, as in the TypeScript CLI: protect is where a project starts.
+_FIRST = ("protect", "check", "pull", "prove", "start-fresh", "login", "logout", "whoami")
+COMMANDS = {**{k: COMMANDS[k] for k in _FIRST}, **{k: v for k, v in COMMANDS.items() if k not in _FIRST}}
 
 
 def parser() -> argparse.ArgumentParser:

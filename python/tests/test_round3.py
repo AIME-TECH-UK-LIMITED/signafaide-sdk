@@ -122,20 +122,32 @@ def test_a_malformed_key_is_caught_here_and_never_sent(project, service, monkeyp
 # --- the background sender ----------------------------------------------------------------------
 
 
+def _until(cond, seconds: float = 15.0) -> bool:
+    """Wait for *cond* (an event the background sender causes), never for a fixed time: on a busy
+    machine its first attempt (registration, then the batch) can take longer than any short sleep."""
+    deadline = time.monotonic() + seconds
+    while not cond():
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.01)
+    return True
+
+
 def test_quota_exceeded_stops_sending_until_the_configuration_changes(recorder, service):
     service.quota = 0
     recorder.flush_interval = 0.02
     for i in range(5):
         signafaide.note(f"n{i}", {})
     recorder._wake.set()
-    time.sleep(0.6)  # 30 intervals: a storm would send 30 requests
+    # The sender's first attempt is refused and it stops: wait for that, however long it takes.
+    assert _until(lambda: recorder._halted is not None), service.calls
+    time.sleep(0.6)  # then 30 intervals: a storm would send 30 requests
     assert record_calls(service) == 1, service.calls
     assert recorder.flush()["errors"]  # an explicit flush still tries
     assert record_calls(service) == 2
     service.quota = None
     os.utime(recorder.state.key_dir(""), (time.time(), time.time() + 5))  # the configuration changed
-    time.sleep(0.4)
-    assert recorder.state.outbox_size() == 0
+    assert _until(lambda: recorder.state.outbox_size() == 0), service.calls
 
 
 def test_close_holds_the_process_at_most_the_exit_limit(recorder, service):

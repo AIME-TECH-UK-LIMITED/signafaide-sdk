@@ -1,0 +1,13 @@
+[project]
+name = "payout-bot"
+version = "1.0.0"
+description = "The quickstart's payout agent: four tools, approve_payout protected."
+requires-python = ">=3.9"
+dependencies = ["signafaide"]
+
+[tool.uv]
+package = false
+
+# The SDK in this repository. Outside it, delete these two lines: uv takes signafaide from PyPI.
+[tool.uv.sources]
+signafaide = { path = "../../../python", editable = true }

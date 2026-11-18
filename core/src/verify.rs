@@ -2,6 +2,7 @@
 
 use crate::bitcoin::{check_header, BlockHeader};
 use crate::checks::report::{self as checks_report, AgentChecks};
+use crate::checks::words::{self as rule_words, RuleSetWords};
 use crate::coverage::{coverage, coverage_lines, telemetry, telemetry_lines, Coverage, Telemetry};
 use crate::drand::{check_round_time, verify_beacon, BeaconCheck};
 use crate::merkle::verify_path;
@@ -105,6 +106,9 @@ pub struct Report {
     /// agent's records found and the rulings on their receipts. A report, never a failure.
     #[serde(rename = "tool_call_checks")]
     pub tool_checks: BTreeMap<String, AgentChecks>,
+    /// Rules in words (§7, §10.5, spec 1.1): each valid rule set version of the pack's
+    /// `rule_sets`, then each valid entry of its `local_rules`, in pack order.
+    pub rules: Vec<RuleSetWords>,
 }
 
 impl Report {
@@ -163,6 +167,9 @@ impl Report {
         for line in self.tool_checks_lines() {
             out += &format!("tool-call checks: {line}\n");
         }
+        for line in self.rules_lines() {
+            out += &format!("rules: {line}\n");
+        }
         out += &self.result_line();
         out.push('\n');
         out
@@ -182,6 +189,11 @@ impl Report {
     /// The tool-call checks report in words (§7), agent by agent.
     pub fn tool_checks_lines(&self) -> Vec<String> {
         self.tool_checks.iter().flat_map(|(agent, c)| checks_report::lines(agent, c)).collect()
+    }
+
+    /// The rules in words (§7, §10.5), rule set by rule set.
+    pub fn rules_lines(&self) -> Vec<String> {
+        self.rules.iter().flat_map(rule_words::lines).collect()
     }
 
     /// For example `PASS: export of every agent, all records, generated 2026-11-13T12:00:00.000Z`,
@@ -755,16 +767,45 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
     // The signed rule set versions in the pack (§7, §10.2 steps 1 to 3), and the versions the
     // records and rulings name.
     let mut held_sets: BTreeMap<(String, i64), String> = BTreeMap::new();
+    let mut words: Vec<RuleSetWords> = Vec::new();
     for (i, entry) in pack.rule_sets.iter().flatten().enumerate() {
         let item = format!("rule_sets[{i}]");
         acc[7].checked += 1;
         match check_rule_set(entry, &pack, &keys) {
             Err(e) => acc[7].fail(&item, e),
-            Ok((set, version, hash)) => {
+            Ok((rs, hash)) => {
+                let (set, version) = (rs.set.clone(), rs.version);
                 if held_sets.keys().any(|(_, v)| *v == version) {
                     acc[7].fail(&item, format!("two rule_sets entries hold version {version}"));
                 }
+                words.push(rule_words::rule_set(&rs, &hash, false));
                 held_sets.insert((set, version), hash);
+            }
+        }
+    }
+    // The local rules a client added (spec 1.1): each the rules object of a hash that a record
+    // of the pack names in its checks.rules.
+    let named_local: BTreeSet<&str> = recs
+        .iter()
+        .filter_map(|x| x.r.envelope.checks.as_ref())
+        .flat_map(|c| c["rules"].as_array().into_iter().flatten())
+        .filter(|r| r["set"] == "local")
+        .filter_map(|r| r["hash"].as_str())
+        .collect();
+    let mut seen_local: BTreeSet<String> = BTreeSet::new();
+    for (i, entry) in pack.local_rules.iter().flatten().enumerate() {
+        let item = format!("local_rules[{i}]");
+        acc[7].checked += 1;
+        match check_local_rules(entry) {
+            Err(e) => acc[7].fail(&item, e),
+            Ok((rs, hash)) => {
+                if !named_local.contains(hash.as_str()) {
+                    acc[7].fail(&item, "no record of the pack names these local rules in its checks.rules");
+                } else if !seen_local.insert(hash.clone()) {
+                    acc[7].fail(&item, "two local_rules entries hold the same rules");
+                } else {
+                    words.push(rule_words::rule_set(&rs, &hash, true));
+                }
             }
         }
     }
@@ -1116,6 +1157,7 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
         coverage: tool_coverage,
         telemetry: tool_telemetry,
         tool_checks,
+        rules: words,
     })
 }
 
@@ -1125,10 +1167,25 @@ fn asks_for_ruling(e: &Envelope) -> bool {
     e.kind == Kind::Decision && e.checks.as_ref().is_some_and(crate::checks::envelope::asks_for_ruling)
 }
 
+/// One `local_rules` entry of a pack (check 8, spec 1.1): `{hash, rules}`, the rules a valid
+/// local rules object (§8) and `hash` its sha256(JCS). Returns the rules and the hash.
+fn check_local_rules(entry: &Value) -> Result<(crate::checks::rules::RuleSet, String)> {
+    let o = entry.as_object().filter(|o| o.len() == 2).ok_or_else(|| Error::new("a local_rules entry is {hash, rules}"))?;
+    let (Some(hash), Some(rules)) = (o.get("hash").and_then(Value::as_str), o.get("rules")) else {
+        return Err(Error::new("a local_rules entry is {hash, rules}"));
+    };
+    let rs = crate::checks::rules::RuleSet::parse_local(rules).map_err(|e| Error::new(format!("not valid local rules: {e}")))?;
+    let h = crate::hash::hash_json(rules)?.hex();
+    if h != hash {
+        return Err(Error::new("the local rules do not hash to the entry's hash"));
+    }
+    Ok((rs, h))
+}
+
 /// One `rule_sets` entry of a pack (check 8, §10.2 steps 1 to 3): a valid document of the pack's
 /// project and env, signed over domain `rules` by a service key active at its `issued`.
-/// Returns its set, version and `rules_hash`.
-fn check_rule_set(entry: &Value, pack: &Pack, keys: &Keys) -> Result<(String, i64, String)> {
+/// Returns the rule set and its `rules_hash`.
+fn check_rule_set(entry: &Value, pack: &Pack, keys: &Keys) -> Result<(crate::checks::rules::RuleSet, String)> {
     let o = entry.as_object().filter(|o| o.len() == 3).ok_or_else(|| Error::new("a rule_sets entry is {rules, sig, service_key_id}"))?;
     let (Some(doc), Some(sig), Some(kid)) = (o.get("rules"), o.get("sig").and_then(Value::as_str), o.get("service_key_id").and_then(Value::as_str)) else {
         return Err(Error::new("a rule_sets entry is {rules, sig, service_key_id}"));
@@ -1141,7 +1198,7 @@ fn check_rule_set(entry: &Value, pack: &Pack, keys: &Keys) -> Result<(String, i6
     keys.active(kid, &rs.issued)
         .and_then(|k| sign::verify(&k.public_key, Domain::Rules, &hash, sig))
         .map_err(|e| Error::new(format!("rule set version {}: {e}", rs.version)))?;
-    Ok((rs.set, rs.version, hash.hex()))
+    Ok((rs, hash.hex()))
 }
 
 /// The disclosed values of a record (§2.3, check 12): with their own salt, hashing to
@@ -1333,6 +1390,7 @@ fn malformed(why: String, independent: Independent) -> Report {
         coverage: BTreeMap::new(),
         telemetry: BTreeMap::new(),
         tool_checks: BTreeMap::new(),
+        rules: vec![],
     }
 }
 
