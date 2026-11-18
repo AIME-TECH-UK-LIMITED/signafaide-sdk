@@ -91,7 +91,7 @@ describe("setup uses the config it generates", () => {
       expect(code).toBe(0);
       expect(fs.existsSync(path.join(other, "signafaide.checks.json"))).toBe(true);
       expect(fs.existsSync(path.join(ctx.root, "signafaide.checks.json"))).toBe(false); // not where the command was run from
-      expect(out).toContain("tool-call checks: on in watch mode");
+      expect(out).toContain("tool-call checks: on, Calibrating");
       process.chdir(other);
       freshProgram(other);
       const { ran, tool } = send();
@@ -110,12 +110,12 @@ describe("setup says what blocks, at install", () => {
   it("a new file: the checks on, the mode, that nothing blocks, no strict tool, no field leaves, where and how to change it", async () => {
     const [, out] = await cli("init");
     const file = path.join(ctx.root, "signafaide.checks.json");
-    expect(out).toContain("tool-call checks: on in watch mode");
+    expect(out).toContain("tool-call checks: on, Calibrating");
     expect(out).toContain("secret, address, changed_tool, fingerprint, hidden_instruction");
     expect(out).toContain("never block");
-    expect(out).toContain("No tool is strict and no field of a tool's arguments leaves the machine");
+    expect(out).toContain("No tool is protected and no field of a tool's arguments leaves the machine");
     expect(out).toContain(`change it in ${file}`);
-    expect(out).toContain('"mode": "enforce" blocks');
+    expect(out).toContain('`"mode": "enforce"` is On');
     expect(out).toContain('"strict": true');
     expect(out).toContain('"disclose"');
     expect(out).toContain("`signafaide checks status`");
@@ -130,13 +130,13 @@ describe("setup says what blocks, at install", () => {
     fs.writeFileSync(file, JSON.stringify(doc));
     const [code, out] = await cli("agent", "setup", "--dir", ctx.root, "--agent", "claude-code");
     expect(code).toBe(0);
-    expect(out).toContain("tool-call checks: on, enforce mode");
-    expect(out).toContain("strict tool pay: fail closed; discloses /amount");
+    expect(out).toContain("tool-call checks: on, On");
+    expect(out).toContain("protected tool pay: if signafAIde can't be reached: Stop; discloses /amount");
     expect(out).toContain(`change it in ${file}`);
     expect(out).toContain("`signafaide checks status`");
     // A file with no strict tool says so.
     fs.writeFileSync(file, JSON.stringify({ ...doc, tools: {} }));
-    expect((await cli("agent", "setup", "--dir", ctx.root, "--agent", "claude-code"))[1]).toContain("no tool is strict; only tool fingerprints leave the machine");
+    expect((await cli("agent", "setup", "--dir", ctx.root, "--agent", "claude-code"))[1]).toContain("no tool is protected; only tool fingerprints leave the machine");
   });
 
   it("with checks off, setup says so", async () => {

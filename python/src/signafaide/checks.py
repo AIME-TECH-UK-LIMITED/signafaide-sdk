@@ -17,6 +17,7 @@ import urllib.parse
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .crypto import HEX64, SALT_RE, hash_json, sha256_hex, verify_sig
+from . import scan
 from .jcs import canonicalize
 
 # --- constants (§9) -----------------------------------------------------------------------
@@ -28,32 +29,44 @@ FINGERPRINTS_REFRESH_MS = 60_000
 RULES_FORMAT = "signafaide-rules/1"
 LIST_FORMAT = "signafaide-fingerprints/1"
 CHECKS_FORMAT = "signafaide-checks/1"
+#: Spec 1.1: the checks file with ``protect`` and a mode per tool (§8).
+CHECKS_FORMAT_2 = "signafaide-checks/2"
 MAX_RULE_SET_BYTES = 1 << 20
 
 #: The check ids, in the order of the §2.8 table.
 CHECK_IDS = ("secret", "address", "changed_tool", "fingerprint", "rule", "hidden_instruction")
-DECISION_CHECKS = ("secret", "address", "changed_tool", "fingerprint", "rule")
+DECISION_CHECKS = ("secret", "address", "changed_tool", "fingerprint", "rule", "hidden_instruction")
+#: The checks of an outcome (§2.8): on the tool's result.
+OUTCOME_CHECKS = ("secret", "hidden_instruction")
 #: The checks a checks file turns on or off (``rule`` is on whenever rules are held).
 FILE_CHECKS = ("secret", "address", "changed_tool", "fingerprint", "hidden_instruction")
 RESULT_ORDER = {"allow": 0, "note": 1, "block": 2}
 SECRET_FORMATS = (
-    ("github_token", r"gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82}", ("github.com", "api.github.com", "uploads.github.com")),
+    ("github_token", r"gh[pousr]_[A-Za-z0-9]{36,251}|github_pat_[A-Za-z0-9_]{82,244}", ("github.com", "api.github.com", "uploads.github.com")),
     ("aws_access_key", r"(AKIA|ASIA)[A-Z0-9]{16}", ("*.amazonaws.com",)),
     ("stripe_key", r"(sk|rk)_(live|test)_[A-Za-z0-9]{24,99}", ("api.stripe.com",)),
     ("slack_token", r"xox[abposr]-[A-Za-z0-9-]{10,200}", ("slack.com", "*.slack.com")),
     ("anthropic_key", r"sk-ant-[A-Za-z0-9_-]{20,200}", ("api.anthropic.com",)),
     ("openai_key", r"sk-proj-[A-Za-z0-9_-]{20,200}", ("api.openai.com",)),
     ("google_api_key", r"AIza[0-9A-Za-z_-]{35}", ("*.googleapis.com",)),
-    ("signafaide_key", r"sfa_(test|live)_[0-9A-Za-z]{32}", ()),  # issuer: the host of the client's witness URL
+    ("signafaide_key", r"sfa_(test|live|user)_[0-9A-Za-z]{32}", ()),  # issuer: the host of the client's witness URL; sfa_user_ is a person session (§6)
 )
 _SECRET_RES = tuple((fid, re.compile(pat), issuers) for fid, pat, issuers in SECRET_FORMATS)
 PRIVATE_KEY_RE = re.compile(r"-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY-----")
+#: Secret formats read by a text rule, not a whole-token pattern (§8): they block like the table's.
+TEXT_FORMATS = ("private_key", "wallet_private_key", "seed_phrase")
+#: Secrets known by where they stand, not by a format (§8, spec 1.1 benchmark batch 2): a value
+#: named as a secret that looks random, a JSON Web Token, a bearer credential. Read on arguments
+#: only; they block like the table's formats.
+CONTEXT_FORMATS = ("bearer_token", "jwt", "named_secret")
+#: What the ``secret`` check notes without blocking (§2.8): public or uncertain finds.
+SECRET_NOTES = ("card_number", "high_entropy", "wallet_address")
 FOUND = {
-    "secret": {f[0] for f in SECRET_FORMATS} | {"private_key", "high_entropy"},
+    "secret": {f[0] for f in SECRET_FORMATS} | set(TEXT_FORMATS) | set(CONTEXT_FORMATS) | set(SECRET_NOTES),
     "address": {"loopback", "private", "shared", "link_local", "unique_local", "unspecified", "metadata", "internal_name"},
     "changed_tool": {"description_changed", "schema_changed", "not_approved"},
     "fingerprint": {"tool", "description", "server"},
-    "hidden_instruction": {"invisible_characters", "instruction_phrase"},
+    "hidden_instruction": {"invisible_characters", "instruction_phrase", "encoded_content", "tool_shadowing", "look_alike_name", "possible_hidden_instruction"},
 }
 OPS_VALUE = {"eq", "ne", "lt", "le", "gt", "ge", "in", "not_in", "prefix", "suffix", "contains", "type"}
 OPS_NO_VALUE = {"present", "absent"}
@@ -241,10 +254,14 @@ def condition_errors(c: Any) -> Optional[str]:
     return None if ok else f"the value of '{op}' has the wrong type"
 
 
-def rule_errors(r: Any, allow_limit: bool = True) -> Optional[str]:
+def rule_errors(r: Any, allow_limit: bool = True, version: Optional[int] = None) -> Optional[str]:
+    """The first problem with a rule (§10.1). *version* is the rule set document's version; None
+    for the local rules of a checks file, which may use neither ``limit`` (*allow_limit* False)
+    nor, from spec 1.1, ``state`` and ``exceptions`` (the checks file sets their mode per tool)."""
     if not isinstance(r, dict):
         return "each rule is an object"
-    err = _exact(r, ("id", "about", "action", "tools", "agents", "when"), ("limit",) if allow_limit else (), "a rule")
+    optional = (("limit",) if allow_limit else ()) + (("state", "exceptions") if version is not None else ())
+    err = _exact(r, ("id", "about", "action", "tools", "agents", "when"), optional, "a rule")
     if err:
         return err
     if not isinstance(r["id"], str) or not RULE_ID_RE.match(r["id"]):
@@ -276,15 +293,44 @@ def rule_errors(r: Any, allow_limit: bool = True) -> Optional[str]:
             return f"rule '{rid}': limit.seconds is 1 to 86,400"
         if lim["per"] not in ("agent", "tool", "agent_tool"):
             return f"rule '{rid}': limit.per is agent, tool or agent_tool"
+    if "state" in r and r["state"] not in ("calibrating", "on"):
+        return f"rule '{rid}': state must be calibrating or on"
+    if "exceptions" in r:
+        if r["action"] != "block":
+            return f"rule '{rid}': exceptions are allowed only on a block rule"
+        xs = r["exceptions"]
+        if not isinstance(xs, list) or not 1 <= len(xs) <= 256:
+            return f"rule '{rid}': exceptions is a list of 1 to 256 exceptions"
+        seen: set = set()
+        for x in xs:
+            if not isinstance(x, dict):
+                return f"rule '{rid}': an exception is {{field, value, reason, since}}"
+            e = _exact(x, ("field", "value", "reason", "since"), (), f"rule '{rid}': an exception")
+            if e:
+                return e
+            if not pointer_ok(x["field"]):
+                return f"rule '{rid}': an exception's field must be a JSON Pointer of at most 256 characters, ~ only as ~0 or ~1"
+            if not isinstance(x["reason"], str) or not 1 <= len(x["reason"]) <= 200:
+                return f"rule '{rid}': an exception's reason is text of 1 to 200 characters"
+            if not is_safe_int(x["since"]) or not 1 <= x["since"] <= (version or 0):
+                return f"rule '{rid}': an exception's since is the version that added it, 1 to this version"
+            try:
+                text = canonicalize(x["value"]).decode()
+            except (ValueError, TypeError) as err2:
+                return f"rule '{rid}': an exception's value is not canonical JSON: {err2}"
+            k = (x["field"], text)
+            if k in seen:
+                return f"rule '{rid}': the exception {x['field']} {text} is listed twice"
+            seen.add(k)
     return None
 
 
-def _rules_list_errors(rules: Any, allow_limit: bool = True) -> Optional[str]:
+def _rules_list_errors(rules: Any, allow_limit: bool = True, version: Optional[int] = None) -> Optional[str]:
     if not isinstance(rules, list) or len(rules) > 1000:
         return "rules must be a list of at most 1,000 rules"
     seen = set()
     for r in rules:
-        err = rule_errors(r, allow_limit)
+        err = rule_errors(r, allow_limit, version)
         if err:
             return err
         if r["id"] in seen:
@@ -320,7 +366,7 @@ def rule_set_errors(doc: Any) -> Optional[str]:
     if not _valid_time(doc["issued"]):
         return "issued must be a time such as 2026-11-17T09:00:00.000Z"
     if doc["mode"] not in ("watch", "enforce"):
-        return "mode must be watch or enforce"
+        return "`mode` must be \"watch\" (Calibrating) or \"enforce\" (On)"
     if doc["default"] not in ("allow", "block"):
         return "default must be allow or block"
     f = doc["fail"]
@@ -356,7 +402,14 @@ def rule_set_errors(doc: Any) -> Optional[str]:
             if k in seen:
                 return f"the fingerprint exception {k[0]} {k[1]} is listed twice"
             seen.add(k)
-    return _rules_list_errors(doc["rules"])
+    err = _rules_list_errors(doc["rules"], True, doc["version"])
+    if err:
+        return err
+    if doc["mode"] == "watch":
+        on = next((r for r in doc["rules"] if r.get("state") == "on"), None)
+        if on is not None:
+            return f"rule '{on['id']}': a rule set whose `mode` is \"watch\" (Calibrating) never blocks, so no rule in it is On"
+    return None
 
 
 def excepted_pairs(doc: Optional[dict]) -> set:
@@ -377,7 +430,7 @@ def local_rules_errors(rules: Any) -> Optional[str]:
         return err
     if rules["default"] not in ("allow", "block"):
         return "rules.default must be allow or block"
-    err = _rules_list_errors(rules["rules"], allow_limit=False)
+    err = _rules_list_errors(rules["rules"], allow_limit=False, version=None)
     if err and "unknown field 'limit'" in err:
         return "rules may not use limit: only the witness counts calls"
     return err
@@ -387,24 +440,80 @@ def applies(rule: dict, agent: str, tool: str) -> bool:
     return (rule["tools"] is None or tool in rule["tools"]) and (rule["agents"] is None or agent in rule["agents"])
 
 
+def rule_state(doc: dict, rule: dict) -> str:
+    """A rule's state (§10.1, spec 1.1): as written, else from the document's mode (``calibrating``
+    in watch mode, ``on`` in enforce mode). Local rules (no ``mode``) are always ``on``: the checks
+    file sets the mode their entry is written in."""
+    if rule.get("state") in ("calibrating", "on"):
+        return rule["state"]
+    return "calibrating" if doc.get("mode") == "watch" else "on"
+
+
+def takes_part(doc: dict, rule: dict) -> bool:
+    """Whether a rule takes part in the result (§10.3): every rule of a rule set in watch mode,
+    and the On rules of one in enforce mode."""
+    return doc.get("mode") == "watch" or rule_state(doc, rule) == "on"
+
+
 def needed_fields(doc: Optional[dict], agent: str, tool: str) -> List[str]:
-    """§10.4: the ``field`` of every condition of every rule that applies, each once, in code point order."""
+    """§10.4: the fields a call **needs**: the ``field`` of every condition of every rule that
+    applies and takes part in the result, each once, in code point order."""
     if doc is None:
         return []
-    return sorted({c["field"] for r in doc["rules"] if applies(r, agent, tool) for c in r["when"]})
+    return sorted({c["field"] for r in doc["rules"] if applies(r, agent, tool) and takes_part(doc, r) for c in r["when"]})
 
 
-def evaluate(doc: dict, agent: str, tool: str, lookup: Callable[[str], Any], count: Optional[Callable[[dict], int]] = None) -> dict:
-    """§10.3: ``{result, basis, matched}``, the enforce-mode result. *doc* has ``rules`` and
-    ``default``. *count* is the witness's count of its earlier allow rulings for a limit rule;
-    without it (a client) limit rules are skipped."""
+def sendable_fields(doc: Optional[dict], agent: str, tool: str) -> List[str]:
+    """§10.4 (spec 1.1): the fields a call **can send**: the ``field`` of every condition of every
+    rule that applies, whatever its state, and of each of their exceptions, in code point order."""
+    if doc is None:
+        return []
+    out = set()
+    for r in doc["rules"]:
+        if applies(r, agent, tool):
+            out.update(c["field"] for c in r["when"])
+            out.update(x["field"] for x in r.get("exceptions", ()))
+    return sorted(out)
+
+
+def disclosure(doc: Optional[dict], agent: str, tool: str, disclose: Sequence[str]) -> dict:
+    """§10.4: what a strict call sends of the fields the developer approved (*disclose*):
+    ``sent``, the sendable fields it lists; ``missing``, the needed fields it does not list (a
+    ruling then blocks with basis ``fields_missing``); ``unsent``, the fields only Calibrating
+    rules or exceptions use that it does not list (nothing blocks for them)."""
+    needed = needed_fields(doc, agent, tool)
+    sendable = sendable_fields(doc, agent, tool)
+    return {
+        "sent": [p for p in sendable if p in disclose],
+        "missing": [p for p in needed if p not in disclose],
+        "unsent": [p for p in sendable if p not in disclose and p not in needed],
+    }
+
+
+def evaluate(doc: dict, agent: str, tool: str, lookup: Callable[[str], Any], count: Optional[Callable[[dict], int]] = None,
+             available: Optional[Callable[[str], bool]] = None) -> dict:
+    """§10.3: ``{result, basis, matched, would_block, not_calibrated, excepted}``, the
+    enforce-mode result. *doc* has ``rules`` and ``default`` (and ``mode`` for a rule set).
+    *count* is the witness's count of its earlier allow rulings for a limit rule; without it (a
+    client) limit rules are skipped. *available* says whether a pointer can be read at all: a
+    client holds the whole call; the witness only the pointers it was sent."""
+    def avail(p: str) -> bool:
+        return available is None or available(p)
+
     errors: List[str] = []
     blocks: List[str] = []
     allows: List[str] = []
+    would_block: List[str] = []
+    not_calibrated: List[str] = []
+    excepted: List[str] = []
     for r in doc["rules"]:
         if not applies(r, agent, tool):
             continue
         if "limit" in r and count is None:
+            continue
+        part = takes_part(doc, r)
+        if not part and any(not avail(c["field"]) for c in r["when"]):
+            not_calibrated.append(r["id"])
             continue
         status: Any = True
         for c in r["when"]:
@@ -412,20 +521,36 @@ def evaluate(doc: dict, agent: str, tool: str, lookup: Callable[[str], Any], cou
             if status is not True:
                 break
         if status == "error":
-            errors.append(r["id"])
+            (errors if part else would_block).append(r["id"])
             continue
         if status is not True:
             continue
+        # An exception applies only to a field that is available and present (§10.1).
+        hit = False
+        for x in r.get("exceptions", ()):
+            if avail(x["field"]):
+                v = lookup(x["field"])
+                if v is not ABSENT and _jcs_eq(v, x["value"]):
+                    hit = True
+                    break
+        if hit:
+            if part:
+                excepted.append(r["id"])
+            continue
         if "limit" in r and count is not None and count(r["limit"]) < r["limit"]["calls"]:
             continue
-        (blocks if r["action"] == "block" else allows).append(r["id"])
+        if part:
+            (blocks if r["action"] == "block" else allows).append(r["id"])
+        elif r["action"] == "block":
+            would_block.append(r["id"])
+    extra = {"would_block": would_block[:16], "not_calibrated": not_calibrated[:16], "excepted": excepted[:16]}
     if errors:
-        return {"result": "block", "basis": "error", "matched": errors[:16]}
+        return {"result": "block", "basis": "error", "matched": errors[:16], **extra}
     if blocks:
-        return {"result": "block", "basis": "rule", "matched": blocks[:16]}
+        return {"result": "block", "basis": "rule", "matched": blocks[:16], **extra}
     if allows:
-        return {"result": "allow", "basis": "rule", "matched": allows[:16]}
-    return {"result": doc["default"], "basis": "default", "matched": []}
+        return {"result": "allow", "basis": "rule", "matched": allows[:16], **extra}
+    return {"result": doc["default"], "basis": "default", "matched": [], **extra}
 
 
 def apply_mode(result: str, mode: str) -> dict:
@@ -436,14 +561,24 @@ def apply_mode(result: str, mode: str) -> dict:
 
 
 def entry_mode(own: str, strict: bool, local: bool) -> str:
-    """The project's rule set binds only strict calls: on a call that is not strict its entry is in watch mode (§8)."""
-    return own if (strict or local) else "watch"
+    """The mode of a client's ``rule`` entry (§2.8, §8): the project's rule set is ruled on by the
+    witness, never by the client, so its entry is always in watch mode (a call that is not strict
+    is not bound by it; a strict call waits for the witness's ruling); local rules follow the
+    checks file's mode (*own*) on every call. *strict* no longer changes the mode."""
+    del strict
+    return own if local else "watch"
 
 
 def client_rule_entry(doc: dict, mode: str, set_id: str, agent: str, tool: str, args: Any) -> dict:
     """The client's ``rule`` entry for one rule set (§2.8): §10.3 as a client over the call's arguments, in *mode*."""
     res = evaluate(doc, agent, tool, lambda p: resolve(args, p))
-    return {"check": "rule", **apply_mode(res["result"], mode), "mode": mode, "set": set_id, "matched": res["matched"]}
+    e = {"check": "rule", **apply_mode(res["result"], mode), "mode": mode, "set": set_id, "matched": res["matched"]}
+    # Spec 1.1: present only when not empty, so an entry without them reads as before.
+    if res["would_block"]:
+        e["would_block"] = res["would_block"]
+    if res["excepted"]:
+        e["excepted"] = res["excepted"]
+    return e
 
 
 # --- §10.2 client acceptance of a fetched version -----------------------------------------
@@ -618,26 +753,34 @@ def _entry_errors(e: Any, kind: str) -> Optional[str]:
     c = e["check"]
     if kind == "decision" and c not in DECISION_CHECKS:
         return f"the check '{c}' is not a check of a decision"
-    if kind == "outcome" and c != "hidden_instruction":
+    if kind == "outcome" and c not in OUTCOME_CHECKS:
         return f"the check '{c}' is not a check of an outcome"
     keys = {"check", "result", "mode"}
     if e.get("mode") == "watch":
         keys.add("enforce_result")
     keys |= {"set", "matched"} if c == "rule" else {"found"}
+    if c == "rule":  # spec 1.1: written only when not empty
+        keys |= {k for k in ("would_block", "excepted") if k in e}
     if set(e) != keys:
         return f"the '{c}' entry has the wrong keys"
     if e["mode"] not in ("watch", "enforce") or e["result"] not in RESULT_ORDER:
-        return "an entry's mode is watch or enforce and its result allow, note or block"
+        return "an entry's `mode` is \"watch\" (Calibrating) or \"enforce\" (On) and its `result` allow, note or block"
     if e["mode"] == "watch":
         if e["enforce_result"] not in RESULT_ORDER or e["result"] != ("note" if e["enforce_result"] == "block" else e["enforce_result"]):
-            return "in watch mode an entry's result equals its enforce_result, except that block is written as note"
-    if c == "hidden_instruction" and "block" in (e["result"], e.get("enforce_result")):
-        return "hidden_instruction never blocks"
+            return "when an entry's `mode` is \"watch\" (Calibrating), its result equals its enforce_result, except that block is written as note"
+    if kind == "outcome" and c == "hidden_instruction" and "block" in (e["result"], e.get("enforce_result")):
+        return "hidden_instruction never blocks on a result"
+    if c == "hidden_instruction" and isinstance(e.get("found"), list) and POSSIBLE in e["found"] and (
+            e["result"] != "note" or (e["mode"] == "watch" and e.get("enforce_result") != "note")):
+        return "a hidden_instruction entry with possible_hidden_instruction (arguments or a result) is a note, never a block"
     if c == "rule":
         if not (e["set"] == "local" or (isinstance(e["set"], str) and SET_RE.match(e["set"]))):
             return "a rule entry's set is local or the rule set's id"
         if not isinstance(e["matched"], list) or len(e["matched"]) > 16 or not all(isinstance(m, str) and RULE_ID_RE.match(m) for m in e["matched"]):
             return "a rule entry's matched is a list of at most 16 rule ids"
+        err = _id_lists_errors(e, ("would_block", "excepted"), "a rule entry")
+        if err:
+            return err
     else:
         f = e["found"]
         if not isinstance(f, list) or len(f) > 8 or len(set(map(str, f))) != len(f) or not all(x in FOUND[c] for x in f):
@@ -690,14 +833,14 @@ def checks_errors(env: dict) -> Optional[str]:
         if not (ch["fingerprints"] is None or (is_safe_int(ch["fingerprints"]) and ch["fingerprints"] >= 0)):
             return "checks.fingerprints must be null or the seq of the shared list"
         if not isinstance(ch["strict"], bool):
-            return "checks.strict must be true or false"
+            return "checks.strict must be true (Protected) or false (Not protected)"
         if not ((ch["strict"] and ch["fail"] in ("open", "closed")) or (not ch["strict"] and ch["fail"] is None)):
-            return "checks.fail is open or closed when strict is true, and null otherwise"
+            return "checks.fail is \"open\" (Let it run) or \"closed\" (Stop) when checks.strict is true (Protected), and null otherwise"
         d = ch["disclosed"]
         if not isinstance(d, list) or len(d) > 64 or not all(pointer_ok(p) for p in d) or d != sorted(set(d)):
             return "checks.disclosed holds at most 64 JSON Pointers, in code point order, without repeats"
         if d and not ch["strict"]:
-            return "checks.disclosed must be empty on a call that is not strict"
+            return "checks.disclosed must be empty on a call that is not protected"
         if bool(d) != (ch["disclosed_hash"] is not None) or (d and not is_hex64(ch["disclosed_hash"])):
             return "checks.disclosed_hash is 64 hex exactly when checks.disclosed is not empty"
         cid = ch["call_id"]
@@ -715,8 +858,6 @@ def checks_errors(env: dict) -> Optional[str]:
         if k in seen:
             return f"the '{e['check']}' check appears twice (rule appears once per rule set)"
         seen.add(k)
-    if env["kind"] == "outcome" and ch["result"] not in ("allow", "note"):
-        return "checks.result of an outcome must be allow or note"
     if ch["result"] != combined(res):
         return f"checks.result must be the strongest result among the entries ({combined(res)})"
     return None
@@ -767,23 +908,47 @@ def disclosed_errors(rec: dict, content: Any = None) -> Optional[str]:
     return None
 
 
+def _id_lists_errors(o: dict, keys: Sequence[str], what: str) -> Optional[str]:
+    """Spec 1.1: the optional lists of rule ids of a rule entry or a ruling: each, when present,
+    1 to 16 rule ids, each once; no rule in two of them or in ``matched``."""
+    lists = [("matched", o.get("matched") if isinstance(o.get("matched"), list) else [])]
+    for k in keys:
+        if k not in o:
+            continue
+        lst = o[k]
+        if not isinstance(lst, list) or not 1 <= len(lst) <= 16:
+            return f"{what}'s {k} is a list of 1 to 16 rule ids, written only when not empty"
+        if not all(isinstance(x, str) and RULE_ID_RE.match(x) for x in lst) or len(set(lst)) != len(lst):
+            return f"{what}'s {k} holds rule ids, each once"
+        lists.append((k, lst))
+    for i, (a, x) in enumerate(lists):
+        for b, y in lists[i + 1:]:
+            both = next((rid for rid in x if rid in y), None)
+            if both is not None:
+                return f"the rule {both} is in both {a} and {b} of {what}"
+    return None
+
+
+_RULING_LISTS = ("would_block", "not_calibrated", "excepted")
+
+
 def ruling_errors(r: Any) -> Optional[str]:
     """Whether a ruling object follows §3.5 field by field (check 6)."""
     if not isinstance(r, dict):
         return "a ruling is an object"
     watch = r.get("mode") == "watch"
     keys = {"v", "record_hash", "batch_hash", "server_time", "ruling", "mode", "basis", "matched", "missing", "rules", "fingerprints", "reason"} | ({"enforce_ruling"} if watch else set())
-    if set(r) != keys:
-        return "the ruling's fields are " + ", ".join(sorted(keys))
+    if set(r) != keys | {k for k in _RULING_LISTS if k in r}:
+        return "the ruling's fields are " + ", ".join(sorted(keys)) + " (and from spec 1.1 would_block, not_calibrated and excepted when not empty)"
     if r["v"] != 1 or not is_safe_int(r["v"]):
         return "the ruling's v must be 1"
     if not (is_hex64(r["record_hash"]) and is_hex64(r["batch_hash"])) or not _valid_time(r["server_time"]):
         return "the ruling's record_hash, batch_hash or server_time is invalid"
     if r["ruling"] not in ("allow", "block") or r["mode"] not in ("watch", "enforce"):
-        return "the ruling is allow or block, in watch or enforce mode"
+        return "the ruling is allow or block, and its `mode` is \"watch\" (Calibrating) or \"enforce\" (On)"
     if watch:
         if r["ruling"] != "allow":
-            return "in watch mode the ruling is always allow"
+            return "when the ruling's `mode` is \"watch\" (Calibrating) the ruling is always allow"
         if r["enforce_ruling"] not in ("allow", "block"):
             return "enforce_ruling is allow or block"
     enforce = r["enforce_ruling"] if watch else r["ruling"]
@@ -791,7 +956,7 @@ def ruling_errors(r: Any) -> Optional[str]:
     if basis not in ("rules_version", "fields_missing", "fingerprint", "error", "rule", "default"):
         return "basis is rules_version, fields_missing, fingerprint, error, rule or default"
     if basis in ("rules_version", "fields_missing", "fingerprint", "error") and enforce != "block":
-        return f"basis {basis} always blocks in enforce mode"
+        return f"basis {basis} always blocks when On (`mode` is \"enforce\")"
     m = r["matched"]
     if not isinstance(m, list) or len(m) > 16 or not all(isinstance(x, str) and RULE_ID_RE.match(x) for x in m):
         return "matched is a list of at most 16 rule ids"
@@ -805,7 +970,7 @@ def ruling_errors(r: Any) -> Optional[str]:
     rules = r["rules"]
     if rules is None:
         if watch or basis not in ("fingerprint", "default"):
-            return "without a rule set a ruling is in enforce mode, with basis fingerprint or default"
+            return "without a rule set a ruling has `mode` \"enforce\" (On), with basis fingerprint or default"
     elif not (isinstance(rules, dict) and set(rules) == {"set", "version", "hash"} and isinstance(rules["set"], str) and SET_RE.match(rules["set"])
               and is_safe_int(rules["version"]) and rules["version"] >= 1 and is_hex64(rules["hash"])):
         return "the ruling's rules is null or {set, version, hash}"
@@ -813,7 +978,14 @@ def ruling_errors(r: Any) -> Optional[str]:
         return "the ruling's fingerprints is the seq of the shared list"
     if not isinstance(r["reason"], str) or not 1 <= len(r["reason"]) <= 300:
         return "the ruling's reason is 1 to 300 characters"
-    return None
+    for k in _RULING_LISTS:
+        if k not in r:
+            continue
+        if basis not in ("error", "rule", "default") or rules is None:
+            return f"the ruling's {k} comes only from the evaluation of a rule set (basis error, rule or default)"
+        if k != "excepted" and watch:
+            return f"the ruling's {k} is about Calibrating rules of a rule set that is On (`mode` is \"enforce\")"
+    return _id_lists_errors(r, _RULING_LISTS, "the ruling")
 
 
 # --- the client's own checks (§8) ---------------------------------------------------------
@@ -821,19 +993,25 @@ def ruling_errors(r: Any) -> Optional[str]:
 
 def string_leaves(value: Any) -> List[str]:
     """The strings of *value*, in the order their members appear in its JCS form."""
-    out: List[str] = []
+    return [s for s, _ in labelled_leaves(value)]
 
-    def walk(v: Any) -> None:
+
+def labelled_leaves(value: Any) -> List[Tuple[str, Optional[str]]]:
+    """The strings of *value* in JCS order, each with the name of the member that holds it (None
+    in a list or at the top)."""
+    out: List[Tuple[str, Optional[str]]] = []
+
+    def walk(v: Any, name: Optional[str]) -> None:
         if isinstance(v, str):
-            out.append(v)
+            out.append((v, name))
         elif isinstance(v, list):
             for x in v:
-                walk(x)
+                walk(x, None)
         elif isinstance(v, dict):
             for k in sorted(v, key=lambda s: s.encode("utf-16-be")):
-                walk(v[k])
+                walk(v[k], k)
 
-    walk(value)
+    walk(value, None)
     return out
 
 
@@ -868,46 +1046,148 @@ def url_host(s: str) -> Optional[str]:
 
 def _entropy(s: str) -> float:
     n = len(s)
-    counts: Dict[str, int] = {}
-    for ch in s:
-        counts[ch] = counts.get(ch, 0) + 1
-    return -sum(c / n * math.log2(c / n) for c in counts.values())
+    return -sum(c / n * math.log2(c / n) for c in (s.count(ch) for ch in set(s)))
 
 
-def secret_findings(args: Any, witness_host: Optional[str] = None) -> dict:
-    """The ``secret`` check (§8) on a call's arguments: ``{result, found}`` in enforce mode."""
-    leaves = string_leaves(args)
-    texts: List[str] = []
-    for s in leaves + ["".join(leaves)]:
-        texts.append(s)
+_TOKEN = re.compile(r"[A-Za-z0-9_-]+")
+_TOKEN_TABLE = str.maketrans({chr(i): (chr(i) if re.match(r"[A-Za-z0-9_-]", chr(i)) else " ") for i in range(128)})
+#: The shortest token any format can match (``xox?-`` and 10 more).
+_MIN_TOKEN = 15
+
+
+def _table_format(tok: str, hosts: List[str], witness_host: Optional[str], found: set) -> None:
+    if len(tok) < _MIN_TOKEN:
+        return
+    for fid, pat, issuers in _SECRET_RES:
+        if pat.fullmatch(tok):
+            iss = (witness_host,) if fid == "signafaide_key" and witness_host else issuers
+            if hosts and iss and all(any(host_matches(h, p) for p in iss) for h in hosts):
+                continue
+            found.add(fid)
+            break
+
+
+_AUTH_HEADERS = {"authorization", "proxy-authorization"}
+
+
+def _context_in(text: str, name: str, single: bool, found: set) -> None:
+    """The secrets known by where they stand (§8 secret, ``CONTEXT_FORMATS``) in one text of an
+    argument named *name*; see the TypeScript SDK's ``contextIn``."""
+    t = text[:scan.PAIRS_SCAN_MAX]
+    if not (single and name.lower() in _AUTH_HEADERS):
+        if any(scan.is_jwt(m.group(0)) for m in scan.JWT_RE.finditer(t)):
+            found.add("jwt")
+        for m in (scan.BEARER_RE.finditer(t) if "bearer" in t.lower() else ()):
+            v = m.group(1)
+            if not (v.startswith("eyJ") and scan.is_jwt(v)) and scan.looks_random(v):
+                found.add("bearer_token")
+                break
+    dump = None
+    for n, v, i in scan.pairs(t):
+        if i > 0 and t[i - 1] in "?&#":
+            hit = scan.secret_name(n, True) and scan.looks_random(v)
+        else:
+            hit = scan.secret_name(n) and (scan.looks_random(v) or (scan.dump_value(v) and (dump if dump is not None else (dump := scan.is_env_dump(t)))))
+        if hit:
+            found.add("named_secret")
+            return
+
+
+def _formats_in(text: str, label: str, hosts: List[str], witness_host: Optional[str], found: set, seeds: bool = True) -> None:
+    """The block formats *text* holds (§8 secret): the table's whole tokens (unless every known
+    destination is an issuing host of the format), a private key, a wallet private key (WIF, or 64
+    hex digits labelled as a private key by *label* or the text before them) and a seed phrase."""
+    if text.isascii():  # split in C: every character outside the token class becomes a space
+        toks = [w for w in text.translate(_TOKEN_TABLE).split() if len(w) >= _MIN_TOKEN]
+    else:
+        toks = [w for w in _TOKEN.findall(text) if len(w) >= _MIN_TOKEN]
+        # Look-alike letters of the larger table, only in tokens that mix scripts (§8 secret).
+        for tok in scan.lookalike_tokens(text):
+            _table_format(tok, hosts, witness_host, found)
+    for tok in toks:
+        _table_format(tok, hosts, witness_host, found)
+        if len(tok) >= 51 and scan.is_wif(tok):
+            found.add("wallet_private_key")
+        elif len(tok) >= 64 and any(scan.is_hex_key(tok, label + " " + text[max(0, m.start() - 32):m.start()])
+                                    for m in re.finditer(r"(?<![A-Za-z0-9_-])" + re.escape(tok) + r"(?![A-Za-z0-9_-])", text)):
+            found.add("wallet_private_key")
+    if PRIVATE_KEY_RE.search(text):
+        found.add("private_key")
+    if seeds and scan.has_seed_phrase(text):
+        found.add("seed_phrase")
+
+
+def secret_findings(args: Any, witness_host: Optional[str] = None, result: bool = False) -> dict:
+    """The ``secret`` check (§8) on a call's arguments (*result* False) or on a tool's result
+    (*result* True): ``{result, found}`` in enforce mode. Every string is normalised first; the
+    texts read are each string, its percent-decoding, the concatenation of all and its
+    percent-decoding, and what each of those decodes to (hex, base64, nested). A result has no
+    destination, and is read for block formats only."""
+    leaves = [(scan.normalise(s), name or "") for s, name in labelled_leaves(args)]
+    hosts = [] if result else [h for h in (url_host(s) for s, _ in leaves) if h is not None]
+    found: set = set()
+    budget = [scan.DECODE_BUDGET]
+    single = len(set(hosts)) == 1
+    # Each string, its percent-decoding (twice: double encoding), and what they decode to: every
+    # format; on arguments also the secrets known by where they stand, and the obfuscated tokens.
+    for s, name in leaves:
+        texts = [s]
         d = _pct_decode(s)
         if d is not None:
             texts.append(d)
-    hosts = [h for h in (url_host(s) for s in leaves) if h is not None]
-    found: List[str] = []
-    for t in texts:
-        for tok in re.findall(r"[A-Za-z0-9_-]+", t):
-            for fid, pat, issuers in _SECRET_RES:
-                if pat.fullmatch(tok):
-                    iss = (witness_host,) if fid == "signafaide_key" and witness_host else issuers
-                    if hosts and iss and all(any(host_matches(h, p) for p in iss) for h in hosts):
-                        continue
-                    if fid not in found:
-                        found.append(fid)
-                    break
-        if PRIVATE_KEY_RE.search(t) and "private_key" not in found:
-            found.append("private_key")
+            d2 = _pct_decode(d)
+            if d2 is not None:
+                texts.append(d2)
+        for t in texts:
+            _formats_in(t, name, hosts, witness_host, found)
+            if not result:
+                _context_in(t, name, single, found)
+            for x in scan.decodings(t, budget):
+                _formats_in(x, name, hosts, witness_host, found)
+                if not result:
+                    _context_in(x, name, single, found)
+        if not result and scan._utf16_len(s) <= scan.OBFUSCATION_MAX:
+            if scan.may_hold_reversed(s):
+                _formats_in(s[::-1], "", hosts, witness_host, found, seeds=False)
+            compact = scan.compact(s)
+            if compact != s and scan.holds_prefix(compact):
+                _formats_in(compact, "", hosts, witness_host, found, seeds=False)
+        # A value named as a secret, as an argument's member: with a single destination it is how a
+        # client signs in to that service, and not a finding.
+        if not result and not single and scan.secret_name(name) and scan.looks_random(s):
+            found.add("named_secret")
+    # Short members of one object joined, in any order: a token split across members.
+    if not result:
+        for j in scan.member_joins(args):
+            _formats_in(j, "", hosts, witness_host, found, seeds=False)
+    # The concatenation of all, and its percent-decoding: a token or key split across strings.
+    if len(leaves) > 1:
+        joined = "".join(x for x, _ in leaves)
+        d = _pct_decode(joined)
+        for t in [joined] if d is None else [joined, d]:
+            _formats_in(t, "", hosts, witness_host, found, seeds=False)
     if found:
         return {"result": "block", "found": sorted(found)[:8]}
-    for s in leaves:
-        cands = [s] + [d for d in [_pct_decode(s)] if d is not None]
-        for t in cands:
-            for tok in re.findall(r"[A-Za-z0-9_+/=-]+", t):
-                if any(p.fullmatch(tok) for _, p, _ in _SECRET_RES):
+    if result:
+        return {"result": "allow", "found": []}
+    notes: set = set()
+    for s, _ in leaves:
+        d = _pct_decode(s)
+        for t in [s] if d is None else [s, d]:
+            if scan.has_card_number(t):
+                notes.add("card_number")
+            for tok in _TOKEN.findall(t):
+                if len(tok) >= 26 and scan.is_wallet_address(tok):
+                    notes.add("wallet_address")
+            for run in re.findall(r"[A-Za-z0-9_+/=-]+", t):
+                if len(run) < 32 or "high_entropy" in notes or _entropy(run) < 4.5:
                     continue
-                if len(tok) >= 32 and _entropy(tok) >= 4.5:
-                    return {"result": "note", "found": ["high_entropy"]}
-    return {"result": "allow", "found": []}
+                # A run that holds a whole format match or a wallet address is that, not random.
+                if any((len(tok) >= _MIN_TOKEN and any(p.fullmatch(tok) for _, p, _ in _SECRET_RES)) or (len(tok) >= 26 and scan.is_wallet_address(tok))
+                       for tok in _TOKEN.findall(run)):
+                    continue
+                notes.add("high_entropy")
+    return {"result": "note" if notes else "allow", "found": sorted(notes)}
 
 
 def _whatwg_ipv4(host: str) -> Any:
@@ -1020,34 +1300,153 @@ def _bare_address(s: str) -> Optional[str]:
 def address_findings(args: Any, allow_hosts: Sequence[str] = (), allow_cidrs: Sequence[str] = (), resolve_names: bool = False) -> dict:
     """The ``address`` check (§8) on a call's arguments: ``{result, found}`` in enforce mode."""
     found: List[str] = []
-    for s in string_leaves(args):
+    for raw in string_leaves(args):
+        s = scan.normalise(raw)
         h = url_host(s)
         if h is None:
             h = _bare_address(s)
             if h is None:
                 continue
         code = classify_host(h, allow_hosts, allow_cidrs, resolve_names)
+        # A host that reads as a local or metadata name once look-alike letters are mapped (§8 address).
+        if code is None:
+            like = scan.host_lookalike(h)
+            if like is not None and not any(host_matches(h, p) for p in allow_hosts):
+                code = classify_host(like, allow_hosts, allow_cidrs)
         if code and code not in found:
             found.append(code)
     return {"result": "block" if found else "allow", "found": sorted(found)}
 
 
-_INVISIBLE = ((0xE0000, 0xE007F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x2064), (0x2066, 0x2069))
-_PHRASES = ("ignore previous instructions", "ignore all previous instructions", "ignore the previous instructions",
-            "disregard previous instructions", "disregard all previous instructions", "forget your instructions", "do not tell the user")
+def _instruction_found_in(strings: Iterable[str]) -> List[str]:
+    """``invisible_characters`` and ``instruction_phrase`` in *strings*; an instruction phrase is
+    also looked for in what each string decodes to (hex, base64, nested; spec 1.1, benchmark batch
+    3), within one ``DECODE_BUDGET`` for all of them."""
+    found: set = set()
+    budget = [scan.DECODE_BUDGET]
+    for s in strings:
+        if "invisible_characters" not in found and scan.has_invisible(s):
+            found.add("invisible_characters")
+        if "instruction_phrase" not in found and (scan.has_instruction(s) or any(scan.has_instruction(x) for x in scan.decodings(scan.normalise(s), budget))):
+            found.add("instruction_phrase")
+        if len(found) == 2:
+            break
+    return sorted(found)
+
+
+#: A short name-like string (most member names, types, enum values): no pattern, encoded run or
+#: invisible character fits in it, so the definition check skips it (only the time changes).
+_INERT = re.compile(r"[A-Za-z0-9_.-]{0,15}\Z")
+
+
+def _instruction_found(value: Any) -> List[str]:
+    return _instruction_found_in(string_leaves(value))
+
+
+#: How deep a tool definition is read (nested objects and lists), and how much text (UTF-16 code
+#: units of strings and member names) at most (§8 hidden_instruction, spec 1.1 benchmark batch 3).
+#: A definition past either cannot be read in full: ``encoded_content``.
+DEFINITION_DEPTH_MAX = 64
+DEFINITION_TEXT_MAX = 1 << 20
+
+
+def definition_leaves(value: Any) -> Tuple[List[Tuple[str, Optional[str]]], bool]:
+    """Every string of a definition and every member name, at any depth (schemas' ``properties``,
+    ``$defs``, ``anyOf``, ``items``, ``default``, ``examples``, ``enum``, ...), in JCS order, each
+    string with the name of the member that holds it (None for a member name, in a list or at the
+    top); and whether the definition is deeper or longer than the bounds (the walk stopped there)."""
+    leaves: List[Tuple[str, Optional[str]]] = []
+    state = {"left": DEFINITION_TEXT_MAX, "over": False}
+
+    def take(s: str, name: Optional[str]) -> None:
+        n = scan._utf16_len(s)
+        if n > state["left"]:
+            state["over"] = True
+            return
+        state["left"] -= n
+        leaves.append((s, name))
+
+    def walk(v: Any, name: Optional[str], depth: int) -> None:
+        if state["over"]:
+            return
+        if isinstance(v, str):
+            take(v, name)
+        elif isinstance(v, (list, dict)):
+            if depth >= DEFINITION_DEPTH_MAX:
+                state["over"] = True
+                return
+            if isinstance(v, list):
+                for x in v:
+                    walk(x, None, depth + 1)
+            else:
+                for k in sorted(v, key=lambda s: s.encode("utf-16-be")):
+                    take(k, None)
+                    walk(v[k], k, depth + 1)
+
+    walk(value, None, 0)
+    return leaves, state["over"]
+
+
+#: The found code that marks a hidden instruction in what an agent writes (arguments) or a tool
+#: returns (a result): always a note, beside the codes that say what was found (§2.8).
+POSSIBLE = "possible_hidden_instruction"
 
 
 def hidden_findings(result: Any) -> dict:
-    """The ``hidden_instruction`` check (§8) on a call's result: ``{result, found}``; never ``block``."""
-    found: List[str] = []
-    for s in string_leaves(result):
-        if any(lo <= ord(ch) <= hi for ch in s for lo, hi in _INVISIBLE) or "﻿" in s[1:]:
-            if "invisible_characters" not in found:
-                found.append("invisible_characters")
-        low = re.sub(r"\s+", " ", "".join(ch.lower() if "A" <= ch <= "Z" else ch for ch in s))
-        if any(p in low for p in _PHRASES) and "instruction_phrase" not in found:
-            found.append("instruction_phrase")
-    return {"result": "note" if found else "allow", "found": sorted(found)}
+    """The ``hidden_instruction`` check (§8) on a call's result: ``{result, found}``; a note, never
+    ``block``, with ``possible_hidden_instruction`` beside what was found."""
+    found = _instruction_found(result)
+    return {"result": "note", "found": sorted(found + [POSSIBLE])} if found else {"result": "allow", "found": []}
+
+
+def argument_findings(args: Any) -> dict:
+    """The ``hidden_instruction`` check (§8) on a call's arguments: a note, never ``block``."""
+    return hidden_findings(args)
+
+
+def call_notes(tool: str, where: str, findings: dict) -> List[dict]:
+    """The notes of one ``hidden_instruction`` finding (§8 notes): none, or one
+    ``{note: "possible_hidden_instruction", in: "arguments" | "result", tool, found}``."""
+    if POSSIBLE not in findings["found"]:
+        return []
+    return [{"note": POSSIBLE, "in": where, "tool": tool, "found": [f for f in findings["found"] if f != POSSIBLE]}]
+
+
+def decision_instruction_findings(definition: Optional[dict], args: dict) -> dict:
+    """The decision's ``hidden_instruction`` entry (§8): the definition's findings block; without
+    them, the arguments' are a note with ``possible_hidden_instruction``."""
+    if definition is not None and definition["result"] == "block":
+        return definition
+    return args
+
+
+def definition_findings(definition: Any, self_name: Optional[str] = None, others: Sequence[str] = (), approved: Sequence[str] = ()) -> dict:
+    """The ``hidden_instruction`` check (§8) on what the agent is shown of a tool or a server: every
+    string of a tool's definition (name, title, description, schemas, annotations, ``_meta``, any
+    other member), or a server's ``instructions``. Besides the instruction phrases and invisible
+    characters: ``encoded_content`` and ``tool_shadowing``. ``{result, found}`` in enforce mode:
+    ``block``. *self_name* and *others*: the tool's name and the other tools listed with it;
+    *approved*: the tools approved earlier for the agent and the server. ``encoded_content`` also
+    for a definition too deep or too long to read in full; ``look_alike_name`` for a name that
+    passes for another tool's, or mixes scripts."""
+    leaves, over = definition_leaves(definition)
+    leaves = [(s, n) for s, n in leaves if not _INERT.match(s)]
+    found = set(_instruction_found_in(s for s, _ in leaves))
+    if over:
+        found.add("encoded_content")
+    budget = [scan.DECODE_BUDGET]
+    me = self_name if self_name is not None else (definition.get("name") if isinstance(definition, dict) and isinstance(definition.get("name"), str) else "")
+    if scan.look_alike_name(me or "", others, approved):
+        found.add("look_alike_name")
+    for raw, name in leaves:
+        if "encoded_content" not in found and scan.has_encoded_content(scan.normalise(raw), name, budget):
+            found.add("encoded_content")
+        if "tool_shadowing" not in found and scan.has_shadowing(raw, me, others):
+            found.add("tool_shadowing")
+        if "encoded_content" in found and "tool_shadowing" in found:
+            break
+    out = sorted(found)
+    return {"result": "block" if out else "allow", "found": out}
 
 
 def changed_tool_findings(fps: dict, approved: Optional[dict]) -> dict:
@@ -1091,13 +1490,15 @@ def checks_file_errors(doc: Any) -> Optional[str]:
     """The first problem with a checks file, naming the key; None when valid."""
     if not isinstance(doc, dict):
         return "the file is not a JSON object"
-    err = _exact(doc, ("format", "mode", "checks", "tools", "addresses", "rules"), ("ruling_timeout_ms",), "the checks file")
+    if doc.get("format") not in (CHECKS_FORMAT, CHECKS_FORMAT_2):
+        return f"format must be {CHECKS_FORMAT} or {CHECKS_FORMAT_2}"
+    v2 = doc["format"] == CHECKS_FORMAT_2
+    keys = ("format", "checks", "tools", "addresses", "rules") if v2 else ("format", "mode", "checks", "tools", "addresses", "rules")
+    err = _exact(doc, keys, ("ruling_timeout_ms", "ci", "proposed"), "the checks file")
     if err:
         return err
-    if doc["format"] != CHECKS_FORMAT:
-        return f"format must be {CHECKS_FORMAT}"
-    if doc["mode"] not in ("watch", "enforce"):
-        return "mode must be watch or enforce"
+    if not v2 and doc["mode"] not in ("watch", "enforce"):
+        return "`mode` must be \"watch\" (Calibrating) or \"enforce\" (On)"
     c = doc["checks"]
     if not isinstance(c, dict):
         return "checks must be an object of the five checks"
@@ -1113,15 +1514,35 @@ def checks_file_errors(doc: Any) -> Optional[str]:
     for name, t in tools.items():
         if not _declared_name(name):
             return f"tools: '{name}' is not a declared tool name (1 to 101 characters)"
+        if v2:
+            if not isinstance(t, dict):
+                return f"tools.{name} must be {{protect, mode?, disclose?}}: `protect` is true (Protected) or false (Not protected), `mode` is \"enforce\" (On) or \"watch\" (Calibrating)"
+            err = _exact(t, ("protect",), ("mode", "disclose"), f"tools.{name}")
+            if err:
+                return err
+            if not isinstance(t["protect"], bool):
+                return f"tools.{name}.protect must be true (Protected) or false (Not protected)"
+            if "mode" in t and t["mode"] not in ("watch", "enforce"):
+                return f"tools.{name}.mode must be \"watch\" (Calibrating) or \"enforce\" (On)"
+            if "disclose" in t:
+                if not t["protect"]:
+                    return f"tools.{name}.disclose is allowed only on a protected tool: only protected calls send fields (set `protect` to true to protect the tool)"
+                d = t["disclose"]
+                if not isinstance(d, list) or len(d) > 64 or not all(pointer_ok(p) for p in d):
+                    return f"tools.{name}.disclose must be a list of at most 64 JSON Pointers"
+                dup = next((p for i, p in enumerate(d) if p in d[:i]), None)
+                if dup is not None:
+                    return f"tools.{name}.disclose lists {dup} twice"
+            continue
         if not isinstance(t, dict):
-            return f"tools.{name} must be {{strict, fail?, disclose?}}"
+            return f"tools.{name} must be {{strict, fail?, disclose?}}: `strict` is true (Protected) or false (Not protected), `fail` is \"closed\" (if signafAIde can't be reached: Stop) or \"open\" (Let it run)"
         err = _exact(t, ("strict",), ("fail", "disclose"), f"tools.{name}")
         if err:
             return err
         if not isinstance(t["strict"], bool):
-            return f"tools.{name}.strict must be true or false"
+            return f"tools.{name}.strict must be true (Protected) or false (Not protected)"
         if "fail" in t and t["fail"] not in ("open", "closed"):
-            return f"tools.{name}.fail must be open or closed"
+            return f"tools.{name}.fail must be \"closed\" (Stop) or \"open\" (Let it run)"
         if "disclose" in t:
             d = t["disclose"]
             if not isinstance(d, list) or len(d) > 64 or not all(pointer_ok(p) for p in d):
@@ -1143,7 +1564,96 @@ def checks_file_errors(doc: Any) -> Optional[str]:
         return err
     if "ruling_timeout_ms" in doc and not (is_safe_int(doc["ruling_timeout_ms"]) and 1 <= doc["ruling_timeout_ms"] <= 60_000):
         return "ruling_timeout_ms must be an integer from 1 to 60,000"
+    if "proposed" in doc:
+        err = _proposed_errors(doc["proposed"], v2, doc["rules"])
+        if err:
+            return err
+    if "ci" in doc:
+        return _ci_errors(doc["ci"])
     return None
+
+
+def _proposed_errors(p: Any, v2: bool, rules: Any) -> Optional[str]:
+    """``proposed`` of a version 2 checks file: the local rules an agent run proposed with no key to
+    save them, each ``{rule, by: "agent", on: "YYYY-MM-DD"}``. A person running ``protect`` is offered them."""
+    if not v2:
+        return "proposed is for checks file version 2"
+    if not isinstance(p, list) or len(p) > 1000:
+        return "proposed must be a list of at most 1,000 {rule, by, on}"
+    ids = {r.get("id") for r in rules["rules"]} if isinstance(rules, dict) and isinstance(rules.get("rules"), list) else set()
+    seen: set = set()
+    for i, x in enumerate(p):
+        if not isinstance(x, dict):
+            return f'proposed[{i}] must be {{"rule", "by", "on"}}'
+        err = _exact(x, ("rule", "by", "on"), (), f"proposed[{i}]")
+        if err:
+            return err
+        if not isinstance(x["rule"], str) or x["rule"] not in ids:
+            return f"proposed[{i}].rule must be the id of a rule in rules"
+        if x["rule"] in seen:
+            return f"proposed lists {x['rule']} twice"
+        seen.add(x["rule"])
+        if x["by"] != "agent":
+            return f'proposed[{i}].by must be "agent"'
+        if not isinstance(x["on"], str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", x["on"]):
+            return f"proposed[{i}].on must be a date, YYYY-MM-DD"
+    return None
+
+
+def _ci_errors(ci: Any) -> Optional[str]:
+    """``ci`` of a checks file: ``{"allow": [{"tool", "reason"}]}``, the reviewed exceptions of
+    ``signafaide check --ci`` (a risky tool left unprotected on purpose, with the reason)."""
+    if not isinstance(ci, dict):
+        return 'ci must be {"allow": [{"tool", "reason"}]}'
+    err = _exact(ci, ("allow",), (), "ci")
+    if err:
+        return err
+    allow = ci["allow"]
+    if not isinstance(allow, list) or len(allow) > 1000:
+        return "ci.allow must be a list of at most 1,000 {tool, reason}"
+    seen: set = set()
+    for i, a in enumerate(allow):
+        if not isinstance(a, dict):
+            return f'ci.allow[{i}] must be {{"tool", "reason"}}'
+        err = _exact(a, ("tool", "reason"), (), f"ci.allow[{i}]")
+        if err:
+            return err
+        if not _declared_name(a["tool"]):
+            return f"ci.allow[{i}].tool must be a declared tool name (1 to 101 characters)"
+        r = a["reason"]
+        if not isinstance(r, str) or not r.strip() or len(r) > 1000:
+            return f"ci.allow[{i}].reason must say why the tool is allowed (1 to 1,000 characters)"
+        if a["tool"] in seen:
+            return f"ci.allow lists {a['tool']} twice"
+        seen.add(a["tool"])
+    return None
+
+
+def tool_settings(file: dict, name: str) -> dict:
+    """§8: what a valid checks file says for the tool with this declared name: ``strict`` (version
+    1 ``strict``, version 2 ``protect``), ``fail`` (the fail mode it gives a strict tool), ``mode``
+    (of the client's own checks and local rules on its calls) and ``disclose`` (the fields the
+    developer approved for sending). Version 2: a protected tool defaults to enforce mode, any
+    other tool (listed or not) to watch mode."""
+    tools = file.get("tools") if isinstance(file.get("tools"), dict) else {}
+    t = tools.get(name)
+    if file.get("format") == CHECKS_FORMAT_2:
+        if not isinstance(t, dict):
+            return {"strict": False, "fail": "closed", "mode": "watch", "disclose": []}
+        protect = t.get("protect") is True
+        return {"strict": protect, "fail": "closed", "mode": t.get("mode") or ("enforce" if protect else "watch"),
+                "disclose": list(t.get("disclose") or []) if protect else []}
+    mode = "enforce" if file.get("mode") == "enforce" else "watch"
+    if not isinstance(t, dict):
+        return {"strict": False, "fail": "closed", "mode": mode, "disclose": []}
+    strict = t.get("strict") is True
+    return {"strict": strict, "fail": "open" if strict and t.get("fail") == "open" else "closed", "mode": mode,
+            "disclose": list(t.get("disclose") or []) if strict else []}
+
+
+def checks_file_version(file: dict) -> int:
+    """The checks file's version: 1 or 2."""
+    return 2 if file.get("format") == CHECKS_FORMAT_2 else 1
 
 
 def default_checks_file() -> dict:
@@ -1160,8 +1670,8 @@ def agent_checks(items: List[dict]) -> Optional[dict]:
     decision_seq, ruling}``; None when it would have no line."""
     outs = {i["decision_seq"]: i for i in items if i["kind"] == "outcome" and i.get("decision_seq") is not None}
     j: dict = {"checked": 0, "allowed": 0, "noted": 0, "blocked_here": 0, "blocked_by_witness": 0, "notes": {},
-               "ruled": {"allow": 0, "block": 0, "watch_would_block": 0}, "no_ruling": {"ran": 0, "not_run": 0, "no_outcome": 0},
-               "ran_after_block": [], "rule_sets": []}
+               "ruled": {"allow": 0, "block": 0, "watch_would_block": 0, "calibrating_would_block": 0, "by_exception": 0, "not_calibrated": 0}, "no_ruling": {"ran": 0, "not_run": 0, "no_outcome": 0},
+               "ran_after_block": [], "withheld": [], "rule_sets": []}
     sets = set()
     for d in items:
         c = d.get("checks")
@@ -1189,6 +1699,14 @@ def agent_checks(items: List[dict]) -> Optional[dict]:
                 j["ruled"][g_ruling] += 1
             if g.get("mode") == "watch" and g.get("enforce_ruling") == "block":
                 j["ruled"]["watch_would_block"] += 1
+            def has(k: str) -> bool:
+                return isinstance(g.get(k), list) and len(g[k]) > 0
+            if g_ruling == "allow" and has("would_block"):
+                j["ruled"]["calibrating_would_block"] += 1
+            if g_ruling == "allow" and has("excepted"):
+                j["ruled"]["by_exception"] += 1
+            if has("not_calibrated"):
+                j["ruled"]["not_calibrated"] += 1
         oc = (o.get("checks") or {}) if o is not None else {}
         o_ran = oc.get("ran", True)
         o_none = oc.get("ruling") == "none"
@@ -1208,6 +1726,8 @@ def agent_checks(items: List[dict]) -> Optional[dict]:
             for e in c.get("results") or []:
                 if e.get("result") == "note":
                     j["notes"][e["check"]] = j["notes"].get(e["check"], 0) + 1
+            if i.get("kind") == "outcome" and c.get("result") == "block":
+                j["withheld"].append(i["seq"])
     j["rule_sets"] = [{"set": s, "version": v, "hash": h} for s, v, h in sorted(sets, key=lambda x: (x[0], x[1] if x[1] is not None else -1, x[2]))]
     return j if checks_lines(".", j) else None
 
@@ -1220,7 +1740,7 @@ def checks_lines(agent: str, j: dict) -> List[str]:
     """The report lines of one agent (§7), without the ``tool-call checks: `` prefix."""
     out: List[str] = []
     if j["checked"]:
-        parts = [f"{j['allowed']} allowed"] + [f"{j[k]} {w}" for k, w in (("noted", "with notes"), ("blocked_here", "blocked here"), ("blocked_by_witness", "blocked by the witness")) if j[k]]
+        parts = [f"{j['allowed']} allowed"] + [f"{j[k]} {w}" for k, w in (("noted", "with notes"), ("blocked_here", "blocked here without a ruling from the witness"), ("blocked_by_witness", "blocked by the witness")) if j[k]]
         out.append(f"{agent}: {_n(j['checked'], 'tool call', 'tool calls')} checked: " + ", ".join(parts))
     if j["notes"]:
         out.append(f"{agent}: notes: " + ", ".join(f"{k} {j['notes'][k]}" for k in CHECK_IDS if k in j["notes"]))
@@ -1228,17 +1748,23 @@ def checks_lines(agent: str, j: dict) -> List[str]:
     ruled = r["allow"] + r["block"]
     if ruled:
         p = [f"{r['allow']} allowed"] + ([f"{r['block']} blocked"] if r["block"] else []) + \
-            ([f"{r['watch_would_block']} in watch mode that enforce mode would have blocked"] if r["watch_would_block"] else [])
-        out.append(f"{agent}: {_n(ruled, 'strict call', 'strict calls')} ruled by the witness: " + ", ".join(p))
+            ([f"{r['watch_would_block']} Calibrating (would have blocked if On)"] if r["watch_would_block"] else []) + \
+            ([f"{r['calibrating_would_block']} allowed that a Calibrating rule would have blocked if On"] if r["calibrating_would_block"] else []) + \
+            ([f"{r['by_exception']} allowed by exception"] if r["by_exception"] else []) + \
+            ([f"{r['not_calibrated']} with a Calibrating rule that could not be checked because a field it needs was not sent"] if r["not_calibrated"] else [])
+        out.append(f"{agent}: {_n(ruled, 'protected call', 'protected calls')} ruled by the witness: " + ", ".join(p))
     nr = j["no_ruling"]
     tot = nr["ran"] + nr["not_run"] + nr["no_outcome"]
     if tot:
-        p = [f"{nr[k]} {w}" for k, w in (("ran", "ran (fail open)"), ("not_run", "did not run"), ("no_outcome", "have no outcome in the pack")) if nr[k]]
+        p = [f"{nr[k]} {w}" for k, w in (("ran", "ran because the tool was set to Let it run"), ("not_run", "did not run"), ("no_outcome", "have no outcome in the pack")) if nr[k]]
         had = "had no ruling when it was decided" if tot == 1 else "had no ruling when they were decided"
-        out.append(f"{agent}: {_n(tot, 'strict call', 'strict calls')} {had}: " + ", ".join(p))
+        out.append(f"{agent}: {_n(tot, 'protected call', 'protected calls')} {had}: " + ", ".join(p))
     if j["ran_after_block"]:
         k = len(j["ran_after_block"])
         out.append(f"{agent}: {_n(k, 'call', 'calls')} ran after a block: seq " + ", ".join(str(s) for s in j["ran_after_block"]))
+    if j["withheld"]:
+        k = len(j["withheld"])
+        out.append(f"{agent}: {_n(k, 'tool result', 'tool results')} withheld from the agent: seq " + ", ".join(str(s) for s in j["withheld"]))
     if j["rule_sets"]:
         out.append(f"{agent}: rule sets used: " + ", ".join(f"local {x['hash'][:8]}" if x["set"] == "local" else f"{x['set']} version {x['version']}" for x in j["rule_sets"]))
     return out

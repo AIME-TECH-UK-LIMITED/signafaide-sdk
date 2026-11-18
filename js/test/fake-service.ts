@@ -52,6 +52,21 @@ export class FakeService {
   rulingError: string | null = null;
   /** record_hash -> [disclosed, disclosed_salt] the witness received. */
   disclosed = new Map<string, [any, string]>();
+  /** Spec 1.1: device sign-ins (device_code -> state), person sessions, and how each rule set
+   * version was published. */
+  devices = new Map<string, { user_code: string; status: string; polls: number }>();
+  sessions = new Map<string, { email: string; org: string; roles: Record<string, string> }>();
+  published: { project: string; version: number; how: string; who: string | null }[] = [];
+  auditorLinks: any[] = [];
+  /** A console page: POST /v1/rules with a session answers 202 `{confirm_in_console: <it>}`. */
+  confirmInConsole: string | null = null;
+  /** A witness without POST /v1/auditor-links answers not_found. */
+  auditorLinksOff = false;
+  /** The plan's longest auditor link (plan_required above it), and whether the refusal says it as max_days. */
+  auditorMaxDays: number | null = null;
+  auditorMaxInBody = true;
+  /** A witness of before agent_keys and head: bad_request when they are sent. */
+  auditorLinksNoKeys = false;
   private ifNoneMatch?: string;
   url = "";
   private server = http.createServer((req, res) => void this.handle(req, res));
@@ -123,12 +138,67 @@ export class FakeService {
         },
       ];
     }
+    if (method === "POST" && path === "/v1/device/code") {
+      const n = this.devices.size + 1;
+      const device_code = `dev${String(n).padStart(40, "0")}`;
+      const user_code = `BCDF-${"GHJK".slice(0, 4)}`;
+      this.devices.set(device_code, { user_code, status: "pending", polls: 0 });
+      return [200, { device_code, user_code, verification_uri: `${this.url}/app/device`, verification_uri_complete: `${this.url}/app/device?code=${user_code}`, expires_in: 600, interval: 5 }];
+    }
+    if (method === "POST" && path === "/v1/device/token") {
+      const d = this.devices.get(body?.device_code);
+      if (!d) return [200, { status: "expired" }];
+      d.polls++;
+      if (d.status === "approved") {
+        d.status = "used";
+        const session = "sfa_user_" + String(this.sessions.size + 1).padStart(32, "0");
+        this.sessions.set(session, { email: "owner@example.test", org: "Example Org", roles: this.pendingRoles });
+        return [200, { status: "approved", session, expires_at: new Date(Date.now() + 12 * 3600_000).toISOString(), person: { email: "owner@example.test" }, organisation: { name: "Example Org" } }];
+      }
+      if (d.status === "used") return [200, { status: "expired" }];
+      return [200, { status: d.status }];
+    }
     if (method === "POST" && path === "/v1/events") {
       this.events.push(body.name);
       return [200, {}];
     }
-    const prj = this.projects.get((auth ?? "").replace(/^Bearer /, ""));
+    const bearer = (auth ?? "").replace(/^Bearer /, "");
+    const person = this.sessions.get(bearer);
+    if (person) {
+      if (method === "GET" && path === "/v1/session") {
+        // §6: the projects the person can see, with their role in each (owner, admin or developer).
+        const projects = [...this.projects.values()].filter((p) => p.project in person.roles).map((p) => ({ project: p.project, name: "Claims", env: p.env, role: person.roles[p.project] }));
+        return [200, { person: { email: person.email }, organisation: { name: person.org }, expires_at: new Date(Date.now() + 3600_000).toISOString(), projects }];
+      }
+      if (method === "DELETE" && path === "/v1/session") {
+        this.sessions.delete(bearer);
+        return [204, ""];
+      }
+      if (method === "POST" && path === "/v1/rules") {
+        const target = [...this.projects.entries()].find(([, p]) => p.project === body.project && p.env === body.env);
+        if (!target) return err(404, "not_found", "No such project.");
+        if (person.roles[body.project] === "developer" && body.env === "live") return err(401, "invalid_key", "Only an admin publishes a live rule set.");
+        // §6: loosening a live project's rules from the command line waits for a person in the console.
+        if (this.confirmInConsole !== null) return [202, { confirm_in_console: this.confirmInConsole }];
+        return this.publishDraft(target[0], body, "session", person.email);
+      }
+      return err(401, "invalid_key", "A person session is not an API key.");
+    }
+    const prj = this.projects.get(bearer);
     if (!prj) return err(401, "invalid_key", "The API key is not valid; run `signafaide init` for a new sandbox key.");
+    if (method === "POST" && path === "/v1/rules") {
+      // An API key publishes only into its own sandbox while it is unclaimed (§6).
+      if (prj.env !== "test" || prj.claimed || body.project !== prj.project || body.env !== prj.env) return err(401, "invalid_key", "An API key cannot publish rules; sign in with `signafaide login`.");
+      return this.publishDraft(bearer, body, "sandbox_key", null);
+    }
+    if (method === "POST" && path === "/v1/auditor-links") {
+      if (this.auditorLinksOff) return err(404, "not_found", "No such route.");
+      if (this.auditorMaxDays !== null && body.days > this.auditorMaxDays)
+        return err(402, "plan_required", `An auditor link of an unclaimed sandbox expires within ${this.auditorMaxDays} days: ask for fewer days, or claim the sandbox in the console.`, this.auditorMaxInBody ? { max_days: this.auditorMaxDays } : {});
+      if (this.auditorLinksNoKeys && ("agent_keys" in body || "head" in body)) return err(400, "bad_request", "Unknown field agent_keys.");
+      this.auditorLinks.push(body);
+      return [201, { url: `${this.url}/audit/aud_${this.auditorLinks.length}`, expires_at: new Date(Date.now() + body.days * 86_400_000).toISOString(), ...("agent_keys" in body ? { agent_keys: true } : {}) }];
+    }
     // As the service: `expires_at` only while the sandbox is unclaimed.
     if (method === "GET" && path === "/v1/project") {
       return [200, { project: prj.project, env: prj.env, claimed: !!prj.claimed, name: prj.name ?? null, ...(prj.expires_at && !prj.claimed ? { expires_at: prj.expires_at } : {}) }];
@@ -302,6 +372,30 @@ export class FakeService {
     return item;
   }
 
+  /** POST /v1/rules (§6, spec 1.1): check `after` and the whole document, then sign it. */
+  private publishDraft(apiKey: string, body: any, how: string, who: string | null): Reply {
+    const prj = this.projects.get(apiKey);
+    const items = this.ruleItems.get(prj.project) ?? [];
+    const newest = items.at(-1)?.rules.version ?? null;
+    if ((body.after ?? null) !== newest) return err(400, "bad_request", "Someone published meanwhile: fetch the rule set, merge and try again.");
+    const d = body.draft ?? {};
+    const item = this.publishRules(apiKey, d.rules, { mode: d.mode, default: d.default, fail: d.fail, addresses: d.addresses, approved: d.approved, fingerprintExceptions: d.fingerprint_exceptions });
+    const bad = C.ruleSetErrors(item.rules);
+    if (bad) {
+      items.pop();
+      return err(400, "bad_request", `The rule set is not valid: ${bad}`);
+    }
+    this.published.push({ project: prj.project, version: item.rules.version, how, who });
+    return [201, item];
+  }
+
+  /** Approve (or refuse) the device sign-in of `userCode`, as a person on the console page does. */
+  answerDevice(status: "approved" | "denied" = "approved", roles: Record<string, string> = {}): void {
+    for (const d of this.devices.values()) if (d.status === "pending") d.status = status;
+    this.pendingRoles = roles;
+  }
+  private pendingRoles: Record<string, string> = {};
+
   /** Publish an update of the shared fingerprint list (§11.2). */
   listUpdate(add: any[] = [], remove: any[] = []): void {
     const k = (e: any): string => `${e.kind} ${e.fingerprint}`;
@@ -348,7 +442,7 @@ export class FakeService {
     const excepted = new Set((doc?.fingerprint_exceptions ?? []).map((e: any) => `${e.kind} ${e.fingerprint}`));
     const hit = ["tool", "description", "server"].some((k) => ch.tool[k] && listed.has(`${k} ${ch.tool[k]}`) && !excepted.has(`${k} ${ch.tool[k]}`));
     let missing: string[] = [];
-    let res: { result: string; basis: string; matched: string[] };
+    let res: { result: string; basis: string; matched: string[]; would_block?: string[]; not_calibrated?: string[]; excepted?: string[] };
     let mode = "enforce";
     let rules: any = null;
     if (!doc) res = hit ? { result: "block", basis: "fingerprint", matched: [] } : { result: "allow", basis: "default", matched: [] };
@@ -360,7 +454,7 @@ export class FakeService {
       if (client && client.version > doc.version) res = { result: "block", basis: "rules_version", matched: [] };
       else if (missing.length) res = { result: "block", basis: "fields_missing", matched: [] };
       else if (hit) res = { result: "block", basis: "fingerprint", matched: [] };
-      else res = C.evaluate(doc, env.agent, env.name, (p) => (p in values ? values[p] : C.ABSENT), () => 0);
+      else res = C.evaluate(doc, env.agent, env.name, (p) => (p in values ? values[p] : C.ABSENT), () => 0, (p) => ch.disclosed.includes(p));
     }
     const g: any = {
       v: 1,
@@ -377,6 +471,8 @@ export class FakeService {
       reason: `${res.result === "allow" ? "Allowed" : "Blocked"} (${res.basis}).`,
     };
     if (mode === "watch") g.enforce_ruling = res.result;
+    // Spec 1.1: what else the evaluation found, each only when not empty.
+    if (["error", "rule", "default"].includes(res.basis)) for (const k of ["would_block", "not_calibrated", "excepted"]) if ((res as any)[k]?.length) g[k] = (res as any)[k];
     return g;
   }
 
@@ -399,6 +495,8 @@ export class FakeService {
       heads: [...agents].filter((a) => prj.heads.has(a)).map((a) => prj.heads.get(a)),
       records: recs,
       anchors: [],
+      // The signed rule set versions (§7): every version this project holds, in version order.
+      ...((this.ruleItems.get(prj.project) ?? []).length ? { rule_sets: [...(this.ruleItems.get(prj.project) ?? [])] } : {}),
       export_sig: "",
     });
   }

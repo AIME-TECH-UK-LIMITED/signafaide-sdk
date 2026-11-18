@@ -5,9 +5,9 @@
 return a :class:`Report` with the same check ids, statuses, text and JSON as
 the reference verifier (``signafaide-verify``).
 
-The drand BLS12-381 signature (check 9) is checked with ``py_ecc`` (a dependency, as
-``@noble/curves`` is for the TypeScript SDK), so both SDKs count the same checks; if it cannot be
-imported the check says ``DRAND_NOT_CHECKED``, never pass.
+The drand BLS12-381 signature (check 9) is checked with ``py_ecc``, from the ``bls`` extra
+(``pip install 'signafaide[bls]'``); it is the only check that needs it. Without it the check says
+``DRAND_NOT_CHECKED``, never pass.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import ots
 from ._plural import plural
-from .checks import accept_rules, agent_checks, asks_for_ruling, checks_lines, disclosed_errors, ruling_errors
+from .checks import accept_rules, agent_checks, asks_for_ruling, checks_lines, disclosed_errors, local_rules_errors, ruling_errors
 from .coverage import coverage as tool_coverage, coverage_lines, telemetry as tool_telemetry, telemetry_lines
 from .bitcoin import check_header
 from .crypto import HEX64, b64url, b64url_decode, check_content, hash_json, key_id, sha256_hex, verify_inclusion, verify_sig
@@ -63,8 +63,8 @@ MAX_ROUND = (253_402_300_799 - QUICKNET_GENESIS) // 3 + 1
 ANCHOR_WINDOW_MS = 7_200_000
 #: Where keys came from, when not from an independent source (§7 result line).
 INDEPENDENT, FROM_PACK, PLAIN_HTTP = "independent", "taken from the pack", "fetched over plain http"
-#: py_ecc is a dependency (about 23 MB with its own); if it cannot be imported, say so plainly.
-DRAND_NOT_CHECKED = "drand: not checked (BLS library not installed; pip install py_ecc)"
+#: py_ecc comes with the ``bls`` extra (about 23 MB with its own); without it, say so plainly.
+DRAND_NOT_CHECKED = "drand: not checked (BLS library not installed; pip install 'signafaide[bls]')"
 
 
 class KeysRequired(ValueError):
@@ -209,6 +209,9 @@ class Report:
     #: Tool-call checks per agent (§7; per chain for local state), for agents with a line: what
     #: the checks of the agent's records found and the rulings on their receipts. A report, never a failure.
     tool_checks: Dict[str, dict] = field(default_factory=dict)
+    #: Rules in words (§7, §10.5, spec 1.1): each valid ``rule_sets`` entry, then each valid
+    #: ``local_rules`` entry, in pack order. A report, never a failure.
+    rules: List[dict] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -239,6 +242,12 @@ class Report:
         """The tool-call checks report in words (§7), agent by agent."""
         return [line for agent, j in self.tool_checks.items() for line in checks_lines(agent, j)]
 
+    def rules_lines(self) -> List[str]:
+        """The rules in words (§7, §10.5), rule set by rule set."""
+        from .words import rule_set_lines
+
+        return [line for w in self.rules for line in rule_set_lines(w)]
+
     def lines(self) -> List[str]:
         out = list(self.notes)
         if self.project and self.env:
@@ -257,6 +266,7 @@ class Report:
         out += [f"coverage: {line}" for line in self.coverage_lines()]
         out += [f"telemetry: {line}" for line in self.telemetry_lines()]
         out += [f"tool-call checks: {line}" for line in self.tool_checks_lines()]
+        out += [f"rules: {line}" for line in self.rules_lines()]
         out += self.after
         out += [f"BLOCKED {b}" for b in self.blocked]
         out.append(self.result_line)
@@ -270,7 +280,11 @@ class Report:
             counts = f"{plural(len(self.blocked), 'chain')} cannot ship ({', '.join(b.split(':')[0] for b in self.blocked)}); {counts}"
         elif self.not_sent:
             counts = f"{plural(self.not_sent, 'record')} not sent yet (--fail-on-pending-send); {counts}"
-        return result_line(self.result, self.sources[0], self.sources[1], self.by_service, scope, counts)
+        line = result_line(self.result, self.sources[0], self.sources[1], self.by_service, scope, counts)
+        # Nothing co-signed yet: the scope leads, so a PASS pasted elsewhere never reads stronger than it is.
+        if self.nothing_cosigned and self.result == "PASS" and scope is None:
+            line = "PASS (local checks only)" + line[len("PASS"):]
+        return line
 
     def __str__(self) -> str:
         return "\n".join(self.lines())
@@ -290,6 +304,7 @@ class Report:
             "coverage": self.coverage,
             "telemetry": self.telemetry,
             "tool_call_checks": self.tool_checks,
+            "rules": self.rules,
             **({"not_yet": self.after} if self.after else {}),
             **({"blocked": self.blocked} if self.blocked else {}),
         }
@@ -489,11 +504,12 @@ def verify_pack(
                   generated=pack["generated"], export_sig=pack["export_sig"])
     v.project_name = pack.get("project_name")
     v.rule_sets = pack.get("rule_sets")
+    v.local_rules = pack.get("local_rules")
     checks = v.run(pack["records"], pack["anchors"])
     return Report(checks, pack["project"], pack["env"], len(pack["records"]), warnings, independent=independent, generated=pack["generated"],
                   filter=pack["filter"], sources=(service_src, agent_src), by_service=by_service,
                   project_name=pack.get("project_name") if isinstance(pack.get("project_name"), str) else None, coverage=v.coverage, telemetry=v.telemetry,
-                  tool_checks=v.tool_checks)
+                  tool_checks=v.tool_checks, rules=v.rules)
 
 
 def _earliest(a: Optional[str], b: Optional[str]) -> Optional[str]:
@@ -577,7 +593,7 @@ def _pack_errors(pack: Any) -> Optional[str]:
     for k in fields:
         if k not in pack:
             return f"missing field `{k}`"
-    extra = sorted(set(pack) - set(fields) - {"project_name", "rule_sets"})
+    extra = sorted(set(pack) - set(fields) - {"project_name", "rule_sets", "local_rules"})
     if extra:
         return f"unknown field `{extra[0]}`"
     if "project_name" in pack:
@@ -591,6 +607,8 @@ def _pack_errors(pack: Any) -> Optional[str]:
         return "`export_sig` must be a string"
     if "rule_sets" in pack and not isinstance(pack["rule_sets"], list):
         return "`rule_sets` must be a list"
+    if "local_rules" in pack and not isinstance(pack["local_rules"], list):
+        return "`local_rules` must be a list"
     if pack["env"] not in ("test", "live"):
         return "env must be test or live"
     if not valid_project_id(pack["project"]):
@@ -698,6 +716,7 @@ class _Acc:
 class _Verifier:
     project_name: Optional[str] = None
     rule_sets: Optional[list] = None
+    local_rules: Optional[list] = None
 
     def __init__(self, service_keys, agent_keys, contents, *, project, env, local, local_heads=None, drand=None,
                  filter=None, export_heads=None, client_heads=None, bitcoin=None, not_independent=False, generated=None, export_sig=None,
@@ -730,6 +749,7 @@ class _Verifier:
         self.coverage: Dict[str, dict] = {}  # tool coverage per chain (§7), filled by run
         self.telemetry: Dict[str, dict] = {}  # telemetry notes per chain (§7), filled by run
         self.tool_checks: Dict[str, dict] = {}  # tool-call checks per chain (§7), filled by run
+        self.rules: List[dict] = []  # rules in words (§7), filled by check 8
         self.drafts = 0  # local drafts waiting for the project (§8): not a reason for "no records"
         self.chain_of: Dict[int, str] = {}  # id(record) -> chain id (local state)
         self.acc = [_Acc() for _ in CHECKS]
@@ -1372,7 +1392,42 @@ class _Verifier:
             doc = e["rules"]
             if any(v == doc["version"] for _, v in held):
                 acc.fail(item, f"two rule_sets entries hold version {doc['version']}")
-            held[(doc["set"], doc["version"])] = hash_json(doc)
+            h = hash_json(doc)
+            held[(doc["set"], doc["version"])] = h
+            from .words import rule_set_words
+
+            self.rules.append(rule_set_words(doc, h, False))
+        # The local rules a client added (spec 1.1): each the rules object of a hash that a
+        # record of the pack names in its checks.rules.
+        named_local = {x.get("hash") for _, r, _ in self.recs for x in ((r["envelope"].get("checks") or {}).get("rules") or [])
+                       if isinstance(x, dict) and x.get("set") == "local"}
+        seen_local: set = set()
+        for i, e in enumerate(self.local_rules or []):
+            item = f"local_rules[{i}]"
+            acc.checked += 1
+            if not isinstance(e, dict) or set(e) != {"hash", "rules"} or not isinstance(e["hash"], str):
+                acc.fail(item, "a local_rules entry is {hash, rules}")
+                continue
+            bad = "rules must be {default, rules}" if e["rules"] is None else local_rules_errors(e["rules"])
+            if bad:
+                acc.fail(item, f"not valid local rules: {bad}")
+                continue
+            try:
+                h = hash_json(e["rules"])
+            except (ValueError, TypeError) as err:
+                acc.fail(item, f"not valid local rules: {err}")
+                continue
+            if h != e["hash"]:
+                acc.fail(item, "the local rules do not hash to the entry's hash")
+            elif h not in named_local:
+                acc.fail(item, "no record of the pack names these local rules in its checks.rules")
+            elif h in seen_local:
+                acc.fail(item, "two local_rules entries hold the same rules")
+            else:
+                seen_local.add(h)
+                from .words import rule_set_words
+
+                self.rules.append(rule_set_words(e["rules"], h, True))
         for label, r, _ in self.recs:
             named = list((r["envelope"].get("checks") or {}).get("rules") or [])
             g = (r.get("receipt") or {}).get("ruling")

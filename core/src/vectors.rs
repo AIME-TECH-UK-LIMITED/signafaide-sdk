@@ -430,6 +430,7 @@ fn build_with(mode: Build, contents: Vec<Sample>) -> Fixture {
         records: pack_records,
         anchors: vec![serde_json::to_value(&anchor).unwrap()],
         rule_sets: None,
+        local_rules: None,
         export_sig: String::new(),
     })
     .unwrap();
@@ -724,6 +725,8 @@ pub fn tampered_packs() -> Vec<(&'static str, &'static str, Value, Inputs)> {
             p["records"][0]["disclosed"]["/amount"] = json!(300);
             p
         }, none()),
+        ("head_sig", "spec 1.1: local rules changed after the decision named their hash", checks_vectors::checks_pack(PackTamper::LocalRulesChanged), none()),
+        ("head_sig", "spec 1.1: local rules that no record of the pack names", checks_vectors::checks_pack(PackTamper::LocalRulesUnnamed), none()),
     ]
 }
 
@@ -910,8 +913,10 @@ pub fn variants() -> Vec<(&'static str, Value, Inputs)> {
         ("two agents: one declared its tools, the other did not", two_declared, two_agent_keys()),
         ("telemetry notes: tools recorded from sampled telemetry spans, decisions written before, after and both", telemetry_notes, none()),
         ("telemetry notes: sampling that follows the caller, one tool with its decision written before the tool ran; a decision named like a telemetry note is not one", telemetry_before, none()),
-        ("tool-call checks: a strict call ruled allow by the witness, its outcome, the rule set version and the disclosed values", checks_vectors::checks_pack(PackTamper::Valid), none()),
+        ("tool-call checks: a protected call ruled allow by the witness, its outcome, the rule set version and the disclosed values", checks_vectors::checks_pack(PackTamper::Valid), none()),
         ("tool-call checks: the pack an auditor link gives, without the disclosed values", checks_vectors::checks_pack(PackTamper::NoDisclosed), none()),
+        ("spec 1.1: the local rules the decision names, added by the client, shown in words", checks_vectors::checks_pack(PackTamper::LocalRules), none()),
+        ("spec 1.1: rule set version 3 with On and Calibrating rules and an exception; the ruling names a Calibrating rule that would have blocked", checks_vectors::checks_pack(PackTamper::Calibrating), none()),
     ]
 }
 
@@ -971,6 +976,8 @@ fn expected(report: &verify::Report) -> Value {
            "telemetry": report.telemetry, "telemetry_lines": report.telemetry_lines()});
     out["tool_call_checks"] = json!(report.tool_checks);
     out["tool_call_checks_lines"] = json!(report.tool_checks_lines());
+    out["rules"] = json!(report.rules);
+    out["rules_lines"] = json!(report.rules_lines());
     out
 }
 

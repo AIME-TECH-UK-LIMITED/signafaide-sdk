@@ -684,4 +684,5 @@ def test_checks_in_watch_mode_only_and_never_strict(local_recorder, project):
     assert all(e["mode"] == "watch" for e in ch["results"])
     assert next(e for e in ch["results"] if e["check"] == "address") == {"check": "address", "result": "note", "mode": "watch", "enforce_result": "block", "found": ["loopback"]}
     assert outcome["envelope"]["checks"] == {"ran": True, "ruling": "not_asked", "result": "note",
-                                             "results": [{"check": "hidden_instruction", "result": "note", "mode": "watch", "enforce_result": "note", "found": ["instruction_phrase"]}]}
+                                             "results": [{"check": "secret", "result": "allow", "mode": "watch", "enforce_result": "allow", "found": []},
+                                                         {"check": "hidden_instruction", "result": "note", "mode": "watch", "enforce_result": "note", "found": ["instruction_phrase", "possible_hidden_instruction"]}]}

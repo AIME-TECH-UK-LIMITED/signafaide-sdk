@@ -16,7 +16,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { SECTION_END, SECTION_START, claudeSkill, cursorRule, instructionsSection } from "./skill.js";
+import { NOTE, SECTION_END, SECTION_START, claudeSkill, cursorRule, instructionsSection } from "./skill.js";
 import { detectAgent } from "./telemetry.js";
 import { VERSION } from "./version.js";
 
@@ -34,6 +34,8 @@ export interface Ctx {
   dryRun: boolean;
   /** A self-hosted witness: written as SIGNAFAIDE_URL into each MCP entry's env. */
   url?: string;
+  /** false: the person said no to the project note, so CLAUDE.md and AGENTS.md are left as they are. */
+  note?: boolean;
 }
 
 /** Printed after `agent setup`: what is sent, what stays, and how to opt in. */
@@ -44,8 +46,8 @@ export function SETUP_NOTES(url?: string): string[] {
     url
       ? `witness: ${url} (SIGNAFAIDE_URL in each MCP entry); it needs an API key from that instance, or \`signafaide init\` against it`
       : "witness: https://api.signafaide.co.uk by default; a self-hosted witness (Enterprise contract) is set with --url <witness url> (https://signafaide.co.uk/docs/self-host)",
-    "strict mode: wrap tools that move money, freeze, delete or send with strict: true (strict=True in Python), so they run only once the witness has co-signed the decision",
-    "for an auditor: a live key, agent keys in a secret store (signafaide keys create --agent <name> --env live --print), an auditor link with the keys and head.json attached, and the verification report for the period",
+    "protect: run `npx signafaide protect` in your terminal: it finds the tools that pay, delete or send, asks what to block (On or Calibrating), writes protect(...) into the code and saves your rules; in code, protect(fn) (or `strict: true`, `strict=True` in Python) protects a tool, which then runs only once signafAIde allows it",
+    "for an auditor: `signafaide prove <tool>` prints the auditor link; for production, a live key, agent keys in a secret store (signafaide keys create --agent <name> --env live --print) and the verification report for the period",
     "agent names: give each agent an explicit name, e.g. wrapTools(tools, { agent: \"claims-bot\" }) or wrap_tools(tools, agent=\"claims-bot\"); otherwise the folder name is used. Production set-up: https://signafaide.co.uk/docs/production",
   ];
 }
@@ -134,9 +136,17 @@ export function mergeJson(ctx: Ctx, file: string, key: string, entry: object): C
   return write(ctx, file, JSON.stringify(doc, null, 2) + "\n");
 }
 
-/** Put the marked signafAIde section in a Markdown file: replaced in place if present, else appended. */
-export function mergeSection(ctx: Ctx, file: string): Change {
-  const section = instructionsSection(ctx.url);
+/** The project note as a marked block (spec: one paragraph and three lines; see NOTE). */
+export function noteSection(): string {
+  return `${SECTION_START}\n${NOTE.trim()}\n${SECTION_END}\n`;
+}
+
+/** The note's first sentence: a file that holds it outside a marked block already has the note. */
+const NOTE_KEY = NOTE.split("\n")[2].split(". ")[0];
+
+/** Put a marked signafAIde section in a Markdown file: replaced in place if present, else appended.
+ * Never twice: a file that already holds the note's text without the markers is left as it is. */
+export function mergeSection(ctx: Ctx, file: string, section: string = instructionsSection(ctx.url)): Change {
   const prev = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   const a = prev.indexOf(SECTION_START);
   const b = prev.indexOf(SECTION_END, a);
@@ -145,11 +155,58 @@ export function mergeSection(ctx: Ctx, file: string): Change {
     let end = b + SECTION_END.length;
     if (prev[end] === "\n") end++;
     next = prev.slice(0, a) + section + prev.slice(end);
+  } else if (prev.includes(NOTE_KEY)) {
+    return { file: shortPath(ctx, file), result: "unchanged" };
   } else {
     next = prev ? prev.replace(/\n*$/, "\n\n") + section : section;
   }
   return write(ctx, file, next);
 }
+
+/** The note in an instructions file the person may decline (`agent setup` asks at a terminal). */
+function noteIn(ctx: Ctx, file: string): Change {
+  if (ctx.note === false) return { file: shortPath(ctx, file), result: "left as it is (you said no to the note)" };
+  return mergeSection(ctx, file, noteSection());
+}
+
+/** The files the note goes in for `protect` and `init`: the project's AGENTS.md and CLAUDE.md
+ * that exist, or a new AGENTS.md when neither does. */
+export const NOTE_FILES = ["AGENTS.md", "CLAUDE.md"];
+export function noteFiles(root: string): string[] {
+  const have = NOTE_FILES.filter((f) => fs.existsSync(path.join(root, f)));
+  return (have.length ? have : ["AGENTS.md"]).map((f) => path.join(root, f));
+}
+
+/** Claude Code's import line: a CLAUDE.md that holds it reads AGENTS.md, so it has the note too. */
+export const CLAUDE_IMPORT = "@AGENTS.md";
+const importsAgents = (file: string): boolean => path.basename(file) === "CLAUDE.md" && fs.existsSync(file) && fs.readFileSync(file, "utf8").split(/\r?\n/).some((l) => l.trim() === CLAUDE_IMPORT);
+
+/** `protect` and `init`: add the note to the project's instructions files, after asking. Returns
+ * what changed; a file that already has the note is not asked about. When there is no instructions
+ * file at all, AGENTS.md is created with the note and CLAUDE.md with just `@AGENTS.md`, so Claude
+ * Code reads the same note; a CLAUDE.md that exists gets the note block itself (never twice). */
+export async function offerNote(root: string, prompt: { confirm(q: string, def: boolean): Promise<boolean> }, out: (s: string) => void): Promise<Change[]> {
+  const ctx: Ctx = { root: path.resolve(root), home: os.homedir(), env: process.env, dryRun: true };
+  const files = noteFiles(ctx.root);
+  const fresh = !NOTE_FILES.some((f) => fs.existsSync(path.join(ctx.root, f)));
+  const todo = files.filter((f) => !importsAgents(f) && mergeSection(ctx, f, noteSection()).result !== "unchanged");
+  const claude = path.join(ctx.root, "CLAUDE.md");
+  if (fresh && todo.length) todo.push(claude);
+  if (!todo.length) return [];
+  const names = todo.map((f) => path.relative(ctx.root, f)).join(" and ");
+  out(`Agents     ${names}: a short marked block that tells coding agents to protect the tools that pay, delete, send, run commands or push code, and how.`);
+  if (!(await prompt.confirm(`${NOTE_QUESTION} ${names}?`, true))) {
+    out("           Not added; run this command again to add it.");
+    return [];
+  }
+  return todo.map((f) => (f === claude && fresh ? write({ ...ctx, dryRun: false }, f, `${CLAUDE_IMPORT}\n`) : mergeSection({ ...ctx, dryRun: false }, f, noteSection())));
+}
+
+/** What a file `offerNote` wrote holds, in words: a CLAUDE.md made new holds only the import. */
+export const noteWhat = (c: Change, the = false): string => (c.file === "CLAUDE.md" && c.result === "created" ? `just ${CLAUDE_IMPORT}, so Claude Code reads the same note` : (the ? "the " : "") + "signafAIde note for coding agents (a marked block)");
+
+/** The question that adds the note (a scripted prompter with no answer left takes its default). */
+export const NOTE_QUESTION = "Add the signafAIde note to";
 
 const tomlString = (s: string): string => JSON.stringify(s);
 
@@ -231,7 +288,8 @@ export const AGENTS: Agent[] = [
       mergeJson(c, path.join(c.root, ".mcp.json"), "mcpServers", entry(c, { type: "stdio" }, true)),
       write(c, path.join(c.root, ".claude", "skills", "signafaide", "SKILL.md"), claudeSkill(c.url)),
       // Claude Code reads CLAUDE.md as the project's instructions; the skill alone is read as a file.
-      mergeSection(c, path.join(c.root, "CLAUDE.md")),
+      // The short note there, not the whole skill: the 18 Nov pick-rate runs adopted it 10 of 16 times, the skill 0.
+      noteIn(c, path.join(c.root, "CLAUDE.md")),
     ],
   },
   {
@@ -243,7 +301,7 @@ export const AGENTS: Agent[] = [
         ["CODEX_HOME", !!c.env.CODEX_HOME],
         ["~/.codex", inHome(c, ".codex")],
       ]),
-    install: (c) => [mergeToml(c, path.join(c.env.CODEX_HOME || path.join(c.home, ".codex"), "config.toml")), mergeSection(c, path.join(c.root, "AGENTS.md"))],
+    install: (c) => [mergeToml(c, path.join(c.env.CODEX_HOME || path.join(c.home, ".codex"), "config.toml")), noteIn(c, path.join(c.root, "AGENTS.md"))],
   },
   {
     id: "cursor",
@@ -294,7 +352,7 @@ export const AGENTS: Agent[] = [
         [".windsurf/ or .devin/ in the project", inProject(c, ".windsurf") || inProject(c, ".devin")],
         ["~/.codeium/windsurf", inHome(c, ".codeium/windsurf")],
       ]),
-    install: (c) => [mergeJson(c, path.join(c.root, ".devin", "mcp_config.json"), "mcpServers", entry(c)), mergeSection(c, path.join(c.root, "AGENTS.md"))],
+    install: (c) => [mergeJson(c, path.join(c.root, ".devin", "mcp_config.json"), "mcpServers", entry(c)), noteIn(c, path.join(c.root, "AGENTS.md"))],
   },
 ];
 
@@ -327,8 +385,8 @@ export interface SetupResult {
  * Install for the named agents (`all` for every one), or for every detected agent.
  * Throws on an unknown name.
  */
-export function setup(opts: { root: string; agents?: string[]; dryRun?: boolean; env?: Record<string, string | undefined>; home?: string; url?: string }): SetupResult[] {
-  const ctx: Ctx = { root: path.resolve(opts.root), home: opts.home ?? os.homedir(), env: opts.env ?? process.env, dryRun: !!opts.dryRun, url: witnessUrl(opts.url) };
+export function setup(opts: { root: string; agents?: string[]; dryRun?: boolean; env?: Record<string, string | undefined>; home?: string; url?: string; note?: boolean }): SetupResult[] {
+  const ctx: Ctx = { root: path.resolve(opts.root), home: opts.home ?? os.homedir(), env: opts.env ?? process.env, dryRun: !!opts.dryRun, url: witnessUrl(opts.url), note: opts.note };
   let chosen: { agent: Agent; reason: string }[];
   if (opts.agents?.length) {
     const ids = opts.agents.flatMap((a) => a.split(",")).map((a) => a.trim().toLowerCase()).filter(Boolean);

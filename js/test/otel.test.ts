@@ -774,7 +774,10 @@ describe("signafaide/otel: tool-call checks (spec §8)", () => {
       ran: true,
       ruling: "not_asked",
       result: "note",
-      results: [{ check: "hidden_instruction", result: "note", mode: "watch", enforce_result: "note", found: ["instruction_phrase"] }],
+      results: [
+        { check: "secret", result: "allow", mode: "watch", enforce_result: "allow", found: [] },
+        { check: "hidden_instruction", result: "note", mode: "watch", enforce_result: "note", found: ["instruction_phrase", "possible_hidden_instruction"] },
+      ],
     });
   });
 });

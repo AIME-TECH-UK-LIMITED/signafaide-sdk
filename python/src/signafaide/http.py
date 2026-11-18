@@ -141,6 +141,36 @@ class Client:
         ``{"rules": null}`` without one, or None when *etag* (its ``rules_hash``) is still current."""
         return self.request("GET", "/v1/rules", query={"version": version}, headers={"If-None-Match": f'"{etag}"'} if etag else None)
 
+    def device_code(self, client: str, host: str) -> dict:
+        """§6 (1.1): start a device sign-in. No auth."""
+        return self.request("POST", "/v1/device/code", {"client": client, "host": host}, auth=False)
+
+    def device_token(self, device_code: str) -> dict:
+        """§6 (1.1): poll a device sign-in. Always 200 with ``{status}``. No auth."""
+        return self.request("POST", "/v1/device/token", {"device_code": device_code}, auth=False)
+
+    def session(self) -> dict:
+        """§6 (1.1): who a person session is (the client's key is the session): ``{person, organisation,
+        expires_at, projects: [{project, name, env, role}]}``, ``role`` being ``owner``, ``admin`` or
+        ``developer``."""
+        return self.request("GET", "/v1/session")
+
+    def end_session(self) -> Any:
+        """§6 (1.1): end a person session (``signafaide logout``)."""
+        return self.request("DELETE", "/v1/session")
+
+    def publish_rules(self, body: dict) -> dict:
+        """§6 (1.1): publish the next version of a project's rule set, with a person session or
+        the key of an unclaimed sandbox. Returns ``{rules, sig, service_key_id}``."""
+        return self.request("POST", "/v1/rules", body)
+
+    def auditor_link(self, body: dict) -> dict:
+        """§6 (1.1) ``POST /v1/auditor-links``: a read-only auditor link (``signafaide prove``), body
+        ``{agent, tool?, from?, days, agent_keys?, head?}``, answer ``{url, expires_at, agent_keys?}``
+        (``agent_keys: true`` when the witness keeps the manifest for the auditor's browser check). A
+        witness without it answers ``not_found``, and prove points at files."""
+        return self.request("POST", "/v1/auditor-links", body)
+
     def fingerprints(self, since: Optional[int] = None) -> dict:
         """The shared fingerprint list (§6, §11.2): ``{snapshot, updates}``."""
         return self.request("GET", "/v1/fingerprints", query={"since": since})

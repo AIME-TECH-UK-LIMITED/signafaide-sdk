@@ -603,6 +603,11 @@ pub struct Pack {
     /// each `{rules, sig, service_key_id}`; present when the project has a rule set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule_sets: Option<Vec<Value>>,
+    /// Spec 1.1: the local rules (§8) that records of the pack name, each `{hash, rules}`, added
+    /// by the client that holds them (the service never does). Bound by the agent-signed
+    /// `checks.rules` hashes, not by the export statement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_rules: Option<Vec<Value>>,
     /// The service's signature (domain `export`) over the export statement (§7).
     pub export_sig: String,
 }

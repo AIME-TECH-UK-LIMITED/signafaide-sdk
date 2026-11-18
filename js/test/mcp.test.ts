@@ -240,7 +240,8 @@ describe("mcp server", () => {
     const [py] = await call("signafaide_quickstart", { language: "python", framework: "openai-agents" });
     expect(py).toContain("uv add signafaide");
     expect(py).toContain("python3 -m venv .venv && .venv/bin/python -m pip install signafaide");
-    expect(py).toContain("signafaide.wrap_tools([lookup_order, refund])");
+    expect(py).toContain('signafaide.wrap_tools([lookup_order, refund], agent="<agent name>")');
+    expect(py).toContain("`npx signafaide protect` (Python: `signafaide protect`)");
     const [ts] = await call("signafaide_quickstart", { language: "typescript" });
     expect(ts).toContain("claimId: string");
     expect(ts).toContain("npx signafaide verify");
@@ -262,7 +263,7 @@ describe("mcp server", () => {
     expect(out).toMatch(/Client signatures +PASS +3 records/);
     expect(out).toMatch(/Merkle proofs +NOT CHECKED +0 records; nothing co-signed yet/);
     expect(out).toContain("co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, or self-host");
-    expect(out.split("\n").at(-1)).toBe("PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)");
+    expect(out.split("\n").at(-1)).toBe("PASS (local checks only): 4 of 12 checks passed, 8 not checked (nothing co-signed yet)");
     expect(ctx.service.calls).toEqual([]);
     await call("signafaide_init", AGREED);
     [out] = await call("signafaide_verify");
@@ -296,17 +297,17 @@ describe("mcp server", () => {
 
   it("explain_ruling and show_rules: a pack's ruling, never a disclosed value", async () => {
     const v = parseJson(fs.readFileSync(path.join(__dirname, "../../spec/vectors.json"), "utf8"));
-    const c = v.variants.find((x: any) => x.name.startsWith("tool-call checks: a strict call ruled allow"));
+    const c = v.variants.find((x: any) => x.name.startsWith("tool-call checks: a protected call ruled allow"));
     write("pack.json", JSON.stringify(c.pack));
     const hash: string = c.pack.records[0].receipt.record_hash;
     for (const id of [hash, hash.slice(0, 10), c.pack.records[1].receipt.record_hash]) {
       const [out, err] = await call("signafaide_explain_ruling", { record: id, pack: "pack.json" });
       expect(err, id).toBe(false);
-      expect(out).toContain("ruling: allow (enforce mode)");
+      expect(out).toContain("ruling: allow (On)");
       expect(out).toContain("basis: rule; matched rules: known-payee");
       expect(out).toContain("rule set: rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 2");
       expect(out).toContain("disclosed fields: /amount, /currency, /payee/country, /payee/id (values are not shown)");
-      expect(out).toContain("rule known-payee: allow");
+      expect(out).toContain("rule known-payee: Allow ");
       for (const value of ["acct_7", "GBP", "\"amount\""]) expect(out).not.toContain(value);
     }
     let [out, err] = await call("signafaide_explain_ruling", { record: "0".repeat(16), pack: "pack.json" });
@@ -327,9 +328,9 @@ describe("mcp server", () => {
     expect(out).toContain("rule set: none held");
     await ctx.rec.checks.pullRules();
     [out] = await call("signafaide_show_rules");
-    expect(out).toContain("version 1, enforce mode, default allow");
-    expect(out).toContain("limit: block (tools pay; every agent) when /amount gt 1000: Big payouts.");
-    expect(out).toContain("strict tool pay: fail closed; discloses no field; the rule set needs /amount");
+    expect(out).toContain("version 1, On, default allow");
+    expect(out).toContain("limit: Block pay when amount is above 1,000 (On). Big payouts.");
+    expect(out).toContain("protected tool pay: if signafAIde can't be reached: Stop; discloses no field; the rule set needs /amount");
     expect(out).toContain("Read-only");
     const pay = record(async (_a: { amount: number }) => "paid", { name: "pay" });
     await expect(pay({ amount: 5 })).rejects.toThrow();

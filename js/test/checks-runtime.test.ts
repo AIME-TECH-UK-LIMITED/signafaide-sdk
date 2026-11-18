@@ -82,7 +82,10 @@ describe("tool-call checks, local first", () => {
       ran: true,
       ruling: "not_asked",
       result: "note",
-      results: [{ check: "hidden_instruction", result: "note", mode: "watch", enforce_result: "note", found: ["instruction_phrase"] }],
+      results: [
+        { check: "secret", result: "allow", mode: "watch", enforce_result: "allow", found: [] },
+        { check: "hidden_instruction", result: "note", mode: "watch", enforce_result: "note", found: ["instruction_phrase", "possible_hidden_instruction"] },
+      ],
     });
     expect(envelopeErrors(d.envelope, DRAFT_FIELDS)).toEqual([]);
     expect(envelopeErrors(o.envelope, DRAFT_FIELDS)).toEqual([]);
@@ -162,6 +165,31 @@ describe("tool-call checks, local first", () => {
     })();
   });
 
+  it("local approvals are per server, and an old key belongs to the first server", () => {
+    writeChecks(ctx.root, { mode: "enforce" });
+    const tool = (server: string, description: string, props: Record<string, unknown>) => ({ name: "lookup", description, inputSchema: { type: "object", properties: props }, server });
+    const agent = ctx.rec.defaultAgent;
+    const review = (t: ReturnType<typeof tool>) => ctx.rec.checks.reviewTool(t, agent, "lookup");
+    const file = path.join(ctx.rec.checks.home, "approved", `${agent}.json`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const old = C.toolFingerprints("lookup", "Look up an order.", { type: "object", properties: { id: { type: "string" } } }, null);
+    fs.writeFileSync(file, JSON.stringify({ lookup: { description: old.description, schema: old.schema, at: "2026-01-01T00:00:00Z" } }));
+    const a = tool("alpha", "Look up an order.", { id: { type: "string" } });
+    const b = tool("beta", "Look up a customer.", { email: { type: "string" } });
+    expect(review(a).withhold).toBe(false);
+    let doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    expect(Object.keys(doc)).toEqual(['["alpha","lookup"]']);
+    expect(doc['["alpha","lookup"]'].at).toBe("2026-01-01T00:00:00Z"); // migrated, not re-approved
+    expect(review(b).withhold).toBe(false); // its own approval, no clash with alpha's
+    expect(review(a).withhold).toBe(false);
+    doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    expect(Object.keys(doc).sort()).toEqual(['["alpha","lookup"]', '["beta","lookup"]']);
+    expect(review(tool("alpha", "Look up an order.", { id: { type: "string" }, cc: { type: "string" } })).withhold).toBe(true);
+    expect(review(b).withhold).toBe(false); // beta is untouched by alpha's change
+    expect(ctx.rec.checks.approve("lookup")).toEqual([agent]);
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({});
+  });
+
   it("strict without a key is no_key", async () => {
     writeChecks(ctx.root, { tools: { pay: { strict: true } } });
     const quiet = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -193,9 +221,9 @@ describe("tool-call checks, local first", () => {
     const [code, out] = await capture(() => main(["init"]));
     expect(code).toBe(0);
     expect(JSON.parse(fs.readFileSync(path.join(ctx.root, "signafaide.checks.json"), "utf8"))).toEqual(C.defaultChecksFile());
-    expect(out).toContain("tool-call checks: on in watch mode");
+    expect(out).toContain("tool-call checks: on, Calibrating");
     const [, again] = await capture(() => main(["init"]));
-    expect(again).toContain("tool-call checks: on, watch mode");
+    expect(again).toContain("tool-call checks: on, Calibrating");
   });
 });
 
@@ -277,7 +305,7 @@ describe("tool-call checks with the witness", () => {
     const r = await verify(null, { offline: true });
     expect(r.check("content").status).toBe("pass");
     expect(r.ok).toBe(true);
-    expect(r.toolChecksLines().join("\n")).toContain("1 strict call ruled by the witness: 1 allowed");
+    expect(r.toolChecksLines().join("\n")).toContain("1 protected call ruled by the witness: 1 allowed");
     expect(String(r)).toContain("tool-call checks: ");
   });
 
@@ -417,8 +445,8 @@ describe("tool-call checks with the witness", () => {
     expect(tested).toContain("/amount");
     const [scode, status] = await capture(() => main(["checks", "status"]));
     expect(scode).toBe(0);
-    expect(status).toContain("watch mode");
-    expect(status).toContain("strict tool pay: fail closed");
+    expect(status).toContain("Calibrating");
+    expect(status).toContain("protected tool pay: if signafAIde can't be reached: Stop");
     expect(status).toContain("needs /amount");
     expect((await capture(() => main(["checks", "approve", "pay"])))[0]).toBe(0);
   });

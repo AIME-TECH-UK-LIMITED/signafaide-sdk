@@ -222,7 +222,12 @@ describe.skipIf(!v)("spec/vectors.json", () => {
       expect(JSON.parse(JSON.stringify(r.toJSON())).tool_call_checks, c.name).toEqual(c.expect.tool_call_checks);
       expect(r.toolChecksLines(), c.name).toEqual(c.expect.tool_call_checks_lines);
       for (const line of c.expect.tool_call_checks_lines) expect(String(r).split("\n"), c.name).toContain(`tool-call checks: ${line}`);
+      // Rules in words (§7, §10.5, spec 1.1): likewise.
+      expect(JSON.parse(JSON.stringify(r.toJSON())).rules, c.name).toEqual(c.expect.rules);
+      expect(r.rulesLines(), c.name).toEqual(c.expect.rules_lines);
+      for (const line of c.expect.rules_lines) expect(String(r).split("\n"), c.name).toContain(`rules: ${line}`);
     }
+    expect(v.variants.filter((c: any) => c.expect.rules_lines.length).length).toBeGreaterThanOrEqual(2);
     expect(v.variants.filter((c: any) => Object.values<any>(c.expect.coverage).some((x) => x.declared_at_seq !== null)).length).toBe(7);
     expect(v.variants.filter((c: any) => Object.keys(c.expect.telemetry).length).length).toBe(2);
     expect(v.variants.filter((c: any) => c.expect.chain_note).length).toBe(3); // an unclean start, a clean restart, a clean restart cut by the window
@@ -259,7 +264,7 @@ describe.skipIf(!v)("spec/vectors.json", () => {
   });
 
   it("tampered packs fail at the expected check", () => {
-    expect(v.tampered.length).toBe(57);
+    expect(v.tampered.length).toBe(59);
     for (const c of v.tampered) {
       const r = verifyPack(c.pack, ...inputs(c, { drand }));
       expect(r.firstFailed(), c.tamper).toBe(c.first_failed);
@@ -274,5 +279,17 @@ describe.skipIf(!v)("spec/vectors.json", () => {
     expect(r.firstFailed()).toBe("schema");
     expect(r.check("schema").failures).toEqual([{ item: "pack", message: NO_RECORDS }]);
     expect(String(r)).toContain("pack: no records");
+  });
+});
+
+describe("the published service keys (SPEC §5, spec 1.1)", () => {
+  it("the npm package ships spec/service-keys.json unchanged, and the SDK pins exactly those keys", async () => {
+    const spec = fs.readFileSync(path.resolve(__dirname, "../../spec/service-keys.json"), "utf8");
+    expect(fs.readFileSync(path.resolve(__dirname, "../service-keys.json"), "utf8")).toBe(spec);
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../package.json"), "utf8"));
+    expect(pkg.files).toContain("service-keys.json");
+    expect(pkg.exports["./service-keys.json"]).toBe("./service-keys.json");
+    const { DEFAULT_SERVICE_KEYS } = await import("../src/checks-runtime.js");
+    expect(JSON.parse(spec).keys).toEqual(DEFAULT_SERVICE_KEYS);
   });
 });

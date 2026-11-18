@@ -81,7 +81,8 @@ def test_a_strict_tool_inside_a_tool_span_is_checked_and_blocked_and_the_span_ad
     recs = calls(online)
     assert [(r["envelope"]["kind"], r["envelope"]["name"]) for r in recs] == [("decision", "pay"), ("outcome", "pay")]
     assert recs[0]["envelope"]["checks"]["strict"] is True
-    assert recs[1]["envelope"]["checks"] == {"ran": False, "ruling": "not_asked", "results": [], "result": "allow"}
+    # A protected call always asks the witness, which rules with the newest rules: it blocks it.
+    assert recs[1]["envelope"]["checks"] == {"ran": False, "ruling": "block", "results": [], "result": "allow"}
 
 
 def test_a_tool_strict_in_code_inside_a_span_waits_for_a_ruling_not_only_a_receipt(online, project, service):

@@ -6,7 +6,9 @@
  */
 
 import * as fs from "node:fs";
+import * as C from "./checks.js";
 import { hashJson } from "./crypto.js";
+import { failWord, modeWord, ruleWords, stateWord } from "./words.js";
 import { recordHash, type SignedRecord } from "./records.js";
 import type { Recorder } from "./runtime.js";
 
@@ -18,13 +20,16 @@ function cond(c: Json): string {
   return "value" in c ? `${c.field} ${c.op} ${JSON.stringify(c.value)}` : `${c.field} ${c.op}`;
 }
 
-/** A rule as one terse line: id, action, where it applies, when, the rate limit. */
-export function ruleLine(r: Json): string {
-  const where = [r.tools ? `tools ${r.tools.join(",")}` : "every tool", r.agents ? `agents ${r.agents.join(",")}` : "every agent"].join("; ");
-  const when = r.when.length ? `when ${r.when.map(cond).join(" and ")}` : "always";
-  const limit = r.limit ? `; more than ${r.limit.calls} per ${r.limit.seconds} s per ${String(r.limit.per).replace("_", " and ")}` : "";
-  return `${r.id}: ${r.action} (${where}) ${when}${limit}: ${r.about}`;
+/** A rule as one line: its id, the rule in words (§10.5), its state in a rule set, and what the
+ * admin wrote about it. `doc` is the rule set (null for the local rules, whose mode is the checks
+ * file's per tool). */
+export function ruleLine(r: Json, doc: Json | null = null): string {
+  const state = doc ? ` (${stateWord(doc.mode === "watch" ? "calibrating" : C.ruleState(doc, r))})` : "";
+  return `${r.id}: ${ruleWords(r)}${state}${r.about ? `. ${r.about}` : ""}`;
 }
+
+/** The older terse form of a condition, kept for callers that print pointers. */
+export const conditionLine = cond;
 
 /** The lines of `signafaide_show_rules`: the rule set this machine holds, and the checks file's part of it. */
 export function showRulesLines(rec: Recorder): string[] {
@@ -43,26 +48,29 @@ export function showRulesLines(rec: Recorder): string[] {
   if (!rs) {
     out.push("rule set: none held" + (rec.apiKey ? "; `signafaide rules pull` fetches it" : " (no API key, so there is no project rule set; local rules in the checks file still apply)"));
   } else {
-    out.push(`rule set ${rs.set}: version ${rs.version}, ${rs.mode} mode, default ${rs.default}, issued ${rs.issued}, rules_hash ${hashJson(rs)}`);
-    if (rs.mode === "watch") out.push("watch mode: a rule that blocks is noted and the call is allowed; the entry records what enforce mode would have done.");
-    out.push(`rules (${rs.rules.length}):`, ...(rs.rules.length ? rs.rules.map((r: Json) => `  ${ruleLine(r)}`) : ["  none"]));
+    out.push(`rule set ${rs.set}: version ${rs.version}, ${modeWord(rs.mode)}, default ${rs.default}, issued ${rs.issued}, rules_hash ${hashJson(rs)}`);
+    if (rs.mode === "watch") out.push("Calibrating (`mode` is \"watch\"): every rule is Calibrating: a rule that would block is noted and the call is allowed.");
+    else out.push("On (`mode` is \"enforce\"): On rules decide; a Calibrating rule never blocks, and the ruling names it when it would have blocked.");
+    out.push(`rules (${rs.rules.length}):`, ...(rs.rules.length ? rs.rules.map((r: Json) => `  ${ruleLine(r, rs)}`) : ["  none"]));
+    for (const r of rs.rules) for (const x of r.exceptions ?? []) out.push(`  exception to ${r.id} since version ${x.since}: ${x.field.slice(1) || "(the empty key)"} is ${JSON.stringify(x.value)}, reason ${JSON.stringify(x.reason)}`);
   }
-  if (file?.rules) out.push(`local rules (checks file, ${file.mode} mode, ${file.rules.rules.length}):`, ...file.rules.rules.map((r: Json) => `  ${ruleLine(r)}`));
-  const strict = file ? Object.keys(file.tools).filter((n) => file!.tools[n].strict).sort() : [];
-  if (!strict.length) out.push('strict tools: none (a tool is strict by code, the gateway\'s --strict, or "strict": true in the checks file)');
+  const v2 = file ? C.checksFileVersion(file) === 2 : false;
+  if (file?.rules) out.push(`local rules (checks file, ${v2 ? "mode per tool" : `${modeWord(file.mode)}`}, ${file.rules.rules.length}):`, ...file.rules.rules.map((r: Json) => `  ${ruleLine(r)}`));
+  const strict = file ? Object.keys(file.tools).filter((n) => C.toolSettings(file!, n).strict).sort() : [];
+  const word = "protected tool";
+  if (!strict.length) out.push(v2 ? "protected tools: none (`signafaide protect <tool>` protects one)" : 'protected tools: none (a tool is protected by code, the gateway\'s --strict, or `"strict": true` in the checks file)');
   for (const n of strict) {
-    const t = file!.tools[n];
-    const fail = rs?.fail?.[n] ?? t.fail ?? "closed";
-    const disclose: string[] = t.disclose ?? [];
-    let line = `strict tool ${n}: fail ${fail}${rs?.fail?.[n] ? " (set by the rule set)" : ""}; discloses ${disclose.join(", ") || "no field"}`;
+    const t = C.toolSettings(file!, n);
+    const fail = rs?.fail?.[n] ?? (v2 ? "closed" : (file!.tools[n].fail ?? "closed"));
+    let line = `${word} ${n}: if signafAIde can't be reached: ${failWord(fail)}${rs?.fail?.[n] ? " (set by the rule set)" : ""}; discloses ${t.disclose.join(", ") || "no field"}`;
     if (rs) {
-      const need = [...new Set<string>(rs.rules.filter((r: Json) => r.tools === null || r.tools.includes(n)).flatMap((r: Json) => r.when.map((x: Json) => x.field)))].sort();
-      const missing = need.filter((p) => !disclose.includes(p));
-      if (missing.length) line += `; the rule set needs ${missing.join(", ")}: not disclosed, so its strict calls are ruled block (fields_missing). Add them to disclose only if the person agrees those fields may leave the machine`;
+      const d = C.disclosure(rs, rec.defaultAgent, n, t.disclose);
+      if (d.missing.length) line += `; the rule set needs ${d.missing.join(", ")}: not disclosed, so its protected calls are ruled block (fields_missing). Add them only if the person agrees those fields may leave the machine (\`signafaide pull\` asks them)`;
+      if (d.unsent.length) line += `; Calibrating rules or exceptions can use ${d.unsent.join(", ")}, which it does not send: they are not calibrated until the person approves them with \`signafaide pull\``;
     }
     out.push(line);
   }
-  out.push("Read-only: this changes nothing. To change rules, publish a new version in the console; to change what a tool discloses or whether it is strict, edit the checks file.");
+  out.push("Read-only: this changes nothing. To change rules, publish a new version in the console (or `signafaide protect`); to change what a tool sends, `signafaide pull` asks the person.");
   return out;
 }
 
@@ -88,7 +96,7 @@ function howToAllow(g: Json, tool: string, mode: string): string[] {
   else if (g.basis === "fingerprint") out.push(`the tool, its description or its server is on the shared fingerprint list; a person re-approves it after review (\`signafaide checks approve ${tool}\`, or in the console when the rule set approves tools)`);
   else if (g.basis === "rule" || g.basis === "error") out.push("an admin changes or removes the matching rule in the console, which publishes a new version; or the call's arguments change so the rule no longer matches");
   else if (g.basis === "default") out.push("the rule set's default is block: an admin adds an allow rule for this tool, or sets the default to allow");
-  if (mode === "watch" && g.enforce_ruling === "block") out.push("this rule set is in watch mode, so the call was allowed; enforce mode would have blocked it for the reason above");
+  if (mode === "watch" && g.enforce_ruling === "block") out.push("this rule set is Calibrating (`mode` is \"watch\"), so the call was allowed; On (`mode` is \"enforce\") would have blocked it for the reason above");
   return out;
 }
 
@@ -119,16 +127,19 @@ export function explainRulingLines(rec: Recorder, record: string, pack?: string)
   }
   const entries: string[] = ch.results.map((e: Json) => {
     const extra = e.check === "rule" ? ` (set ${e.set}${e.matched.length ? `, matched ${e.matched.join(", ")}` : ""})` : e.found.length ? ` (found ${e.found.join(", ")})` : "";
-    return `${e.check} ${e.result}${e.enforce_result && e.enforce_result !== e.result ? `, enforce mode: ${e.enforce_result}` : ""}, ${e.mode} mode${extra}`;
+    return `${e.check} ${e.result}${e.enforce_result && e.enforce_result !== e.result ? `, if On: ${e.enforce_result}` : ""}, ${modeWord(e.mode)}${extra}`;
   });
   out.push(`client checks: ${ch.result}${entries.length ? `: ${entries.join("; ")}` : ""}`);
-  out.push(`strict: ${ch.strict ? `yes, fail ${ch.fail}` : "no (central rules never block a call that is not strict)"}; rules applied: ${ch.rules.map((x: Json) => (x.set === "local" ? "local" : `${x.set} version ${x.version}`)).join(", ") || "none"}`);
+  out.push(`protected: ${ch.strict ? `yes, if signafAIde can't be reached: ${failWord(ch.fail)}` : "no (central rules never block a call that is not protected)"}; rules applied: ${ch.rules.map((x: Json) => (x.set === "local" ? "local" : `${x.set} version ${x.version}`)).join(", ") || "none"}`);
   out.push(`disclosed fields: ${ch.disclosed.join(", ") || "none"} (values are not shown)`);
   const g = r.receipt?.ruling as Json | undefined;
   if (g) {
     out.push(
-      `ruling: ${g.ruling} (${g.mode} mode${g.enforce_ruling ? `, enforce mode would give ${g.enforce_ruling}` : ""}) by the witness at ${g.server_time}`,
+      `ruling: ${g.ruling} (${modeWord(g.mode)}${g.enforce_ruling ? `, if On it would give ${g.enforce_ruling}` : ""}) by the witness at ${g.server_time}`,
       `basis: ${g.basis}; matched rules: ${g.matched.join(", ") || "none"}; missing fields: ${g.missing.join(", ") || "none"}`,
+      ...(g.would_block?.length ? [`Calibrating rules that would have blocked it (they never block): ${g.would_block.join(", ")}`] : []),
+      ...(g.not_calibrated?.length ? [`Calibrating rules not checked, because a field they need was not sent: ${g.not_calibrated.join(", ")}`] : []),
+      ...(g.excepted?.length ? [`allowed by exception to: ${g.excepted.join(", ")}`] : []),
       `rule set: ${g.rules ? `${g.rules.set} version ${g.rules.version}` : "none held by the witness"}; shared fingerprint list seq ${g.fingerprints}`,
       `reason: ${g.reason}`,
     );
@@ -136,20 +147,20 @@ export function explainRulingLines(rec: Recorder, record: string, pack?: string)
     if (g.ruling === "block") out.push(`to allow it: ${fix.join("; ") || "see the reason"}`);
     else if (fix.length) out.push(`note: ${fix.join("; ")}`);
     const rules = [rec.checks.heldRules(), ...(pack ? (JSON.parse(fs.readFileSync(pack, "utf8")).rule_sets ?? []).map((x: Json) => x.rules) : [])].filter((x) => isObj(x) && x.set === g.rules?.set && x.version === g.rules?.version);
-    for (const m of g.matched) {
+    for (const m of [...g.matched, ...(g.would_block ?? []), ...(g.excepted ?? [])]) {
       const rule = rules[0]?.rules.find((x: Json) => x.id === m);
-      if (rule) out.push(`  rule ${ruleLine(rule)}`);
+      if (rule) out.push(`  rule ${ruleLine(rule, rules[0])}`);
     }
     if (g.matched.length && !rules.length) out.push("  the text of the rules is not held here: run `signafaide rules pull`, or look in the console (rule set versions are kept as long as a record names them)");
     out.push("The ruling is the witness's own decision on what the client disclosed, under that rule set version and fingerprint list. It does not say the call was right.");
   } else if (r.receipt?.ruling_error) {
-    out.push(`ruling: none; the witness could not rule (${r.receipt.ruling_error}). A fail-open tool ran without one; a fail-closed tool did not run.`);
+    out.push(`ruling: none; the witness could not rule (${r.receipt.ruling_error}). A tool set to Let it run ran without one; a tool set to Stop did not run.`);
   } else if (ch.strict && ch.result !== "block") {
     out.push(r.receipt ? "ruling: none on the receipt." : "ruling: not yet; the record has not been co-signed (it waits in the outbox, or there is no API key).");
   } else if (ch.result === "block") {
     out.push("ruling: none asked. A client check blocked the call here, before it asked the witness.");
   } else {
-    out.push("ruling: none asked. The call is not strict, so only the client's own checks and rules applied.");
+    out.push("ruling: none asked. The call is not protected, so only the client's own checks and rules applied.");
   }
   if (ch.result === "block") {
     const blockers = ch.results.filter((e: Json) => e.result === "block").map((e: Json) => e.check);

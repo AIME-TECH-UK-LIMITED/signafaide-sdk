@@ -17,19 +17,29 @@ signafAIde gives you audit evidence of what your AI agents did, for EU AI Act re
 | [`python/`](python/README.md) | the Python SDK and CLI (`signafaide` on PyPI) |
 | [`python-langchain/`](python-langchain/README.md) | `langchain-signafaide`: a LangChain agent middleware that records every tool call the agent makes |
 | [`js/`](js/README.md) | the TypeScript SDK, CLI and `agent setup` for coding agents (`signafaide` on npm), and the MCP server (`signafaide-mcp`, in `js/mcp`) |
-| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.4.0`) |
+| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.5.0`) |
 | [`verifier/`](verifier) | `signafaide-verify`, the standalone Rust verifier of a pack (also builds to WebAssembly) |
 | [`core/`](core) | the Rust protocol core shared by the verifier and the service |
 | [`plugin/`](plugin/README.md) | the Claude Code plugin: the MCP server and the skill |
 
 ## Quick start
 
+In your agent's folder, at a terminal:
+
 ```bash
-uv add signafaide                 # Python, in a uv project; or: python3 -m venv .venv && .venv/bin/python -m pip install signafaide
-npm install signafaide            # TypeScript or JavaScript
+npx signafaide protect            # TypeScript or JavaScript
+uv run signafaide protect         # Python (after uv add signafaide; or .venv/bin/signafaide protect)
 ```
 
-Wrap the tools that act, run the agent, then `signafaide verify` (`npx signafaide verify` for TypeScript). See the [Python](python/README.md) and [TypeScript](js/README.md) READMEs.
+`protect` finds the agent's tools, asks which to protect and what to block (On or Calibrating), shows the code change and asks before writing it, makes a free sandbox if you say yes and saves your rules. Then:
+
+```bash
+npx signafaide check approve_payout amount=1200 currency=GBP   # a dry run: exit 1 when it would block
+npx signafaide status                                            # one line per tool: recorded, protected, proof
+npx signafaide prove approve_payout                              # a read-only link for your auditor
+```
+
+`pull` fetches the rules saved in the console, `login` signs a person in to save rules after the sandbox is kept. A runnable example: [`examples/payout-agent`](examples/payout-agent). To wrap tools by hand, see the reference sections of the [Python](python/README.md) and [TypeScript](js/README.md) READMEs.
 
 ## Add the MCP server to a coding agent
 
@@ -38,14 +48,14 @@ The MCP server (`signafaide-mcp`, Node.js 20 or later) lets a coding agent previ
 ```json
 {
   "mcpServers": {
-    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.4.0"] }
+    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.5.0"] }
   }
 }
 ```
 
-- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.4.0`
+- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.5.0`
 - Gemini CLI: `gemini extensions install https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk`
-- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.4.0%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
+- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.5.0%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
 
 There are no API keys or other settings. To check it works, ask the agent to call `signafaide_status`.
 
@@ -54,7 +64,7 @@ There are no API keys or other settings. To check it works, ask the agent to cal
 Wrapping records the tools a developer wraps. Three things cover the rest.
 
 - MCP tools: `signafaide gateway -- <the MCP server's command>` (in the `signafaide` npm package) runs an MCP server behind a recording proxy. The agent's MCP client starts the gateway in place of the server, for example `npx -y signafaide gateway --agent support-bot -- npx -y @modelcontextprotocol/server-filesystem /data`. Every tool call that passes through is recorded, a decision before the call is forwarded and an outcome when the answer arrives, and a call that cannot be recorded is not forwarded. A remote (HTTP) server goes behind a stdio bridge: `npx -y signafaide gateway -- npx -y mcp-remote https://mcp.example.com/mcp`.
-- Traced agents: an agent already traced with OpenTelemetry is recorded with no wrapping, by one span processor added where tracing is set up (`SignafaideSpanProcessor`, in `signafaide.otel` for Python and `signafaide/otel` for TypeScript). It reads tool-call spans by the OpenTelemetry GenAI, OpenInference and OpenLLMetry conventions and exports nothing. Each record says that it comes from telemetry and whether its decision was written before the tool ran or after it, and what the tracing sampler can leave out is reported as a note. Running a tool only once it is recorded (strict mode) needs the SDK's wrappers. See the [Python](python/README.md#opentelemetry-records-from-the-traces-you-already-have) and [TypeScript](js/README.md#opentelemetry-records-from-the-traces-you-already-have) READMEs.
+- Traced agents: an agent already traced with OpenTelemetry is recorded with no wrapping, by one span processor added where tracing is set up (`SignafaideSpanProcessor`, in `signafaide.otel` for Python and `signafaide/otel` for TypeScript). It reads tool-call spans by the OpenTelemetry GenAI, OpenInference and OpenLLMetry conventions and exports nothing. Each record says that it comes from telemetry and whether its decision was written before the tool ran or after it, and what the tracing sampler can leave out is reported as a note. Running a tool only once it is recorded (a protected tool) needs the SDK's wrappers. See the [Python](python/README.md#opentelemetry-records-from-the-traces-you-already-have) and [TypeScript](js/README.md#opentelemetry-records-from-the-traces-you-already-have) READMEs.
 - Framework tools: `wrap_tools` / `wrapTools` declare the tools they wrap as recorded, and `declare_tools([...])` / `declareTools([...])` takes the agent's full tool list, so the tools that are not wrapped are declared as not recorded. The declaration is a signed note per tool in the agent's chain (ordinary records, counted like any other), and every verifier reports it per agent, for example `all 4 declared tools are recorded` or `1 declared tool is not recorded: web_search`. It is a note, never a failure.
 
 What this shows, and what it does not: the gateway records every call that goes through it; a call the application makes around it is still not recorded, so the deployment has to make the gateway the only route to those tools. A declaration is the program's own signed statement of its tools: evidence of what it said it had, not proof that the list is complete. A tool list is as fresh as its last declaration: a source that stops (a gateway that is removed, a program that ends) leaves the list at its clean exit, or within 24 hours after a crash. Details: [TypeScript](js/README.md), [Python](python/README.md), spec §2.6, §7 and §8.

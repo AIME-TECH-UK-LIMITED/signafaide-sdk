@@ -2,26 +2,38 @@
 
 Audit evidence of what your AI agents did, for EU AI Act record-keeping, ISO/IEC 42001 and SOC 2. Each record is signed with the agent's own key and chained on your machine; once you opt in, a witness (the signafAIde service, or one you host) co-signs and publicly timestamps it, so neither side can forge or edit a record alone.
 
-- Nothing is sent until a person runs `npx signafaide init` or sets `SIGNAFAIDE_API_KEY`. After that each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them. Each content hash is salted with 16 random bytes that stay on your machine with the content, so the hash alone cannot be used to guess the content, even when it has only a few possible values.
-- The sandbox `init` creates needs no account, email or card.
+- Nothing is sent until a person says yes to the sandbox in `npx signafaide protect` (or runs `npx signafaide init`), or sets `SIGNAFAIDE_API_KEY`. After that each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them. Each content hash is salted with 16 random bytes that stay on your machine with the content, so the hash alone cannot be used to guess the content, even when it has only a few possible values.
+- The sandbox needs no account, email or card.
 - To keep the evidence in your environment, self-host the witness and set `SIGNAFAIDE_URL` ([self-host](https://signafaide.co.uk/docs/self-host)).
 - Apache-2.0, with a public protocol spec and an independent verifier.
 
-```bash
-npm install signafaide
-```
+## Quickstart: one command
 
-```ts
-import { record } from "signafaide";
-
-const approvePayout = record(async (claimId: string, amount: number) => { /* ... */ }, { name: "approve_payout" });
-```
+In your agent's folder, at a terminal:
 
 ```bash
-npx signafaide verify
+npx signafaide protect
 ```
 
-That's it. With no API key, records are signed, chained and kept in `.signafaide/`, and nothing is sent. `signafaide verify` checks every signature, chain link and content hash and ends with a result line that says how many of the 12 checks ran, for example `PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)`. A check that was not run is never counted as passed. It also says what still needs the witness:
+It finds your agent's tools (an object named like `tools`, exported functions in files named like tools, Vercel AI SDK, OpenAI Agents and LangChain `tool(...)`, MCP servers, tool classes), lists every one with what it does, and asks which to protect and what to block: an amount, a currency, a number of calls a minute, each On (it blocks) or Calibrating (it only notes "Would have blocked"). It shows the change to your code as a diff and asks before writing it: `protect(...)` for the tools you protect, `record(...)` for the others, the same agent name in every call, and `declareTools(...)` once. It writes `signafaide.checks.json` (commit it), makes a free sandbox if you say yes (no account, email or card) and saves your rules. A run without a terminal says exactly what it did not do and the command to finish.
+
+```bash
+npx signafaide check approve_payout amount=1200 currency=GBP   # a dry run: exit 1 when it would block
+npx signafaide status                                            # one line per tool: recorded, protected, proof
+npx signafaide prove approve_payout                              # a read-only link for your auditor
+```
+
+A protected tool asks signafAIde before it runs, every call, and signafAIde rules with the newest rules, so a limit changed in the console applies from the next call. If signafAIde can't be reached it retries for the ruling timeout (10 s), then stops (Stop, the default; Let it run is a person's choice in the console). Checks on this machine (a secret in the arguments, a private address, hidden instructions, a changed tool) block here, before signafAIde is asked. A blocked call throws `SignafaideBlocked`: one sentence with the rule in words and a link.
+
+- `npx signafaide pull` fetches the rules saved in the console and asks before any new field of a protected tool leaves the machine.
+- `npx signafaide prove [tool] [--days N] [--files]` asks for a 30-day link, or the longest your plan allows, reuses an active link for the same tool, and sends the agent's public keys with it, so the auditor's browser check is complete. `--files` writes a pack instead.
+- `npx signafaide login` signs you in (a code you approve in the console): after you keep the sandbox, rules are saved by a person, never by the agent's API key.
+
+A runnable example: [`examples/payout-agent`](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/tree/main/examples/payout-agent).
+
+## Recording without protecting
+
+With no API key, records are signed, chained and kept in `.signafaide/`, and nothing is sent. `npx signafaide verify` checks every signature, chain link and content hash and ends with a result line that says how many of the 12 checks ran, for example `PASS (local checks only): 4 of 12 checks passed, 8 not checked (nothing co-signed yet)`. A check that was not run is never counted as passed. It also says what still needs the witness:
 
 ```
 co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, or self-host (SIGNAFAIDE_URL)
@@ -94,7 +106,7 @@ MCP tools: the gateway. In the agent's MCP configuration, start the gateway in p
 {"command": "npx", "args": ["-y", "signafaide", "gateway", "--agent", "support-bot", "--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "/data"]}
 ```
 
-It runs the server, relays every message unchanged, declares the server's tools as recorded, and writes a `decision` before each `tools/call` is forwarded and an `outcome` when the answer arrives. A call that cannot be recorded is not forwarded. `--strict` (or `--strict-tools a,b`) forwards a call only once the witness has co-signed its decision; `--name-prefix github.` keeps the tool names of several servers apart; `--store-content` sends inputs and outputs too. A remote (HTTP) server goes behind a stdio bridge such as [`mcp-remote`](https://github.com/geelen/mcp-remote):
+It runs the server, relays every message unchanged, declares the server's tools as recorded, and writes a `decision` before each `tools/call` is forwarded and an `outcome` when the answer arrives. A call that cannot be recorded is not forwarded. `--strict` (or `--strict-tools a,b`) protects every tool (or the named tools): a call is forwarded only once the witness has co-signed its decision; `--name-prefix github.` keeps the tool names of several servers apart; `--store-content` sends inputs and outputs too. A remote (HTTP) server goes behind a stdio bridge such as [`mcp-remote`](https://github.com/geelen/mcp-remote):
 
 ```bash
 npx -y signafaide gateway --agent support-bot -- npx -y mcp-remote https://mcp.example.com/mcp
@@ -139,18 +151,32 @@ Each tool call gives a `decision` (the tool's name and the arguments the span ho
 
 - **Before or after.** When a span says at its start that it is a tool call, the decision is written then, before the tool runs. The Vercel AI SDK's OpenTelemetry integration does this. When a span says so only at its end, the decision and the outcome are both written then, after the tool ran. The LangChain instrumentations of OpenInference and of OpenLLMetry do this: they set a span's attributes after it has started. Every record says which it was: in its signed content (`meta.telemetry.decision_written` is `before` or `after`), and in a signed note in the chain that a hash-only verifier reads too. `signafaide verify` and `signafaide status` show it per tool: `2 tools are recorded from telemetry spans: lookup_order (decision written before the tool ran), refund (decision written after the tool ran)`.
 - **Sampling.** A span the sampler drops never reaches the processor, so its tool call has no record. The processor writes one signed note per process that says what the sampler can leave out, and `verify` and `status` repeat it as a note, never a failure. OpenTelemetry's default sampler (parent-based with an always-on root) keeps every trace your program starts and follows the caller's decision for a trace that arrives from another service: `telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded`. A sampler that can drop your own traces (ratio-based, always-off, parent-based with another root, a custom one): `records come from sampled telemetry: some tool calls may not be recorded`. A plain always-on sampler gets no note. A span does not name its sampler, so the processor reads it from the registered global tracer provider (`provider.register()`, or the Node SDK). For a provider that is not registered globally, pass the provider's sampler, whichever kind it is: `new SignafaideSpanProcessor({ sampler })`. When the processor has neither, it cannot tell whether spans are sampled and writes no note.
-- **Strict mode needs the SDK.** "Do not run the tool unless it is recorded" is a feature of wrapping the tool with the SDK (`strict: true`), not of the telemetry processor. The processor never throws into your application and never waits for the network: when a record cannot be written the tool still runs, and one warning is logged.
-- **One record per call.** A tool that is also wrapped with the SDK gives one decision and one outcome, not two: the wrapper's records stand, and a strict wrapper still waits for its receipt. This also holds when the span arrives after the call has ended, as with a tracing tool that builds its spans from finished runs: the span is matched to the wrapper's call by the tool call id when both have one, otherwise by the tool's name and the span's own start and end times. A tool that an MCP gateway on the same machine records for the same agent is left to the gateway, by tool name.
+- **Protecting a tool needs the SDK.** "Do not run the tool unless it is recorded" is a feature of wrapping the tool with the SDK (`protect(fn)`), not of the telemetry processor. The processor never throws into your application and never waits for the network: when a record cannot be written the tool still runs, and one warning is logged.
+- **One record per call.** A tool that is also wrapped with the SDK gives one decision and one outcome, not two: the wrapper's records stand, and a protected wrapper still waits for its receipt. This also holds when the span arrives after the call has ended, as with a tracing tool that builds its spans from finished runs: the span is matched to the wrapper's call by the tool call id when both have one, otherwise by the tool's name and the span's own start and end times. A tool that an MCP gateway on the same machine records for the same agent is left to the gateway, by tool name.
 - **Agent name.** `new SignafaideSpanProcessor({ agent: "support-bot" })` names the chain. Without it the name is the tracer resource's `service.name`, made into a valid agent name, and without that the project folder's name.
 - **Tools.** Each tool seen in a span is declared as one of the agent's recorded tools, as `wrapTools` declares the tools it wraps. That is the list of tools seen so far, not the agent's full tool list: give that with `declareTools([...])`. `declareTools: false` turns the declaration off. `storeContent: true` sends inputs and outputs too.
 
-## Strict mode: no receipt, no action
+## Reference: wrapping by hand
 
-```ts
-const wireFunds = record(sendWire, { strict: true }); // now returns a Promise
+`protect` writes this for you; this is what it writes, and how to write it yourself.
+
+```bash
+npm install signafaide
 ```
 
-The decision is shipped first, and the function runs only after the service has returned its receipt. If the service can't be reached or refuses the record, or there is no API key (`no_key`), the call rejects with `NotRecorded` and the function does not run. Agent frameworks often turn a tool's error into a failed tool call and print nothing, so the first time a strict tool is refused in a process the SDK writes one warning line to stderr with the tool's name and the fix.
+```ts
+import { protect, record, declareTools } from "signafaide";
+
+export const tools = {
+  approve_payout: protect(approvePayout, { args: ["payee", "amount", "currency"], agent: "payout-bot" }), // asks signafAIde first
+  lookup_invoice: record(lookupInvoice, { args: ["id"], agent: "payout-bot" }), // recorded only
+};
+declareTools(Object.keys(tools), { agent: "payout-bot" });
+```
+
+`args` names positional arguments, so a rule finds `amount` by its name. A function that takes one object needs no `args`: its fields (`/amount`) are the names. `protect(fn)` always returns a Promise. Framework tools: `wrapTool(tool({...}), { name: "approve_payout", agent: "payout-bot", strict: true })`, or `wrapTools({...}, { agent, strict: true })` for a whole object.
+
+Older code wrote `record(fn, { strict: true })`: it still works, and asks the witness as `protect(fn)` does. The decision is shipped first, and the function runs only after the witness has returned its receipt and ruling. If the service can't be reached or refuses the record, or there is no API key (`no_key`), the call rejects and the function does not run. Agent frameworks often turn a tool's error into a failed tool call and print nothing, so the first time a protected tool is refused in a process the SDK writes one warning line to stderr with the tool's name and the fix.
 
 ## Hash-only
 
@@ -163,7 +189,7 @@ record(fn, { name: "x", storeContent: true }); // one tool
 
 ## Offline
 
-Nothing waits on the network unless you use strict mode. With an API key, records go to `.signafaide/outbox/` and are shipped in batches, one request at a time: every 2 seconds, every 100 records, and once more when the process is about to exit, for at most 3 seconds (`exitFlushMs`, `SIGNAFAIDE_EXIT_FLUSH_MS`). If the service can't be reached, they stay on disk and are retried with a backoff that grows to a minute; a refusal retrying cannot fix (quota used up, a wrong or revoked key) stops sending until the configuration changes. A malformed `SIGNAFAIDE_API_KEY` is caught here and never sent. They ship on the next run or with `signafaide flush`. Records are never lost on exit, and background requests never keep your process alive.
+Nothing waits on the network unless you protect a tool. With an API key, records go to `.signafaide/outbox/` and are shipped in batches, one request at a time: every 2 seconds, every 100 records, and once more when the process is about to exit, for at most 3 seconds (`exitFlushMs`, `SIGNAFAIDE_EXIT_FLUSH_MS`). If the service can't be reached, they stay on disk and are retried with a backoff that grows to a minute; a refusal retrying cannot fix (quota used up, a wrong or revoked key) stops sending until the configuration changes. A malformed `SIGNAFAIDE_API_KEY` is caught here and never sent. They ship on the next run or with `signafaide flush`. Records are never lost on exit, and background requests never keep your process alive.
 
 ## Containers that restart
 
@@ -240,6 +266,12 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 
 | command | does |
 |---|---|
+| `signafaide protect [tool] [--tool <name>] [--limit-field <field> --above <number>] [--local] [--yes]` | finds the tools, asks what to block, shows the code change and writes it, writes the checks file, adds the project note to AGENTS.md / CLAUDE.md if you say yes, makes a free sandbox if you say yes, saves the rules; `--limit-field` and `--above` give the limit without asking, and without a terminal every rule starts Calibrating |
+| `signafaide check <tool> field=value...` | a dry run of a call against the rules: what would block, what is sent; exit 1 when it would block |
+| `signafaide pull` | fetches the project's rules; asks before a new field of a protected tool is sent |
+| `signafaide prove [tool] [--days N] [--files] [--all]` | the auditor link (or files), with the calls, the rules in words and what ran before protection |
+| `signafaide login` / `signafaide logout` | a person's sign-in for saving rules from the command line |
+| `signafaide start-fresh <agent>` | proofs of the agent start from now; the old record is kept |
 | `signafaide init` | the opt-in: creates a free sandbox if there is no key (no account, email or card), prints the claim link, what claiming gives and when an unclaimed sandbox is deleted |
 | `signafaide status` | key and env, agents, last receipt, outbox size, quota; BLOCKED chains (exit 1) |
 | `signafaide repair [--agent X] [--dry-run]` | sets aside records no witness can take (kept in `.signafaide/held/`, still verified), gives the agent a new key and starts a new segment |
@@ -252,7 +284,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 | `signafaide claim` | prints the claim link again, what claiming gives and how many days an unclaimed sandbox has left |
 | `signafaide flush` | ships the outbox now (with no key it sends nothing and says so) |
 | `signafaide gateway [--agent X] [--name-prefix P] [--strict \| --strict-tools a,b] [--store-content] -- <command> [args...]` | runs an MCP server behind a recording proxy: every tool call that passes through is recorded, and one that cannot be recorded is not forwarded (see "Recording everything an agent can call") |
-| `signafaide agent setup [--agent <name>]... [--url <witness>] [--dry-run] [--dir <project>]` | installs the MCP server and the skill in your coding agents; `--url` sets `SIGNAFAIDE_URL` in each MCP entry |
+| `signafaide agent setup [--agent <name>]... [--url <witness>] [--dry-run] [--dir <project>]` | installs the MCP server and the skill in your coding agents, and the project note in CLAUDE.md and AGENTS.md (asked at a terminal); `--url` sets `SIGNAFAIDE_URL` in each MCP entry |
 | `signafaide mcp` | runs the MCP server over stdio, when the separate `signafaide-mcp` package is installed (`agent setup` configures `npx -y signafaide-mcp@<version>` instead) |
 
 ## Coding agents
@@ -272,19 +304,19 @@ finds the coding agents installed or in use and, for each one, adds the signafAI
 | GitHub Copilot (VS Code) | `.vscode/mcp.json` | `.github/copilot-instructions.md` section |
 | Windsurf | `.devin/mcp_config.json` | `AGENTS.md` section |
 
-The MCP tools: `signafaide_setup` (a preview that changes, creates and sends nothing: the language and framework, the install command, the code edit and what a sandbox would send), `signafaide_init` (creates the external sandbox, and nothing unless the agent passes `confirm_user_agreed: true` and `user_words`, what the person wrote when they agreed), `signafaide_quickstart` (a reference snippet for a language and framework the agent names; it reads nothing in the project), `signafaide_verify` (runs the checks; with a key it ships waiting records first), `signafaide_status` (key, chains, outbox, quota and the claim step; it contacts the service only when a key exists), `signafaide_records` (lists and searches the records on this machine by agent, time or record hash; metadata only, never the inputs or outputs), `signafaide_flush` (sends the waiting records now, like `signafaide flush`; without an API key it sends nothing and never creates a sandbox), `signafaide_explain_error`, `signafaide_explain_ruling` (why a tool call was allowed, noted or blocked, from a record hash; never prints a disclosed value), `signafaide_show_rules` (the rule set and strict tools held; read-only) and `signafaide_claim_link` (for when the person only needs the claim link). The three that return the claim link (`signafaide_init`, `signafaide_status`, `signafaide_claim_link`) return it with what claiming gives and the days an unclaimed sandbox has left, for the agent to pass on to the person. The MCP server needs Node.js 20 or later.
+The MCP tools: `signafaide_setup` (a preview that changes, creates and sends nothing: the language and framework, the install command, the code edit and what a sandbox would send), `signafaide_init` (creates the external sandbox, and nothing unless the agent passes `confirm_user_agreed: true` and `user_words`, what the person wrote when they agreed), `signafaide_quickstart` (a reference snippet for a language and framework the agent names; it reads nothing in the project), `signafaide_verify` (runs the checks; with a key it ships waiting records first), `signafaide_status` (key, chains, outbox, quota and the claim step; it contacts the service only when a key exists), `signafaide_records` (lists and searches the records on this machine by agent, time or record hash; metadata only, never the inputs or outputs), `signafaide_flush` (sends the waiting records now, like `signafaide flush`; without an API key it sends nothing and never creates a sandbox), `signafaide_explain_error`, `signafaide_explain_ruling` (why a tool call was allowed, noted or blocked, from a record hash; never prints a disclosed value), `signafaide_show_rules` (the rule set and protected tools held; read-only) and `signafaide_claim_link` (for when the person only needs the claim link). The three that return the claim link (`signafaide_init`, `signafaide_status`, `signafaide_claim_link`) return it with what claiming gives and the days an unclaimed sandbox has left, for the agent to pass on to the person. The MCP server needs Node.js 20 or later.
 
 ## What is sent besides records
 
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-js/0.4.0 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
+X-Signafaide-Client: signafaide-js/0.5.0 (node 22.22.0; adapter=vercel-ai; agent=cursor; via=sdk)
 ```
 
 It holds the SDK and its version, the JavaScript runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `vercel-ai`, `otel` for the OpenTelemetry processor, or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`, `signafaide agent setup`) and kept in `.signafaide/config.json`; it is never guessed per process, so a program started from a terminal inside a coding agent is not labelled as that agent. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.
 
-The header and the events hold no content, file paths, hostnames or user names. `SIGNAFAIDE_TELEMETRY=0` removes the adapter, the coding agent and the strict-mode flag from the header, stops the coding agent being saved in `.signafaide/config.json`, and turns the events off. The SDK and its version, the runtime and its version, and how the call was made (`via`) are still sent.
+The header and the events hold no content, file paths, hostnames or user names. `SIGNAFAIDE_TELEMETRY=0` removes the adapter, the coding agent and the protected-tool flag from the header, stops the coding agent being saved in `.signafaide/config.json`, and turns the events off. The SDK and its version, the runtime and its version, and how the call was made (`via`) are still sent.
 
 ## Configuration
 
@@ -301,7 +333,7 @@ The header and the events hold no content, file paths, hostnames or user names. 
 | `SIGNAFAIDE_DISABLED` | `1`: wrapped functions run and nothing is recorded |
 | `SIGNAFAIDE_DECLARE_TOOLS` | `0`: `wrapTools` does not declare the tools it wraps (`declareTools()` still does) |
 | `SIGNAFAIDE_SEGMENT_BYTES` | `67108864`: a shipped chain file larger than this rolls into a sealed segment |
-| `SIGNAFAIDE_TELEMETRY` | `0` turns off the adapter, agent and strict fields and the events |
+| `SIGNAFAIDE_TELEMETRY` | `0` turns off the adapter, agent and protected fields and the events |
 
 Running in containers, with replicas, on read-only or ephemeral disks, on serverless or in CI: see the [production guide](https://signafaide.co.uk/docs/production). A record's time never goes back along its chain: if the clock steps back, the record keeps the previous record's time and the clock's reading goes in `meta.wall_time`.
 

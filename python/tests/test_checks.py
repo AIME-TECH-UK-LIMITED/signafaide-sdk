@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 import signafaide
+from signafaide._confusables import INSTRUCTION_CONFUSABLES
 from signafaide import checks as C
+from signafaide import scan
 from signafaide import cli, runtime
 from signafaide.checks_runtime import CheckError, ToolInfo
 from signafaide.crypto import hash_json, sha256_hex, signed_message, verify_sig
@@ -72,7 +74,10 @@ def test_evaluation_modes_and_client_entries(c):
     for t in ev["cases"]:
         doc = ev["rule_sets"][t["rule_set"]]
         count = _count(t["agent"], t["tool"], ev["now"], t["history"]) if t["where"] == "witness" else None
-        assert C.evaluate(doc, t["agent"], t["tool"], lambda p: C.resolve(t["input"], p), count) == t["expect"], t["name"]
+        e = C.evaluate(doc, t["agent"], t["tool"], lambda p: C.resolve(t["input"], p), count)
+        assert {k: e[k] for k in ("result", "basis", "matched")} == t["expect"], t["name"]
+        # A document without states and exceptions never names a rule in the 1.1 lists.
+        assert (e["would_block"], e["not_calibrated"], e["excepted"]) == ([], [], []), t["name"]
     for m in c["modes"]:
         assert C.apply_mode(m["check_result"], m["mode"]) == m["expect"]
     cre = c["client_rule_entries"]
@@ -177,7 +182,7 @@ def test_local_checks(c):
     lc = c["local_checks"]
     for tid, t in lc["tokens"].items():
         assert sha256_hex("".join(t["parts"]).encode()) == t["sha256"], tid
-    assert [f["id"] for f in lc["secret_formats"]] == [f[0] for f in C.SECRET_FORMATS] + ["private_key"]
+    assert [f["id"] for f in lc["secret_formats"]] == [f[0] for f in C.SECRET_FORMATS] + list(C.TEXT_FORMATS) + list(C.CONTEXT_FORMATS)
     for f, (fid, pat, issuers) in zip(lc["secret_formats"], C.SECRET_FORMATS):
         assert f["pattern"] == pat and (f["issuers"] == list(issuers) or fid == "signafaide_key"), fid
     for t in lc["secret"]:
@@ -186,6 +191,24 @@ def test_local_checks(c):
         assert C.address_findings(t["input"], t["allow"]["hosts"], t["allow"]["cidrs"]) == t["expect"], t["name"]
     for t in lc["hidden_instruction"]:
         assert C.hidden_findings(t["result"]) == t["expect"], t["name"]
+    # spec 1.1
+    for t in lc["secret_result"]:
+        assert C.secret_findings(_rebuild(t["result"], lc["tokens"]), "witness.example", result=True) == t["expect"], t["name"]
+    for t in lc["definitions"]:
+        assert C.definition_findings(t["definition"], None, t.get("others", []), t.get("approved", [])) == t["expect"], t["name"]
+    assert lc["instruction_patterns"] == list(scan.INSTRUCTION_PATTERNS)
+    # spec 1.1, benchmark batch 2
+    for t in lc["arguments"]:
+        assert C.argument_findings(t["input"]) == t["expect"], t["name"]
+    for t in lc["notes"]:
+        f = C.argument_findings(t["value"]) if t["in"] == "arguments" else C.hidden_findings(t["value"])
+        assert C.call_notes(t["tool"], t["in"], f) == t["expect"], t["name"]
+    assert lc["shadow_patterns"] == list(scan.SHADOW_PATTERNS)
+    assert lc["shadow_ref_patterns"] == list(scan.SHADOW_REF_PATTERNS)
+    assert lc["instruction_confusables"] == [[c, x] for c, x in INSTRUCTION_CONFUSABLES]
+    # spec 1.1, benchmark batch 3
+    assert lc["covert_patterns"] == {"collect": list(scan.COLLECT_PATTERNS), "conceal": list(scan.CONCEAL_PATTERNS)}
+    assert lc["name_scripts"] == [[n, [list(r) for r in rs]] for n, rs in scan.NAME_SCRIPTS]
 
 
 def test_secret_check_details():
@@ -198,7 +221,7 @@ def test_secret_check_details():
 def test_verifier_lines(c):
     vl = c["verifier_lines"]
     out, lines = {}, []
-    for agent in ("agent-a", "agent-b"):
+    for agent in ("agent-a", "agent-b", "agent-c"):
         items = [{"seq": r["record"]["seq"], "kind": r["record"]["kind"], "checks": r["record"].get("checks"), "decision_seq": r["record"].get("ref_seq"),
                   "ruling": r["ruling"]} for r in vl["records"] if r["record"]["agent"] == agent]
         j = C.agent_checks(items)
@@ -207,6 +230,64 @@ def test_verifier_lines(c):
             lines += C.checks_lines(agent, j)
     assert lines == vl["expect"]["checks_lines"]
     assert out == vl["expect"]["checks"]
+
+
+def test_spec_1_1_rule_states(c):
+    rs = c["rule_states"]
+    for t in rs["states"]:
+        doc = rs["rule_sets"][t["rule_set"]]
+        assert C.rule_set_errors(doc) is None, t["name"]
+        assert {r["id"]: C.rule_state(doc, r) for r in doc["rules"]} == t["expect"], t["name"]
+    for t in rs["evaluation"]:
+        doc = rs["rule_sets"][t["rule_set"]]
+        if t["where"] == "witness":
+            e = C.evaluate(doc, "agent-a", t["tool"], lambda p: t["input"][p] if p in t["input"] else C.ABSENT, lambda lim: 0, lambda p: p in t["available"])
+        else:
+            e = C.evaluate(doc, "agent-a", t["tool"], lambda p: C.resolve(t["input"], p))
+        assert e == t["expect"], t["name"]
+    for t in rs["client_rule_entries"]:
+        doc = rs["rule_sets"][t["rule_set"]]
+        e = C.client_rule_entry(doc, C.entry_mode(doc["mode"], t["strict"], False), doc["set"], "agent-a", "approve_payout", t["input"])
+        assert e == t["expect"], t["name"]
+    for t in rs["disclosure"]:
+        assert C.disclosure(rs["rule_sets"][t["rule_set"]], "agent-a", "approve_payout", t["disclose"]) == t["expect"], t["name"]
+    for t in rs["ruling_shapes"]["valid"]:
+        assert C.ruling_errors(t["ruling"]) is None, t["name"]
+    for t in rs["ruling_shapes"]["invalid"]:
+        assert C.ruling_errors(t["ruling"]) is not None, t["name"]
+    for t in rs["rulings"]:
+        g = {"v": 1, "record_hash": "00" * 32, "batch_hash": "11" * 32, "server_time": rs["now"], "reason": t["reason"], **t["expect"]}
+        assert C.ruling_errors(g) is None, t["name"]
+
+
+def test_spec_1_1_words_and_checks_files(c):
+    from signafaide import words as W
+
+    w = c["rule_words"]
+    for t in w["conditions"]:
+        assert W.condition_words(t["condition"]) == t["expect"]
+    v3 = c["rule_states"]["rule_sets"]["v3"]
+    for t in w["rules"]:
+        doc = {**v3, "version": 1, "prev": None, "mode": "enforce", "default": "allow", "fail": {}, "addresses": {"hosts": [], "cidrs": []},
+               "approved": None, "rules": [t["rule"]]}
+        doc.pop("fingerprint_exceptions", None)
+        assert C.rule_set_errors(doc) is None, t["name"]
+        assert W.rule_words(t["rule"]) == t["expect"], t["name"]
+    for t in w["rule_sets"]:
+        if "local_rules" in t:
+            words = W.rule_set_words(t["local_rules"]["rules"], t["local_rules"]["hash"], True)
+        else:
+            words = W.rule_set_words(t["rule_set"]["rules"], t["rule_set"]["hash"], False)
+        assert words == t["expect"]["words"], t["name"]
+        assert W.rule_set_lines(words) == t["expect"]["lines"], t["name"]
+    f = c["checks_files"]
+    for t in f["valid"]:
+        assert C.checks_file_errors(t["file"]) is None, t["name"]
+        for name, want in t["expect"]["tools"].items():
+            assert C.tool_settings(t["file"], name) == want, (t["name"], name)
+        assert (None if t["file"]["rules"] is None else hash_json(t["file"]["rules"])) == t["expect"]["local_rules_hash"], t["name"]
+    for t in f["invalid"]:
+        assert C.checks_file_errors(t["file"]) is not None, t["name"]
 
 
 def test_checks_file_schema():
@@ -286,7 +367,8 @@ def test_watch_mode_notes_and_runs(local, project):
     addr = next(e for e in ch["results"] if e["check"] == "address")
     assert addr == {"check": "address", "result": "note", "mode": "watch", "enforce_result": "block", "found": ["metadata"]}
     assert o["envelope"]["checks"] == {"ran": True, "ruling": "not_asked", "result": "note",
-                                       "results": [{"check": "hidden_instruction", "result": "note", "mode": "watch", "enforce_result": "note", "found": ["instruction_phrase"]}]}
+                                       "results": [{"check": "secret", "result": "allow", "mode": "watch", "enforce_result": "allow", "found": []},
+                                                         {"check": "hidden_instruction", "result": "note", "mode": "watch", "enforce_result": "note", "found": ["instruction_phrase", "possible_hidden_instruction"]}]}
     from signafaide.records import DRAFT_FIELDS
 
     assert envelope_errors(d["envelope"], DRAFT_FIELDS) == [] and envelope_errors(o["envelope"], DRAFT_FIELDS) == []
@@ -366,6 +448,45 @@ def test_changed_tool_with_local_approvals(local, project):
     assert e.value.check == "changed_tool" and "signafaide checks approve lookup" in e.value.message
     assert local.checks.approve("lookup") == [local.default_agent]
     assert spec_v3.call({"id": "o_1"}, lambda: 3) == 3  # re-approved: its next call approves it
+
+
+def _lookup_spec(server, description, props):
+    info = ToolInfo("lookup", description, {"type": "object", "properties": props}, server=server)
+    return signafaide.decorator._Spec("lookup", tool=info)
+
+
+def test_local_approvals_are_per_server(local, project):
+    write_checks(project, mode="enforce")
+    a = _lookup_spec("alpha", "Look up an order.", {"id": {"type": "string"}})
+    b = _lookup_spec("beta", "Look up a customer.", {"email": {"type": "string"}})
+    assert a.call({"id": "o_1"}, lambda: 1) == 1
+    assert b.call({"email": "x"}, lambda: 2) == 2  # another server's tool of the same name: its own approval
+    assert a.call({"id": "o_1"}, lambda: 3) == 3  # and it did not change alpha's
+    doc = json.loads((local.checks.home / "approved" / f"{local.default_agent}.json").read_text())
+    assert sorted(doc) == ['["alpha","lookup"]', '["beta","lookup"]']
+    changed = _lookup_spec("alpha", "Look up an order.", {"id": {"type": "string"}, "cc": {"type": "string"}})
+    with pytest.raises(CheckError) as e:
+        changed.call({"id": "o_1"}, lambda: 4)
+    assert e.value.check == "changed_tool"
+    assert b.call({"email": "x"}, lambda: 5) == 5  # beta is untouched by alpha's change
+    assert local.checks.approve("lookup") == [local.default_agent]
+    assert json.loads((local.checks.home / "approved" / f"{local.default_agent}.json").read_text()) == {}
+
+
+def test_local_approval_of_the_old_key_belongs_to_the_first_server(local, project):
+    write_checks(project, mode="enforce")
+    path = local.checks.home / "approved" / f"{local.default_agent}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    old = _lookup_spec("", "Look up an order.", {"id": {"type": "string"}})
+    fps = C.tool_fingerprints("lookup", old.tool.description, old.tool.input_schema, None)
+    path.write_text(json.dumps({"lookup": {"description": fps["description"], "schema": fps["schema"], "at": "2026-01-01T00:00:00Z"}}))
+    a = _lookup_spec("alpha", "Look up an order.", {"id": {"type": "string"}})
+    assert a.call({"id": "o_1"}, lambda: 1) == 1
+    doc = json.loads(path.read_text())
+    assert list(doc) == ['["alpha","lookup"]'] and doc['["alpha","lookup"]']["at"] == "2026-01-01T00:00:00Z"
+    b = _lookup_spec("beta", "Look up a customer.", {"email": {"type": "string"}})
+    assert b.call({"email": "x"}, lambda: 2) == 2  # the old approval went with alpha; beta approves its own
+    assert sorted(json.loads(path.read_text())) == ['["alpha","lookup"]', '["beta","lookup"]']
 
 
 def test_strict_call_ruled_allow_discloses_only_listed_fields(online, project, service):
@@ -576,7 +697,7 @@ def test_cli_checks_and_rules(online, project, service, capsys):
     assert "block (rule: limit)" in out and "/amount" in out
     code = cli.main(["checks", "status"])
     out = capsys.readouterr().out
-    assert code == 0 and "watch mode" in out and "strict tool pay: fail closed" in out and "needs /amount" in out
+    assert code == 0 and "Calibrating" in out and "protected tool pay: if signafAIde can't be reached: Stop" in out and "needs /amount" in out
     assert cli.main(["checks", "approve", "pay"]) == 0
 
 
@@ -585,5 +706,5 @@ def test_init_writes_the_checks_file_in_watch_mode(project, service, monkeypatch
     assert cli.main(["init"]) == 0
     doc = json.loads((project / "signafaide.checks.json").read_text())
     assert doc == C.default_checks_file()
-    assert "tool-call checks: on in watch mode" in capsys.readouterr().out
+    assert "tool-call checks: on, Calibrating" in capsys.readouterr().out
     runtime._default = None

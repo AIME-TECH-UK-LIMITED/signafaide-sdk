@@ -173,7 +173,7 @@ describe("#41: the skill and agent setup", () => {
     expect(body).toContain("auditor link");
     expect(body).toContain("verification report");
     const notes = SETUP_NOTES().join("\n");
-    expect(notes).toContain("strict mode");
+    expect(notes).toContain("protects a tool");
     expect(notes).toContain("auditor link");
   });
 

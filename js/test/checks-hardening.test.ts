@@ -74,7 +74,8 @@ describe("hardening: the OpenTelemetry plug-in never takes over a checked call",
       const recs = calls("support-bot");
       expect(recs.map((r) => `${r.envelope.kind} ${r.envelope.name}`)).toEqual(["decision pay", "outcome pay"]);
       expect(recs[0].envelope.checks!.strict).toBe(true);
-      expect(recs[1].envelope.checks).toEqual({ ran: false, ruling: "not_asked", results: [], result: "allow" });
+      // A protected call always asks the witness, which rules with the newest rules: it blocks it.
+      expect(recs[1].envelope.checks).toEqual({ ran: false, ruling: "block", results: [], result: "allow" });
     });
   }
 

@@ -1,8 +1,8 @@
 {
   "name": "signafaide",
   "displayName": "signafAIde",
-  "version": "0.4.0",
-  "description": "Audit evidence for AI agent tool calls: each one signed, co-signed by an independent witness and publicly timestamped, so an auditor can verify it offline. For EU AI Act record-keeping, ISO/IEC 42001 and SOC 2. A skill that says when and how to use it, and the hosted signafAIde MCP server for quickstarts, error codes and checking evidence.",
+  "version": "0.5.0",
+  "description": "Use when adding or changing a tool that pays, deletes, sends messages, runs commands, pushes code, or edits secrets or config. signafAIde's protect() checks each call against the rules a person set before it runs and signs a record of it; records stay on this machine until a person opts in. A skill that says when and how to use it, and the hosted signafAIde MCP server for quickstarts, error codes and checking evidence.",
   "author": { "name": "AIMETECH", "url": "https://signafaide.co.uk" },
   "license": "Apache-2.0",
   "keywords": ["audit-trail", "ai-agents", "tamper-evidence", "compliance", "mcp"],

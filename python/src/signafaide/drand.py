@@ -2,7 +2,7 @@
 
 Quicknet is ``bls-unchained-g1-rfc9380``: the signature is a G1 point over
 ``sha256(round as 8 big-endian bytes)``, the public key a G2 point. Pure Python
-(``py_ecc``, a dependency). One round takes about 0.2 s, so a pack's rounds are checked
+(``py_ecc``, from the ``bls`` extra: ``pip install 'signafaide[bls]'``). One round takes about 0.2 s, so a pack's rounds are checked
 together: with random 64-bit weights r_i, e(sum r_i*sig_i, g2) == e(sum r_i*H(m_i), pk)
 holds for all of them at the cost of two pairings, and fails (except with probability
 about 2^-64) if any one is wrong. When the batch fails, each round is checked on its own

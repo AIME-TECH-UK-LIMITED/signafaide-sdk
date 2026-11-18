@@ -24,6 +24,12 @@ pub struct Decided {
     pub rules: Value,
     pub fingerprints: i64,
     pub reason: String,
+    /// Spec 1.1 (§3.5): the `calibrating` rules that would have blocked the call, the ones that
+    /// could not be evaluated for a field not disclosed, and the rules an exception kept from
+    /// matching. Each is written only when it is not empty.
+    pub would_block: Vec<String>,
+    pub not_calibrated: Vec<String>,
+    pub excepted: Vec<String>,
 }
 
 impl Decided {
@@ -45,6 +51,11 @@ impl Decided {
         });
         if let Some(e) = self.enforce_ruling {
             v["enforce_ruling"] = json!(e.as_str());
+        }
+        for (k, ids) in [("would_block", &self.would_block), ("not_calibrated", &self.not_calibrated), ("excepted", &self.excepted)] {
+            if !ids.is_empty() {
+                v[k] = json!(ids);
+            }
         }
         v
     }
@@ -112,6 +123,9 @@ pub fn decide<E>(
             rules: Value::Null,
             fingerprints: fingerprint_seq,
             reason: sentence(reason),
+            would_block: vec![],
+            not_calibrated: vec![],
+            excepted: vec![],
         });
     };
     let rs = h.rule_set;
@@ -121,7 +135,8 @@ pub fn decide<E>(
     let mut missing: Vec<String> = rs.needed(agent, tool).into_iter().filter(|p| !disclosed_list.contains(&p.as_str())).collect();
     missing.truncate(64);
 
-    // (result, basis, matched, cause of a block or reason of an allow, fix of a block)
+    // (result, basis, matched, cause of a block or reason of an allow, fix of a block, evaluation)
+    let mut calib: Option<rules::Evaluation> = None;
     let (result, basis, matched, cause, fix): (Action, &'static str, Vec<String>, String, &str) = if let Some(cv) = client_version.filter(|cv| *cv > v) {
         (Action::Block, "rules_version", vec![], format!("the call names rule set version {cv}, newer than version {v} the witness holds"), "fetch the rule set again with signafaide rules pull")
     } else if !missing.is_empty() {
@@ -137,25 +152,35 @@ pub fn decide<E>(
         (Action::Block, "fingerprint", vec![], fingerprint_cause(), FINGERPRINT_FIX)
     } else {
         let field = |p: &str| disclosed.get(p).cloned();
-        let e = rules::evaluate(rs, agent, tool, &field, Some(count))?;
+        let available = |p: &str| disclosed_list.contains(&p);
+        let e = rules::evaluate(rs, agent, tool, &field, Some(&available), Some(count))?;
         let (cause, fix) = match (e.basis, e.result) {
             (Basis::Error, _) => (
                 format!("{} of rule set version {v} met a field of the wrong type", rule_list(&e.matched)),
                 "send the field with the type the rule expects, or change the rule in the console",
             ),
             (Basis::Rule, Action::Block) => (format!("{} of rule set version {v} matched", rule_list(&e.matched)), "change the rule in the console to allow such calls"),
+            (_, Action::Allow) if !e.excepted.is_empty() => (format!("Allowed by an exception to {} of rule set version {v}.", rule_list(&e.excepted)), ""),
             (Basis::Rule, Action::Allow) => (format!("Allowed by {} of rule set version {v}.", rule_list(&e.matched)), ""),
             (Basis::Default, Action::Block) => (format!("no rule of rule set version {v} allows the call, and its default is block"), "add an allow rule in the console"),
             (Basis::Default, Action::Allow) => (format!("Allowed: no rule of rule set version {v} matched, and its default is allow."), ""),
         };
-        (e.result, e.basis.as_str(), e.matched, cause, fix)
+        let out = (e.result, e.basis.as_str(), e.matched.clone(), cause, fix);
+        calib = Some(e);
+        out
     };
-    let (ruling, enforce_ruling, reason) = match (rs.mode, result) {
+    let (ruling, enforce_ruling, mut reason) = match (rs.mode, result) {
         (Mode::Enforce, Action::Block) => (Action::Block, None, format!("Blocked: {cause}; {fix}.")),
         (Mode::Enforce, Action::Allow) => (Action::Allow, None, cause),
-        (Mode::Watch, Action::Block) => (Action::Allow, Some(Action::Block), format!("Allowed in watch mode; enforce mode would block the call: {cause}.")),
+        (Mode::Watch, Action::Block) => (Action::Allow, Some(Action::Block), format!("Allowed because the rule set is Calibrating; On would block the call: {cause}.")),
         (Mode::Watch, Action::Allow) => (Action::Allow, Some(Action::Allow), cause),
     };
+    let (would_block, not_calibrated, excepted) = calib.map(|e| (e.would_block, e.not_calibrated, e.excepted)).unwrap_or_default();
+    if !would_block.is_empty() {
+        // "...; Calibrating rule x would have blocked it."
+        reason.pop();
+        reason.push_str(&format!("; Calibrating {} would have blocked it.", rule_list(&would_block)));
+    }
     Ok(Decided {
         ruling,
         mode: rs.mode,
@@ -166,6 +191,9 @@ pub fn decide<E>(
         rules: json!({"set": rs.set, "version": v, "hash": h.rules_hash}),
         fingerprints: fingerprint_seq,
         reason: sentence(reason),
+        would_block,
+        not_calibrated,
+        excepted,
     })
 }
 
@@ -181,7 +209,8 @@ pub fn validate(r: &Value) -> Result<(), String> {
     if watch {
         keys.push("enforce_ruling");
     }
-    if let Some(k) = o.keys().find(|k| !keys.contains(&k.as_str())) {
+    const OPTIONAL: [&str; 3] = ["would_block", "not_calibrated", "excepted"];
+    if let Some(k) = o.keys().find(|k| !keys.contains(&k.as_str()) && !OPTIONAL.contains(&k.as_str())) {
         return Err(format!("the ruling has the unknown field '{k}'"));
     }
     if let Some(k) = keys.iter().find(|k| !o.contains_key(**k)) {
@@ -198,11 +227,11 @@ pub fn validate(r: &Value) -> Result<(), String> {
     }
     let ruling = o["ruling"].as_str().filter(|r| matches!(*r, "allow" | "block")).ok_or("ruling is allow or block")?;
     if !matches!(o["mode"].as_str(), Some("watch" | "enforce")) {
-        return Err("the ruling's mode is watch or enforce".into());
+        return Err("the ruling is allow or block, and its `mode` is \"watch\" (Calibrating) or \"enforce\" (On)".into());
     }
     let enforce = if watch {
         if ruling != "allow" {
-            return Err("in watch mode the ruling is always allow".into());
+            return Err("when the ruling's `mode` is \"watch\" (Calibrating) the ruling is always allow".into());
         }
         o["enforce_ruling"].as_str().filter(|r| matches!(*r, "allow" | "block")).ok_or("enforce_ruling is allow or block")?
     } else {
@@ -210,7 +239,7 @@ pub fn validate(r: &Value) -> Result<(), String> {
     };
     let basis = o["basis"].as_str().filter(|b| matches!(*b, "rules_version" | "fields_missing" | "fingerprint" | "error" | "rule" | "default")).ok_or("basis is rules_version, fields_missing, fingerprint, error, rule or default")?;
     if BLOCKING_BASES.contains(&basis) && enforce != "block" {
-        return Err(format!("basis {basis} always blocks in enforce mode"));
+        return Err(format!("basis {basis} always blocks when On (`mode` is \"enforce\")"));
     }
     let matched = o["matched"].as_array().filter(|m| m.len() <= 16).ok_or("matched is a list of at most 16 rule ids")?;
     if !matched.iter().all(|m| m.as_str().is_some_and(super::is_rule_id)) {
@@ -234,7 +263,7 @@ pub fn validate(r: &Value) -> Result<(), String> {
     match &o["rules"] {
         Value::Null => {
             if watch || !matches!(basis, "fingerprint" | "default") {
-                return Err("without a rule set a ruling is in enforce mode, with basis fingerprint or default".into());
+                return Err("without a rule set a ruling has `mode` \"enforce\" (On), with basis fingerprint or default".into());
             }
         }
         Value::Object(m) => {
@@ -253,6 +282,33 @@ pub fn validate(r: &Value) -> Result<(), String> {
     }
     if !o["reason"].as_str().is_some_and(|r| (1..=300).contains(&r.chars().count())) {
         return Err("the ruling's reason is 1 to 300 characters".into());
+    }
+    // Spec 1.1: would_block, not_calibrated and excepted, each written only when not empty.
+    let mut lists: Vec<(&str, Vec<&str>)> = vec![("matched", matched.iter().filter_map(Value::as_str).collect())];
+    for k in OPTIONAL {
+        let Some(l) = o.get(k) else { continue };
+        let l = l.as_array().filter(|l| (1..=16).contains(&l.len())).ok_or_else(|| format!("the ruling's {k} is a list of 1 to 16 rule ids, written only when not empty"))?;
+        let ids: Vec<&str> = l.iter().filter_map(|x| x.as_str().filter(|s| super::is_rule_id(s))).collect();
+        if ids.len() != l.len() {
+            return Err(format!("the ruling's {k} holds rule ids"));
+        }
+        if ids.iter().enumerate().any(|(i, x)| ids[..i].contains(x)) {
+            return Err(format!("the ruling's {k} names a rule twice"));
+        }
+        if !matches!(basis, "error" | "rule" | "default") || o["rules"].is_null() {
+            return Err(format!("the ruling's {k} comes only from the evaluation of a rule set (basis error, rule or default)"));
+        }
+        if k != "excepted" && watch {
+            return Err(format!("the ruling's {k} is about Calibrating rules of a rule set that is On (`mode` is \"enforce\")"));
+        }
+        lists.push((k, ids));
+    }
+    for (i, (a, x)) in lists.iter().enumerate() {
+        for (b, y) in &lists[i + 1..] {
+            if let Some(id) = x.iter().find(|id| y.contains(id)) {
+                return Err(format!("the rule {id} is in both {a} and {b} of the ruling"));
+            }
+        }
     }
     Ok(())
 }

@@ -4,13 +4,24 @@ signafAIde for LangChain: a signed, tamper-evident record of every tool call an 
 
 Each tool call writes a `decision` record before the tool runs and an `outcome` record after it. Records are signed with the agent's own key and chained on the machine that wrote them, in `.signafaide/`. Once a person opts in, a witness (the signafAIde service, or one you host) co-signs them and timestamps them publicly, so neither side can forge or edit a record alone. An auditor can verify the records without trusting either side. Records attest integrity and timing, never whether a decision was right.
 
+## Quickstart
+
+To protect the agent's `@tool` functions with rules (block above an amount, On or Calibrating), run this in the agent's folder, at a terminal:
+
+```bash
+uv add langchain-signafaide
+uv run signafaide protect
+```
+
+It finds the `@tool` functions, asks which to protect and what to block, shows the change (`@signafaide.protect(agent=...)` under `@tool`) and asks before writing it, makes a free sandbox if you say yes and saves your rules. Then `uv run signafaide check <tool> field=value` (a dry run), `signafaide pull` (the console's rules), `signafaide prove <tool>` (the auditor link) and `signafaide login` (a person's sign-in for saving rules). The middleware below records every tool call the agent makes, whatever protect found.
+
 ## Install
 
 ```bash
-pip install langchain-signafaide
+uv add langchain-signafaide      # or, in a virtual environment: python -m pip install langchain-signafaide
 ```
 
-Needs Python 3.10 or later and LangChain 1.x.
+Needs Python 3.10 or later and LangChain 1.x, and installs `signafaide` 0.4 or later (below 1.0).
 
 ## Middleware
 
@@ -36,7 +47,7 @@ signafaide verify
 |---|---|
 | `agent` | The name of the record chain. Use one name per running agent instance in production. Default: the project folder's name. |
 | `tools` | Every tool the agent can call (tools or names). They are declared in the chain as recorded, so a verifier can report that all of the agent's tools are covered. Without it, a tool is declared when it is first called. |
-| `strict` | A tool runs only once its decision has a receipt from the witness. If the witness cannot be reached, the call raises `NotRecorded` and the tool does not run. |
+| `strict` | Protects the tool: it runs only once its decision has a receipt from the witness. If the witness cannot be reached, the call raises `NotRecorded` and the tool does not run. |
 | `store_content` | Also send inputs and outputs to the witness, encrypted. Default: hashes only. |
 
 The middleware works with `invoke` and `ainvoke`. A tool that raises is recorded with its error and the exception is raised unchanged.

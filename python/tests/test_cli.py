@@ -29,13 +29,16 @@ def cli(project, service, monkeypatch, capsys):
 
 
 def test_commands_registered():
-    assert list(COMMANDS) == ["init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush", "checks", "rules"]
+    assert list(COMMANDS) == ["protect", "check", "pull", "prove", "start-fresh", "login", "logout", "whoami",
+                              "init", "status", "repair", "verify", "keys", "export", "replay", "compare", "claim", "flush", "checks", "rules"]
 
 
 def test_init_then_claim(cli, project, service):
     code, out, _ = cli("init")
-    # ready + claim link, why claim, time left, terms, what is sent, which tool-call checks are on, how to change them
-    assert code == 0 and out.count("\n") == 7 and "claim it at " + service.url in out and "tool-call checks: on in watch mode" in out
+    # ready + claim link, why claim, time left, terms, what is sent, which tool-call checks are on, how to change them,
+    # the project note and the file it went in
+    assert "agents: AGENTS.md created, with the signafAIde note for coding agents (a marked block)" in out
+    assert code == 0 and out.count("\n") == 10 and "claim it at " + service.url in out and "tool-call checks: on, Calibrating" in out
     assert f"By creating a sandbox you agree to the signafAIde Terms ({service.url}/legal/terms) and Privacy notice ({service.url}/legal/privacy)." in out
     assert "records written before now ship with their original times" in out
     claim = out.splitlines()[0].rsplit(" ", 1)[1]
@@ -55,7 +58,7 @@ def test_no_key_status_flush_verify_send_nothing(cli, service):
     assert (code, out.strip()) == (0, "no API key: nothing was sent; 2 records stay local. Run `signafaide init` (or set SIGNAFAIDE_API_KEY) to send hashes")
     code, out, _ = cli("verify")
     lines = out.strip().splitlines()
-    assert code == 0 and lines[-1] == "PASS: 4 of 12 checks passed, 8 not checked (nothing co-signed yet)"
+    assert code == 0 and lines[-1] == "PASS (local checks only): 4 of 12 checks passed, 8 not checked (nothing co-signed yet)"
     assert lines[-2] == "co-signature, public timestamp: not yet. Run `signafaide init` to send hashes, or self-host (SIGNAFAIDE_URL)"
     assert re.search(r"^ 3\. Client signatures +PASS +2 records", out, re.M)
     assert service.calls == []

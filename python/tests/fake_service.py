@@ -54,6 +54,20 @@ class FakeService:
         self.req_headers = {}
         self.client_ids = []  # X-Signafaide-Client of every request
         self.events = []
+        #: Spec 1.1: device sign-ins, person sessions, how each version was published, auditor links.
+        self.devices = {}  # device_code -> {"user_code", "status"}
+        self.sessions = {}  # session -> {"email", "org", "roles"}
+        #: A console page: POST /v1/rules with a session answers 202 {"confirm_in_console": <it>}.
+        self.confirm_in_console = None
+        self.published = []
+        self.auditor_links = []
+        self.auditor_links_off = False
+        #: The plan's longest auditor link (plan_required above it), whether the refusal says it
+        #: as max_days, and a witness of before agent_keys and head (bad_request when sent).
+        self.auditor_max_days = None
+        self.auditor_max_in_body = True
+        self.auditor_links_no_keys = False
+        self.pending_roles = {}
         handler = self._handler()
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -98,9 +112,62 @@ class FakeService:
         if method == "POST" and path == "/v1/events":
             self.events.append(body.get("name"))
             return 200, {}
-        prj = self.projects.get((auth or "").removeprefix("Bearer "))
+        if method == "POST" and path == "/v1/device/code":
+            code = f"dev{len(self.devices) + 1:040d}"
+            self.devices[code] = {"user_code": "BCDF-GHJK", "status": "pending"}
+            return 200, {"device_code": code, "user_code": "BCDF-GHJK", "verification_uri": f"{self.url}/app/device",
+                         "verification_uri_complete": f"{self.url}/app/device?code=BCDF-GHJK", "expires_in": 600, "interval": 5}
+        if method == "POST" and path == "/v1/device/token":
+            d = self.devices.get((body or {}).get("device_code"))
+            if d is None or d["status"] == "used":
+                return 200, {"status": "expired"}
+            if d["status"] == "approved":
+                d["status"] = "used"
+                session = f"sfa_user_{len(self.sessions) + 1:032d}"
+                self.sessions[session] = {"email": "owner@example.test", "org": "Example Org", "roles": self.pending_roles}
+                return 200, {"status": "approved", "session": session, "expires_at": _rfc3339(time.time() + 12 * 3600),
+                             "person": {"email": "owner@example.test"}, "organisation": {"name": "Example Org"}}
+            return 200, {"status": d["status"]}
+        bearer = (auth or "").removeprefix("Bearer ")
+        person = self.sessions.get(bearer)
+        if person is not None:
+            if method == "GET" and path == "/v1/session":
+                # §6: the projects the person can see, with their role in each (owner, admin or developer).
+                projects = [{"project": p["project"], "name": "Claims", "env": p["env"], "role": person["roles"][p["project"]]}
+                            for p in self.projects.values() if p["project"] in person["roles"]]
+                return 200, {"person": {"email": person["email"]}, "organisation": {"name": person["org"]}, "expires_at": _rfc3339(time.time() + 3600), "projects": projects}
+            if method == "DELETE" and path == "/v1/session":
+                del self.sessions[bearer]
+                return 204, ""
+            if method == "POST" and path == "/v1/rules":
+                target = next((k for k, p in self.projects.items() if p["project"] == body.get("project") and p["env"] == body.get("env")), None)
+                if target is None:
+                    return err(404, "not_found", "No such project.")
+                if self.confirm_in_console is not None:
+                    # §6: loosening a live project's rules from the command line waits for a person in the console.
+                    return 202, {"confirm_in_console": self.confirm_in_console}
+                return self._publish_draft(target, body, "session", person["email"])
+            return err(401, "invalid_key", "A person session is not an API key.")
+        prj = self.projects.get(bearer)
         if prj is None:
             return err(401, "invalid_key", "The API key is not valid; run `signafaide init` for a new sandbox key.")
+        if method == "POST" and path == "/v1/rules":
+            # An API key publishes only into its own sandbox while it is unclaimed (§6).
+            if prj["env"] != "test" or prj.get("claimed") or body.get("project") != prj["project"] or body.get("env") != prj["env"]:
+                return err(401, "invalid_key", "An API key cannot publish rules; sign in with `signafaide login`.")
+            return self._publish_draft(bearer, body, "sandbox_key", None)
+        if method == "POST" and path == "/v1/auditor-links":
+            if self.auditor_links_off:
+                return err(404, "not_found", "No such endpoint.")
+            if self.auditor_max_days is not None and body.get("days", 0) > self.auditor_max_days:
+                extra = {"max_days": self.auditor_max_days} if self.auditor_max_in_body else {}
+                return err(402, "plan_required", f"An auditor link of an unclaimed sandbox expires within {self.auditor_max_days} days: ask for fewer days, "
+                           "or claim the sandbox in the console.", **extra)
+            if self.auditor_links_no_keys and ("agent_keys" in body or "head" in body):
+                return err(400, "bad_request", "Unknown field agent_keys.")
+            self.auditor_links.append(body)
+            return 201, {"url": f"{self.url}/audit/aud_{len(self.auditor_links)}", "expires_at": _rfc3339(time.time() + body.get("days", 30) * 86_400),
+                         **({"agent_keys": True} if "agent_keys" in body else {})}
         if method == "GET" and path == "/v1/project":
             # As the service: expires_at only while the sandbox is unclaimed.
             return 200, {"project": prj["project"], "env": prj["env"], "claimed": bool(prj.get("claimed")), "name": prj.get("name"),
@@ -283,6 +350,7 @@ class FakeService:
         prj = self.projects[api_key]
         items = self.rule_items.setdefault(prj["project"], [])
         prev = items[-1]["rules"] if items else None
+        mode, default = mode or "enforce", default or "allow"
         doc = {"format": "signafaide-rules/1", "project": prj["project"], "env": prj["env"], "set": set_id, "version": len(items) + 1,
                "prev": hash_json(prev) if prev else None, "issued": issued or now(), "mode": mode, "default": default, "fail": fail or {},
                "addresses": addresses or {"hosts": [], "cidrs": []}, "approved": approved, "rules": rules}
@@ -291,6 +359,32 @@ class FakeService:
         item = {"rules": doc, "sig": self.key.sign("rules", hash_json(doc)), "service_key_id": self.key.key_id}
         items.append(item)
         return item
+
+    def _publish_draft(self, api_key, body, how, who):
+        """POST /v1/rules (§6, spec 1.1): check ``after`` and the whole document, then sign it."""
+        from signafaide import checks as C
+
+        prj = self.projects[api_key]
+        items = self.rule_items.setdefault(prj["project"], [])
+        newest = items[-1]["rules"]["version"] if items else None
+        if body.get("after") != newest:
+            return err(400, "bad_request", "Someone published meanwhile: fetch the rule set, merge and try again.")
+        d = body.get("draft") or {}
+        item = self.publish_rules(api_key, d.get("rules"), mode=d.get("mode"), default=d.get("default"), fail=d.get("fail"), addresses=d.get("addresses"),
+                                  approved=d.get("approved"), fingerprint_exceptions=d.get("fingerprint_exceptions"))
+        bad = C.rule_set_errors(item["rules"])
+        if bad:
+            items.pop()
+            return err(400, "bad_request", f"The rule set is not valid: {bad}")
+        self.published.append({"project": prj["project"], "version": item["rules"]["version"], "how": how, "who": who})
+        return 201, item
+
+    def answer_device(self, status="approved", roles=None):
+        """Approve (or refuse) the pending device sign-ins, as a person on the console page does."""
+        for d in self.devices.values():
+            if d["status"] == "pending":
+                d["status"] = status
+        self.pending_roles = roles or {}
 
     def list_update(self, add=(), remove=()):
         """Publish an update of the shared fingerprint list (§11.2)."""
@@ -339,13 +433,18 @@ class FakeService:
             elif hit:
                 res = {"result": "block", "basis": "fingerprint", "matched": []}
             else:
-                res = C.evaluate(doc, env["agent"], env["name"], lambda p: values.get(p, C.ABSENT), count=lambda lim: 0)
+                res = C.evaluate(doc, env["agent"], env["name"], lambda p: values.get(p, C.ABSENT), count=lambda lim: 0, available=lambda p: p in ch["disclosed"])
         g = {"v": 1, "record_hash": rc["record_hash"], "batch_hash": rc["batch_hash"], "server_time": rc["batch"]["server_time"],
              "ruling": res["result"] if mode == "enforce" else "allow", "mode": mode, "basis": res["basis"], "matched": res["matched"],
              "missing": missing[:64] if res["basis"] == "fields_missing" else [], "rules": rules, "fingerprints": len(self.list_updates),
              "reason": f"{res['result'].capitalize()}ed ({res['basis']})."}
         if mode == "watch":
             g["enforce_ruling"] = res["result"]
+        # Spec 1.1: what else the evaluation found, each only when not empty.
+        if res["basis"] in ("error", "rule", "default"):
+            for k in ("would_block", "not_calibrated", "excepted"):
+                if res.get(k):
+                    g[k] = res[k]
         return g
 
     def export(self, prj, agent, from_, to):
@@ -370,6 +469,8 @@ class FakeService:
             "heads": [prj["heads"][a] for a in agents if a in prj["heads"]],
             "records": recs,
             "anchors": [],
+            # The signed rule set versions (§7): every version this project holds, in version order.
+            **({"rule_sets": list(self.rule_items[prj["project"]])} if self.rule_items.get(prj["project"]) else {}),
         })
 
     def sign_export(self, pack):
@@ -413,5 +514,8 @@ class FakeService:
 
             def do_POST(self):
                 self._do("POST")
+
+            def do_DELETE(self):
+                self._do("DELETE")
 
         return H

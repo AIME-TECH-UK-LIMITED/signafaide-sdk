@@ -25,6 +25,13 @@ pub struct Ruled {
     pub allow: u64,
     pub block: u64,
     pub watch_would_block: u64,
+    /// Spec 1.1: rulings of `allow` that name a Calibrating rule that would have blocked the call.
+    pub calibrating_would_block: u64,
+    /// Spec 1.1: rulings of `allow` under which an exception kept a rule from matching.
+    pub by_exception: u64,
+    /// Spec 1.1: rulings with a Calibrating rule that could not be evaluated (a field it needs
+    /// was not disclosed).
+    pub not_calibrated: u64,
 }
 
 #[derive(Serialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -53,6 +60,8 @@ pub struct AgentChecks {
     pub ruled: Ruled,
     pub no_ruling: NoRuling,
     pub ran_after_block: Vec<u64>,
+    /// The seqs of outcomes whose result the client withheld from the agent (1.1).
+    pub withheld: Vec<u64>,
     pub rule_sets: Vec<RuleSetUsed>,
 }
 
@@ -96,6 +105,16 @@ pub fn agent_checks(items: &[Item<'_>]) -> Option<AgentChecks> {
             if g["mode"] == "watch" && g["enforce_ruling"] == "block" {
                 j.ruled.watch_would_block += 1;
             }
+            let has = |k: &str| g[k].as_array().is_some_and(|l| !l.is_empty());
+            if g_ruling == Some("allow") && has("would_block") {
+                j.ruled.calibrating_would_block += 1;
+            }
+            if g_ruling == Some("allow") && has("excepted") {
+                j.ruled.by_exception += 1;
+            }
+            if has("not_calibrated") {
+                j.ruled.not_calibrated += 1;
+            }
         }
         let o = outcomes.get(&d.seq);
         let oc = o.and_then(|o| o.checks);
@@ -121,7 +140,11 @@ pub fn agent_checks(items: &[Item<'_>]) -> Option<AgentChecks> {
                 }
             }
         }
+        if i.kind == Kind::Outcome && i.checks.is_some_and(|c| c["result"] == "block") {
+            j.withheld.push(i.seq);
+        }
     }
+    j.withheld.sort_unstable();
     j.ran_after_block.sort_unstable();
     let mut sets: Vec<RuleSetUsed> = sets.into_iter().collect();
     sets.sort_by(|a, b| (&a.set, a.version.unwrap_or(-1), &a.hash).cmp(&(&b.set, b.version.unwrap_or(-1), &b.hash)));
@@ -134,7 +157,7 @@ pub fn lines(agent: &str, j: &AgentChecks) -> Vec<String> {
     let mut out = Vec::new();
     if j.checked > 0 {
         let mut parts = vec![format!("{} allowed", j.allowed)];
-        for (n, what) in [(j.noted, "with notes"), (j.blocked_here, "blocked here"), (j.blocked_by_witness, "blocked by the witness")] {
+        for (n, what) in [(j.noted, "with notes"), (j.blocked_here, "blocked here without a ruling from the witness"), (j.blocked_by_witness, "blocked by the witness")] {
             if n > 0 {
                 parts.push(format!("{n} {what}"));
             }
@@ -152,25 +175,38 @@ pub fn lines(agent: &str, j: &AgentChecks) -> Vec<String> {
             p.push(format!("{} blocked", j.ruled.block));
         }
         if j.ruled.watch_would_block > 0 {
-            p.push(format!("{} in watch mode that enforce mode would have blocked", j.ruled.watch_would_block));
+            p.push(format!("{} Calibrating (would have blocked if On)", j.ruled.watch_would_block));
         }
-        out.push(format!("{agent}: {} ruled by the witness: {}", plural(ruled, "strict call", "strict calls"), p.join(", ")));
+        if j.ruled.calibrating_would_block > 0 {
+            p.push(format!("{} allowed that a Calibrating rule would have blocked if On", j.ruled.calibrating_would_block));
+        }
+        if j.ruled.by_exception > 0 {
+            p.push(format!("{} allowed by exception", j.ruled.by_exception));
+        }
+        if j.ruled.not_calibrated > 0 {
+            p.push(format!("{} with a Calibrating rule that could not be checked because a field it needs was not sent", j.ruled.not_calibrated));
+        }
+        out.push(format!("{agent}: {} ruled by the witness: {}", plural(ruled, "protected call", "protected calls"), p.join(", ")));
     }
     let nr = &j.no_ruling;
     let total = nr.ran + nr.not_run + nr.no_outcome;
     if total > 0 {
         let mut p = Vec::new();
-        for (n, what) in [(nr.ran, "ran (fail open)"), (nr.not_run, "did not run"), (nr.no_outcome, "have no outcome in the pack")] {
+        for (n, what) in [(nr.ran, "ran because the tool was set to Let it run"), (nr.not_run, "did not run"), (nr.no_outcome, "have no outcome in the pack")] {
             if n > 0 {
                 p.push(format!("{n} {what}"));
             }
         }
         let had = if total == 1 { "had no ruling when it was decided" } else { "had no ruling when they were decided" };
-        out.push(format!("{agent}: {} {had}: {}", plural(total, "strict call", "strict calls"), p.join(", ")));
+        out.push(format!("{agent}: {} {had}: {}", plural(total, "protected call", "protected calls"), p.join(", ")));
     }
     if !j.ran_after_block.is_empty() {
         let seqs: Vec<String> = j.ran_after_block.iter().map(u64::to_string).collect();
         out.push(format!("{agent}: {} ran after a block: seq {}", plural(seqs.len() as u64, "call", "calls"), seqs.join(", ")));
+    }
+    if !j.withheld.is_empty() {
+        let seqs: Vec<String> = j.withheld.iter().map(u64::to_string).collect();
+        out.push(format!("{agent}: {} withheld from the agent: seq {}", plural(seqs.len() as u64, "tool result", "tool results"), seqs.join(", ")));
     }
     if !j.rule_sets.is_empty() {
         let parts: Vec<String> = j

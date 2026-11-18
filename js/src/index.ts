@@ -40,10 +40,12 @@ import {
 export * from "./core.js";
 
 installNodeCrypto();
-export { NotRecorded, autoDeclareTools, declareTools, note, record, toJsonable, wrapTool, wrapTools, type DeclareOptions, type RecordOptions, type WrapOptions } from "./record.js";
+export { NotRecorded, autoDeclareTools, declareTools, note, protect, record, toJsonable, wrapTool, wrapTools, type DeclareOptions, type ProtectOptions, type RecordOptions, type WrapOptions } from "./record.js";
+export { notes, onNote, type CallNote, type NoteHandler } from "./notes.js";
 export { Recorder, configure, getRecorder, recordingDisabled, testMode, type Blocked, type FlushResult, type RecorderOptions, type StopResult } from "./runtime.js";
 export { State, StateError, TOOL_SOURCE_MAX_AGE_MS, TOOL_SOURCE_REFRESH_MS } from "./state.js";
-export { CheckError, ChecksState, type ToolInfo } from "./checks-runtime.js";
+export { CheckError, ChecksState, SignafaideBlocked, type ToolInfo } from "./checks-runtime.js";
+export { conditionWords, defaultWords, ruleSetLines, ruleSetWords, ruleWords, type RuleSetWords } from "./words.js";
 export { Entry, Replay, loadServiceKeys, replay, type ReplayOptions } from "./replay.js";
 export { ExperimentReport, VerificationFailed, compare, recordedValue, type CompareOptions, type ExperimentRow } from "./experiments.js";
 export { DEFAULT_TIMESTAMP_URL, blockHeader, checkHeader, lookupTimestamps, rootsFromVector, type BlockHeader, type BlockRoots } from "./timestamps.js";

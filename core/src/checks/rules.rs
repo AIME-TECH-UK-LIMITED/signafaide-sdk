@@ -59,6 +59,48 @@ impl Mode {
     }
 }
 
+/// A rule's state (§10.1, spec 1.1): `on` takes part in the result; `calibrating` never
+/// blocks, and a call it would have blocked is noted (`would_block`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum State {
+    Calibrating,
+    On,
+}
+
+impl State {
+    pub fn parse(s: &str) -> Option<State> {
+        match s {
+            "calibrating" => Some(State::Calibrating),
+            "on" => Some(State::On),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            State::Calibrating => "calibrating",
+            State::On => "on",
+        }
+    }
+
+    /// The state a rule has when its document omits `state`: from the rule set's mode, so a
+    /// document written before spec 1.1 means what it meant.
+    pub fn from_mode(mode: Mode) -> State {
+        match mode {
+            Mode::Watch => State::Calibrating,
+            Mode::Enforce => State::On,
+        }
+    }
+
+    /// The word people read: `On` or `Calibrating`.
+    pub fn word(self) -> &'static str {
+        match self {
+            State::Calibrating => "Calibrating",
+            State::On => "On",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Op {
     Eq,
@@ -120,17 +162,49 @@ pub struct Condition {
     pub value: Value,
 }
 
+/// An exception to a block rule (§10.1, spec 1.1): the rule does not match a call whose field
+/// at `field` is present and equal (JCS) to `value`. `reason` is the admin's, `since` the
+/// version that added it.
+#[derive(Clone, Debug)]
+pub struct Exception {
+    pub field: String,
+    pub value: Value,
+    pub reason: String,
+    pub since: i64,
+}
+
 #[derive(Clone, Debug)]
 pub struct Rule {
     pub id: String,
+    pub about: String,
     pub action: Action,
     pub tools: Option<Vec<String>>,
     pub agents: Option<Vec<String>>,
     pub when: Vec<Condition>,
     pub limit: Option<Limit>,
+    /// `state` as written; `None` when the document omits it (§10.1).
+    pub state: Option<State>,
+    /// `exceptions`, empty when the document has none.
+    pub exceptions: Vec<Exception>,
 }
 
 impl Rule {
+    /// The rule's state in a rule set of `mode`: as written, else from the mode.
+    pub fn state_in(&self, mode: Mode) -> State {
+        self.state.unwrap_or(State::from_mode(mode))
+    }
+
+    /// The fields of the rule's conditions, each once, in condition order.
+    pub fn condition_fields(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        for c in &self.when {
+            if !out.contains(&c.field.as_str()) {
+                out.push(&c.field);
+            }
+        }
+        out
+    }
+
     /// §10.3: the rule applies when its `tools` is null or holds the tool, and its `agents` is
     /// null or holds the agent.
     pub fn applies(&self, agent: &str, tool: &str) -> bool {
@@ -161,7 +235,7 @@ impl RuleSet {
     }
 }
 
-fn exact(o: &Map<String, Value>, keys: &[&str], optional: &[&str], what: &str) -> Result<(), String> {
+pub(crate) fn exact(o: &Map<String, Value>, keys: &[&str], optional: &[&str], what: &str) -> Result<(), String> {
     if let Some(k) = o.keys().find(|k| !keys.contains(&k.as_str()) && !optional.contains(&k.as_str())) {
         return Err(format!("{what} has the unknown field '{k}'"));
     }
@@ -171,17 +245,17 @@ fn exact(o: &Map<String, Value>, keys: &[&str], optional: &[&str], what: &str) -
     Ok(())
 }
 
-fn declared_name(v: &Value) -> bool {
+pub(crate) fn declared_name(v: &Value) -> bool {
     v.as_str().is_some_and(|s| (1..=101).contains(&s.chars().count()))
 }
 
-fn host_pattern(v: &Value) -> bool {
+pub(crate) fn host_pattern(v: &Value) -> bool {
     let Some(s) = v.as_str() else { return false };
     let name = s.strip_prefix("*.").unwrap_or(s);
     !name.is_empty() && name.len() <= 253 && name.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_'))
 }
 
-fn cidr(v: &Value) -> bool {
+pub(crate) fn cidr(v: &Value) -> bool {
     let Some((addr, len)) = v.as_str().and_then(|s| s.split_once('/')) else { return false };
     let Ok(len) = len.parse::<u8>() else { return false };
     match addr.parse::<std::net::IpAddr>() {
@@ -216,7 +290,7 @@ impl RuleSet {
         let mode = match o["mode"].as_str() {
             Some("watch") => Mode::Watch,
             Some("enforce") => Mode::Enforce,
-            _ => return Err("mode must be watch or enforce".into()),
+            _ => return Err("`mode` must be \"watch\" (Calibrating) or \"enforce\" (On)".into()),
         };
         let default = Action::parse(&o["default"]).ok_or("default must be allow or block")?;
         let fail = o["fail"].as_object().filter(|f| f.len() <= 1000).ok_or("fail must be an object of at most 1,000 tools")?;
@@ -269,30 +343,94 @@ impl RuleSet {
                 }
             }
         }
-        let list = o["rules"].as_array().filter(|r| r.len() <= 1000).ok_or("rules must be a list of at most 1,000 rules")?;
-        let mut rules = Vec::with_capacity(list.len());
-        let mut ids = BTreeSet::new();
-        for r in list {
-            let rule = parse_rule(r)?;
-            if !ids.insert(rule.id.clone()) {
-                return Err(format!("the rule id '{}' is used twice", rule.id));
+        let rules = parse_rules(&o["rules"], Some(version))?;
+        if mode == Mode::Watch {
+            if let Some(r) = rules.iter().find(|r| r.state == Some(State::On)) {
+                return Err(format!("rule '{}': a rule set whose `mode` is \"watch\" (Calibrating) never blocks, so no rule in it is On", r.id));
             }
-            rules.push(rule);
         }
         Ok(RuleSet { project: project.into(), env: env.into(), set: set.into(), version, issued: issued.into(), mode, default, rules, fingerprint_exceptions })
     }
 
-    /// §10.4: the `field` of every condition of every rule that applies to the call (`limit`
-    /// rules included), each once, in Unicode code point order.
+    /// The local rules of a checks file (§8): `{"default", "rules"}`, the rules as §10.1 writes
+    /// them but without `limit`, `state` and `exceptions`. The result is a rule set in enforce
+    /// mode named `local`; the checks file's mode for the tool decides how its entry is written.
+    pub fn parse_local(obj: &Value) -> Result<RuleSet, String> {
+        let o = obj.as_object().ok_or("rules must be null or {default, rules}")?;
+        exact(o, &["default", "rules"], &[], "rules")?;
+        let default = Action::parse(&o["default"]).ok_or("rules.default must be allow or block")?;
+        let rules = parse_rules(&o["rules"], None)?;
+        if let Some(r) = rules.iter().find(|r| r.limit.is_some()) {
+            return Err(format!("rule '{}': local rules may not use limit: only the witness counts calls", r.id));
+        }
+        Ok(RuleSet {
+            project: String::new(),
+            env: String::new(),
+            set: "local".into(),
+            version: 0,
+            issued: String::new(),
+            mode: Mode::Enforce,
+            default,
+            rules,
+            fingerprint_exceptions: BTreeSet::new(),
+        })
+    }
+
+    /// Whether the rule `r` takes part in the result (§10.3): every rule of a rule set in watch
+    /// mode (whose result is then written as watch mode writes it), and the `on` rules of a rule
+    /// set in enforce mode. A `calibrating` rule in enforce mode never does.
+    pub fn takes_part(&self, r: &Rule) -> bool {
+        self.mode == Mode::Watch || r.state_in(self.mode) == State::On
+    }
+
+    /// §10.4: the fields a call **needs**: the `field` of every condition of every rule that
+    /// applies to the call and takes part in the result (§10.3), `limit` rules included, each
+    /// once, in Unicode code point order. A `calibrating` rule's fields and the fields of
+    /// exceptions are never needed.
     pub fn needed(&self, agent: &str, tool: &str) -> Vec<String> {
-        let set: BTreeSet<&str> = self.rules.iter().filter(|r| r.applies(agent, tool)).flat_map(|r| r.when.iter().map(|c| c.field.as_str())).collect();
+        let set: BTreeSet<&str> = self.rules.iter().filter(|r| r.applies(agent, tool) && self.takes_part(r)).flat_map(|r| r.when.iter().map(|c| c.field.as_str())).collect();
         set.into_iter().map(String::from).collect()
+    }
+
+    /// §10.4: the fields a call **can send**: the `field` of every condition of every rule that
+    /// applies to the call, whatever its state, and the `field` of each of their exceptions,
+    /// each once, in Unicode code point order. Every needed field is one of them.
+    pub fn sendable(&self, agent: &str, tool: &str) -> Vec<String> {
+        let set: BTreeSet<&str> = self
+            .rules
+            .iter()
+            .filter(|r| r.applies(agent, tool))
+            .flat_map(|r| r.when.iter().map(|c| c.field.as_str()).chain(r.exceptions.iter().map(|e| e.field.as_str())))
+            .collect();
+        set.into_iter().map(String::from).collect()
+    }
+
+    /// Whether the document uses a key of spec 1.1 (a rule's `state` or `exceptions`).
+    pub fn uses_states_or_exceptions(&self) -> bool {
+        self.rules.iter().any(|r| r.state.is_some() || !r.exceptions.is_empty())
     }
 }
 
-fn parse_rule(r: &Value) -> Result<Rule, String> {
+/// The `rules` list of a rule set document (`version` Some) or of a checks file's local rules
+/// (`version` None: no `state` and no `exceptions`).
+fn parse_rules(v: &Value, version: Option<i64>) -> Result<Vec<Rule>, String> {
+    let list = v.as_array().filter(|r| r.len() <= 1000).ok_or("rules must be a list of at most 1,000 rules")?;
+    let mut rules = Vec::with_capacity(list.len());
+    let mut ids = BTreeSet::new();
+    for r in list {
+        let rule = parse_rule(r, version)?;
+        if !ids.insert(rule.id.clone()) {
+            return Err(format!("the rule id '{}' is used twice", rule.id));
+        }
+        rules.push(rule);
+    }
+    Ok(rules)
+}
+
+fn parse_rule(r: &Value, version: Option<i64>) -> Result<Rule, String> {
     let o = r.as_object().ok_or("each rule is an object")?;
-    exact(o, &["id", "about", "action", "tools", "agents", "when"], &["limit"], "a rule")?;
+    let optional: &[&str] = if version.is_some() { &["limit", "state", "exceptions"] } else { &["limit"] };
+    exact(o, &["id", "about", "action", "tools", "agents", "when"], optional, "a rule")?;
     let id = o["id"].as_str().filter(|i| is_rule_id(i)).ok_or("a rule id matches ^[a-z0-9][a-z0-9._-]{0,63}$")?.to_string();
     let at = |m: &str| format!("rule '{id}': {m}");
     if o["about"].as_str().is_none_or(|a| a.chars().count() > 200) {
@@ -329,7 +467,33 @@ fn parse_rule(r: &Value) -> Result<Rule, String> {
             Some(Limit { calls, seconds, per })
         }
     };
-    Ok(Rule { id, action, tools, agents, when, limit })
+    let state = match o.get("state") {
+        None => None,
+        Some(v) => Some(v.as_str().and_then(State::parse).ok_or_else(|| at("state must be calibrating or on"))?),
+    };
+    let mut exceptions = Vec::new();
+    if let Some(xs) = o.get("exceptions") {
+        if action != Action::Block {
+            return Err(at("exceptions are allowed only on a block rule"));
+        }
+        let xs = xs.as_array().filter(|x| (1..=256).contains(&x.len())).ok_or_else(|| at("exceptions is a list of 1 to 256 exceptions"))?;
+        let doc_version = version.unwrap_or(0);
+        for x in xs {
+            let e = x.as_object().ok_or_else(|| at("an exception is {field, value, reason, since}"))?;
+            exact(e, &["field", "value", "reason", "since"], &[], &at("an exception"))?;
+            let field = e["field"].as_str().filter(|f| is_pointer(f)).ok_or_else(|| at("an exception's field must be a JSON Pointer of at most 256 characters, ~ only as ~0 or ~1"))?;
+            let reason = e["reason"].as_str().filter(|r| (1..=200).contains(&r.chars().count())).ok_or_else(|| at("an exception's reason is text of 1 to 200 characters"))?;
+            let since = safe_int(&e["since"]).filter(|s| (1..=doc_version).contains(s)).ok_or_else(|| at("an exception's since is the version that added it, 1 to this version"))?;
+            let value = e["value"].clone();
+            let text = jcs::canonicalize(&value).map_err(|err| at(&format!("an exception's value is not canonical JSON: {err}")))?;
+            if exceptions.iter().any(|x: &Exception| x.field == field && jcs::canonicalize(&x.value).ok().as_deref() == Some(text.as_str())) {
+                return Err(at(&format!("the exception {field} {text} is listed twice")));
+            }
+            exceptions.push(Exception { field: field.into(), value, reason: reason.into(), since });
+        }
+    }
+    let about = o["about"].as_str().unwrap_or_default().to_string();
+    Ok(Rule { id, about, action, tools, agents, when, limit, state, exceptions })
 }
 
 pub fn parse_condition(c: &Value) -> Result<Condition, String> {
@@ -459,21 +623,41 @@ pub struct Evaluation {
     pub result: Action,
     pub basis: Basis,
     pub matched: Vec<String>,
+    /// The `calibrating` rules (in enforce mode) that would have blocked the call: in error, or
+    /// a matching `block` rule. In document order, at most 16.
+    pub would_block: Vec<String>,
+    /// The `calibrating` rules (in enforce mode) that could not be evaluated because a field
+    /// they need was not available (at the witness: not in `checks.disclosed`). In document
+    /// order, at most 16.
+    pub not_calibrated: Vec<String>,
+    /// The rules taking part in the result whose conditions all held but that an exception
+    /// kept from matching. In document order, at most 16.
+    pub excepted: Vec<String>,
 }
 
-/// Evaluate a call (§10.3). `field` looks up a pointer (`None`: absent). `count` is the witness's
-/// count of its earlier `allow` rulings for a `limit` rule; without it (a client) `limit` rules
-/// are skipped.
+/// Evaluate a call (§10.3). `field` looks up a pointer (`None`: absent). `available` says
+/// whether a pointer can be looked up at all: a client has the whole call (`None`: every field
+/// is available); the witness has only the pointers of `checks.disclosed`. `count` is the
+/// witness's count of its earlier `allow` rulings for a `limit` rule; without it (a client)
+/// `limit` rules are skipped.
 pub fn evaluate<E>(
     rs: &RuleSet,
     agent: &str,
     tool: &str,
     field: &dyn Fn(&str) -> Option<Value>,
+    available: Option<&dyn Fn(&str) -> bool>,
     mut count: Option<Count<'_, E>>,
 ) -> Result<Evaluation, E> {
+    let avail = |p: &str| available.is_none_or(|a| a(p));
     let (mut errors, mut blocks, mut allows) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut would_block, mut not_calibrated, mut excepted) = (Vec::new(), Vec::new(), Vec::new());
     for r in rs.rules.iter().filter(|r| r.applies(agent, tool)) {
         if r.limit.is_some() && count.is_none() {
+            continue;
+        }
+        let part = rs.takes_part(r);
+        if !part && r.condition_fields().iter().any(|p| !avail(p)) {
+            not_calibrated.push(r.id.clone());
             continue;
         }
         let mut status = Holds::Yes;
@@ -485,32 +669,46 @@ pub fn evaluate<E>(
         }
         match status {
             Holds::Error => {
-                errors.push(r.id.clone());
+                if part { &mut errors } else { &mut would_block }.push(r.id.clone());
                 continue;
             }
             Holds::No => continue,
             Holds::Yes => {}
+        }
+        // An exception applies only to a field that is available and present (§10.1).
+        let is_excepted = r.exceptions.iter().any(|e| avail(&e.field) && field(&e.field).is_some_and(|v| jcs_eq(&v, &e.value)));
+        if is_excepted {
+            if part {
+                excepted.push(r.id.clone());
+            }
+            continue;
         }
         if let (Some(l), Some(count)) = (&r.limit, count.as_mut()) {
             if count(l)? < l.calls {
                 continue;
             }
         }
-        if r.action == Action::Block { &mut blocks } else { &mut allows }.push(r.id.clone());
+        match (part, r.action) {
+            (true, Action::Block) => blocks.push(r.id.clone()),
+            (true, Action::Allow) => allows.push(r.id.clone()),
+            (false, Action::Block) => would_block.push(r.id.clone()),
+            (false, Action::Allow) => {}
+        }
     }
     let take = |mut v: Vec<String>| {
         v.truncate(16);
         v
     };
-    Ok(if !errors.is_empty() {
-        Evaluation { result: Action::Block, basis: Basis::Error, matched: take(errors) }
+    let (result, basis, matched) = if !errors.is_empty() {
+        (Action::Block, Basis::Error, take(errors))
     } else if !blocks.is_empty() {
-        Evaluation { result: Action::Block, basis: Basis::Rule, matched: take(blocks) }
+        (Action::Block, Basis::Rule, take(blocks))
     } else if !allows.is_empty() {
-        Evaluation { result: Action::Allow, basis: Basis::Rule, matched: take(allows) }
+        (Action::Allow, Basis::Rule, take(allows))
     } else {
-        Evaluation { result: rs.default, basis: Basis::Default, matched: vec![] }
-    })
+        (rs.default, Basis::Default, vec![])
+    };
+    Ok(Evaluation { result, basis, matched, would_block: take(would_block), not_calibrated: take(not_calibrated), excepted: take(excepted) })
 }
 
 /// A check result as an entry writes it in `mode` (§2.8): in watch mode `block` is written as
@@ -529,11 +727,13 @@ pub fn apply_mode(result: &str, mode: Mode) -> Map<String, Value> {
     m
 }
 
-/// The mode of a client's `rule` entry (§2.8, §8): the project's rule set binds only strict
-/// calls, so on a call that is not strict its entry is always in watch mode; local rules follow
-/// the checks file's mode (`own`) on every call.
-pub fn entry_mode(own: Mode, strict: bool, local: bool) -> Mode {
-    if strict || local {
+/// The mode of a client's `rule` entry (§2.8, §8): the project's rule set is ruled on by the
+/// witness, never by the client, so its entry is always in watch mode (a call that is not strict
+/// is not bound by it; a strict call waits for the witness's ruling, and the client decides alone
+/// only when it has none); local rules follow the checks file's mode (`own`) on every call.
+/// `strict` no longer changes the mode (spec 1.1, protected calls always ask the witness).
+pub fn entry_mode(own: Mode, _strict: bool, local: bool) -> Mode {
+    if local {
         own
     } else {
         Mode::Watch
@@ -541,17 +741,25 @@ pub fn entry_mode(own: Mode, strict: bool, local: bool) -> Mode {
 }
 
 /// A client's `rule` entry for one rule set (§2.8, §8): the evaluation of §10.3 as a client
-/// (`limit` rules skipped) over the call's arguments, written in `mode`. `set` is the rule set's
+/// (`limit` rules skipped) over the call's arguments, written in `mode`, with `would_block` and
+/// `excepted` when they are not empty. `set` is the rule set's
 /// id, or `local`.
 pub fn client_entry(rs: &RuleSet, mode: Mode, set: &str, agent: &str, tool: &str, args: &Value) -> Value {
     let field = |p: &str| resolve(args, p).cloned();
-    let e = evaluate::<()>(rs, agent, tool, &field, None).expect("a client evaluation never counts");
+    let e = evaluate::<()>(rs, agent, tool, &field, None, None).expect("a client evaluation never counts");
     let mut m = Map::new();
     m.insert("check".into(), Value::from("rule"));
     m.extend(apply_mode(e.result.as_str(), mode));
     m.insert("mode".into(), Value::from(mode.as_str()));
     m.insert("set".into(), Value::from(set));
     m.insert("matched".into(), Value::from(e.matched));
+    // Spec 1.1: present only when not empty, so an entry without them reads as before.
+    if !e.would_block.is_empty() {
+        m.insert("would_block".into(), Value::from(e.would_block));
+    }
+    if !e.excepted.is_empty() {
+        m.insert("excepted".into(), Value::from(e.excepted));
+    }
     Value::Object(m)
 }
 

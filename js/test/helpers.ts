@@ -28,6 +28,8 @@ export function useProject(opts: { optIn?: boolean } = {}): Ctx {
     delete process.env.TERM_PROGRAM;
     // The SDK turns test mode on by itself under Vitest; these tests exercise the real recorder.
     process.env.SIGNAFAIDE_TEST = "0";
+    // Sessions stay in a temporary session.json, never in this machine's credential store.
+    process.env.SIGNAFAIDE_CREDENTIAL_STORE = "file";
     ADAPTERS.clear();
     resetToolRegistry(); // tools wrapped by an earlier test are not this test's tool list
     ctx.root = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfa-js-")), "Claims Project");

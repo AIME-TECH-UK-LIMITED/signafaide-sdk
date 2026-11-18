@@ -1,13 +1,14 @@
 /** `record`, `note`, `wrapTools` and `declareTools`: the decision -> run -> outcome cycle, and
  * the agent's tool list (SPEC §2.6). Node only. */
 
-import { CheckError, outcomeChecks, refusedContent, registerSyncTool, resetSyncTools, type Plan, type ToolInfo } from "./checks-runtime.js";
+import { CheckError, SignafaideBlocked, callLink, outcomeChecks, refusedContent, registerSyncTool, resetSyncTools, type Plan, type ToolInfo } from "./checks-runtime.js";
 import { declaredName } from "./coverage.js";
 import { canonicalize, isUnsafeInteger } from "./jcs.js";
 import { SignafaideError } from "./http.js";
 import { recordHash, type SignedRecord } from "./records.js";
 import { getRecorder, noWrites, recording, recordingDisabled, telemetryHooks, type Recorder } from "./runtime.js";
 import { ADAPTERS } from "./telemetry.js";
+import { deliver, development, type CallNote, type NoteHandler } from "./notes.js";
 import { VERSION } from "./version.js";
 
 export interface RecordOptions {
@@ -22,6 +23,15 @@ export interface RecordOptions {
   storeContent?: boolean;
   /** Extra fields for the decision's `meta`. */
   meta?: Record<string, unknown>;
+  /** The names of the function's positional arguments (spec 1.1): the decision's input is then
+   * `{<name>: <argument>}`, so rules find a value by its name (`/amount`). Arguments past the
+   * names are kept, in order, under `"_rest"`. Without it the input is the single argument, or the
+   * argument list when there are several. */
+  args?: readonly string[];
+  /** Called with each note of this tool's calls (spec 1.1: a possible hidden instruction in the
+   * arguments or the result). The call runs and returns as without it; `onNote(handler)` gets the
+   * notes of every tool, and `notes(result)` those of an object result. */
+  onNote?: NoteHandler;
 }
 
 /** Strict mode: the decision got no receipt, so the tool did not run. */
@@ -189,6 +199,15 @@ class Spec {
     if (tool?.name) BY_WRAPPER.add(tool.name);
     remember(WRAPPED, opts.agent, name);
     if (listed) remember(LISTED, opts.agent, name);
+    // The agent is shown the tool from now on: its fingerprints are approved the first time (§8).
+    if (tool && !recordingDisabled()) {
+      try {
+        const rec = getRecorder();
+        rec.checks.seen(tool, opts.agent || rec.defaultAgent, declaredName(name));
+      } catch {
+        /* the first call reports what is wrong */
+      }
+    }
   }
 
   private decide(input: unknown, plan?: Plan | null): [Recorder, SignedRecord] {
@@ -211,6 +230,7 @@ class Spec {
       callId,
       syncOnly: this.syncOnly,
       declared: declaredName(this.name),
+      protect: !!(this.opts as ProtectOptions).protect,
     });
   }
 
@@ -224,6 +244,10 @@ class Spec {
 
   /** The outcome of a call that did not run (§8 steps 3 and 4), and the error to throw. */
   private refused(rec: Recorder, d: SignedRecord, err: CheckError, ruling: string): CheckError {
+    if (err instanceof SignafaideBlocked) {
+      const h = recordHash(d);
+      err.attach(h, callLink(rec, h));
+    }
     this.outcomeChecked(rec, d, refusedContent(err), outcomeChecks(false, ruling));
     if (err.code !== "blocked") rec.noteStrictRefused(this.name, err);
     return err;
@@ -235,29 +259,49 @@ class Spec {
     const async = plan.strict || !!this.opts.strict;
     if (plan.blocked) {
       ended();
+      this.notify(rec, plan.notes);
       const err = this.refused(rec, d, plan.blocked, "not_asked");
-      if (async) return Promise.reject(err);
+      // An async function's callers get a rejected promise, never a synchronous throw.
+      if (async || !this.syncOnly) return Promise.reject(err);
       throw err;
     }
-    if (!plan.strict) return async ? Promise.resolve().then(() => this.runChecked(rec, d, body, "not_asked")) : this.runChecked(rec, d, body, "not_asked");
+    if (!plan.strict) return async ? Promise.resolve().then(() => this.runChecked(rec, d, body, "not_asked", plan.notes)) : this.runChecked(rec, d, body, "not_asked", plan.notes);
     rec.strictUsed = true;
     return rec.checks.ruling(d, plan, this.name).then(([ruling, err]) => {
       if (err) {
         ended();
+        this.notify(rec, plan.notes);
         throw this.refused(rec, d, err, ruling);
       }
-      return this.runChecked(rec, d, body, ruling);
+      return this.runChecked(rec, d, body, ruling, plan.notes);
     });
   }
 
-  private runChecked(rec: Recorder, d: SignedRecord, fn: () => unknown, ruling: string): unknown {
+  /** Hand the call's notes to the caller (§8 notes); with a result, keep them for `notes(result)`. */
+  private notify(rec: Recorder, list: readonly CallNote[], result?: unknown): void {
+    deliver(list, { own: this.opts.onNote, development: development(rec), result });
+  }
+
+  private runChecked(rec: Recorder, d: SignedRecord, fn: () => unknown, ruling: string, argNotes: readonly CallNote[] = []): unknown {
     const failed = (e: unknown): never => {
       this.outcomeChecked(rec, d, errorContent(e), outcomeChecks(true, ruling));
+      this.notify(rec, argNotes);
       throw e;
     };
     const done = (v: unknown): unknown => {
       const value = toJsonable(v) ?? null;
-      this.outcomeChecked(rec, d, { output: value }, outcomeChecks(true, ruling, rec.checks.resultEntries(value)));
+      const results = rec.checks.resultEntries(value, false, declaredName(this.name));
+      const withheld = rec.checks.withheld(this.name, results);
+      this.notify(rec, [...argNotes, ...rec.checks.resultNotes(declaredName(this.name), results)], withheld ? undefined : v);
+      if (withheld) {
+        // The result holds a secret: the agent gets this error instead, and the record keeps
+        // the finding, never the result (§8 step 5).
+        const h = recordHash(d);
+        withheld.attach(h, callLink(rec, h));
+        this.outcomeChecked(rec, d, { error: { type: "Withheld", message: withheld.message, check: withheld.check } }, outcomeChecks(true, ruling, results));
+        throw withheld;
+      }
+      this.outcomeChecked(rec, d, { output: value }, outcomeChecks(true, ruling, results));
       return v;
     };
     let out: unknown;
@@ -288,7 +332,7 @@ class Spec {
       // Agent frameworks often swallow a tool's error (the model just sees a failed tool): say
       // once, on stderr, that a strict tool did not run and how to fix it.
       rec.noteStrictRefused(this.name, err);
-      throw new NotRecorded(`${err.message} (strict mode: ${this.name} did not run)`, { code: err.code, status: err.status, docs: err.docs, body: err.body });
+      throw new NotRecorded(`${err.message} (${this.name} is protected and did not run)`, { code: err.code, status: err.status, docs: err.docs, body: err.body });
     }
   }
 
@@ -379,12 +423,52 @@ class Spec {
 export function record<F extends AnyFn>(fn: F, opts: RecordOptions & { strict: true }): (...args: Parameters<F>) => Promise<Awaited<ReturnType<F>>>;
 export function record<F extends AnyFn>(fn: F, opts?: RecordOptions): F;
 export function record<F extends AnyFn>(fn: F, opts: RecordOptions = {}): AnyFn {
+  checkArgNames(opts.args);
   return recordWith(new Spec(opts.name ?? fn.name, opts, false, undefined, syncFunction(fn, opts)), fn);
 }
 
+/** Options of `protect`: those of `record`, without `strict` (a protected tool is always strict). */
+export type ProtectOptions = Omit<RecordOptions, "strict"> & { /** @internal */ protect?: true };
+
+/**
+ * Protect a tool (spec 1.1): record every call of `fn`, and run it only when signafAIde allows
+ * it. Each call is strict: it waits for the witness's ruling under the project's rules and
+ * fails closed (unless the rule set sets another fail mode for the tool), and sends the witness
+ * only the fields of the call that the rules can use and that `signafaide.checks.json` lists for
+ * the tool (`signafaide pull` asks before it adds one). A blocked call throws `SignafaideBlocked`,
+ * whose message says why in one sentence, with the rule in words and a link to the call.
+ * Name positional arguments with `args` so rules can find them: `protect(approvePayout,
+ * { args: ["payee", "amount", "currency"] })`. Returns an async function.
+ */
+export function protect<F extends AnyFn>(fn: F, opts: ProtectOptions = {}): (...args: Parameters<F>) => Promise<Awaited<ReturnType<F>>> {
+  checkArgNames(opts.args);
+  const o: RecordOptions & { protect: true } = { ...opts, strict: true, protect: true };
+  return recordWith(new Spec(opts.name ?? fn.name, o, false, undefined, false), fn) as (...args: Parameters<F>) => Promise<Awaited<ReturnType<F>>>;
+}
+
+function checkArgNames(names: readonly string[] | undefined): void {
+  if (names === undefined) return;
+  if (!Array.isArray(names) || !names.every((n) => typeof n === "string" && n.length > 0) || new Set(names).size !== names.length) {
+    throw new TypeError('args names the positional arguments: distinct non-empty strings, for example { args: ["payee", "amount", "currency"] }');
+  }
+}
+
+/** The decision's input of a call: named by `names` when given (spec 1.1), else the single
+ * argument, or the argument list when there are several. */
+export function namedInput(args: unknown[], names?: readonly string[]): unknown {
+  if (!names) return args.length === 1 ? args[0] : args;
+  const out: Record<string, unknown> = {};
+  names.forEach((n, i) => {
+    if (i < args.length && args[i] !== undefined) out[n] = args[i];
+  });
+  if (args.length > names.length) out._rest = args.slice(names.length);
+  return out;
+}
+
 function recordWith(spec: Spec, fn: AnyFn): AnyFn {
+  const names = spec.opts.args;
   const wrapped = function (this: unknown, ...args: unknown[]) {
-    return spec.call(args.length === 1 ? args[0] : args, () => fn.apply(this, args));
+    return spec.call(namedInput(args, names), () => fn.apply(this, args));
   };
   Object.defineProperty(wrapped, "name", { value: fn.name });
   return wrapped;
@@ -403,6 +487,8 @@ export interface WrapOptions {
   /** Declare the wrapped tools as the agent's recorded tools (SPEC §2.6), with the first
    * recorded call. Default true; `SIGNAFAIDE_DECLARE_TOOLS=0` turns it off everywhere. */
   declareTools?: boolean;
+  /** Called with each note of the wrapped tools' calls (see `RecordOptions.onNote`). */
+  onNote?: NoteHandler;
 }
 
 /**
