@@ -1,6 +1,6 @@
 # signafAIde SDK
 
-[![CI](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/signafaide)](https://www.npmjs.com/package/signafaide) [![PyPI](https://img.shields.io/pypi/v/signafaide)](https://pypi.org/project/signafaide/) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![signafAIde MCP server – quality and maintenance score on Glama](https://glama.ai/mcp/servers/AIME-TECH-UK-LIMITED/signafaide-sdk/badges/score.svg)](https://glama.ai/mcp/servers/AIME-TECH-UK-LIMITED/signafaide-sdk)
+[![CI](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/signafaide)](https://www.npmjs.com/package/signafaide) [![PyPI](https://img.shields.io/pypi/v/signafaide)](https://pypi.org/project/signafaide/) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/badge)](https://scorecard.dev/viewer/?uri=github.com/AIME-TECH-UK-LIMITED/signafaide-sdk) [![signafAIde MCP server – quality and maintenance score on Glama](https://glama.ai/mcp/servers/AIME-TECH-UK-LIMITED/signafaide-sdk/badges/score.svg)](https://glama.ai/mcp/servers/AIME-TECH-UK-LIMITED/signafaide-sdk)
 
 signafAIde checks each risky AI agent tool call before it runs, and proves what your agents did.
 
@@ -112,6 +112,8 @@ What each one is: the PyPI wheels hold these same release binaries, file for fil
 The last line is the result, for example `PASS: 12 of 12 checks passed; export of every agent, all records, generated 2026-11-20T09:00:00.000Z`. Exit code 0 is PASS, 1 is FAIL, 2 means an input could not be read or the keys differ. Only checks that passed are counted as passed: a public timestamp that has not confirmed yet is pending (usually a few hours), for example `PASS: 11 of 12 checks passed, 1 pending (public timestamp)`, and a check that could not run is not checked. When the keys did not come from an independent source, the result says so in brackets after PASS.
 
 To build the verifier from source: `cargo run --release --manifest-path verifier/Cargo.toml -- pack.json --agent-keys agent-keys.json`.
+
+A pack that passes shows what the agent's program recorded and that it was not changed later; it does not show that the content was true, or a call that was never recorded. The full list: [Limits of a signafAIde record](https://signafaide.co.uk/docs/limits).
 
 ## Privacy and support
 
