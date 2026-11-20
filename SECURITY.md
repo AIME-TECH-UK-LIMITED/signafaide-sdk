@@ -4,13 +4,19 @@
 
 Please do not open a public issue for a security problem.
 
-Report it privately, either through GitHub's **Report a vulnerability** button on the [Security tab](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/security) of this repository, or by email to [sales@signafaide.co.uk](mailto:sales@signafaide.co.uk). Include the details and a way to reproduce it.
+Report it privately, either through GitHub's **Report a vulnerability** button on the [Security tab](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/security) of this repository, or by email to [security@signafaide.co.uk](mailto:security@signafaide.co.uk). Include the details and a way to reproduce it.
 
 ## Response times
 
+These are targets, not guarantees:
+
 - We confirm we received your report within 3 working days (UK).
 - We send a first assessment, including whether we treat it as a vulnerability, within 10 working days.
-- For a confirmed vulnerability we aim to release a fix within 90 days of the report, keep you informed until then, and agree the disclosure date with you.
+- We aim to release a fix or publish a mitigation within 90 days of the report, keep you informed until then, and agree the disclosure date with you.
+
+Enterprise customers: response times are as agreed in their contract.
+
+There is no paid bug bounty.
 
 ## Good-faith research
 
