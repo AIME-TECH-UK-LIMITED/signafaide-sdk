@@ -331,7 +331,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-python/0.5.2 (python 3.12.3; adapter=none; agent=claude-code; via=sdk)
+X-Signafaide-Client: signafaide-python/0.5.3 (python 3.12.3; adapter=none; agent=claude-code; via=sdk)
 ```
 
 It holds the SDK and its version, the Python runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `otel` for the OpenTelemetry processor, or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`) and kept in `.signafaide/config.json`; it is never guessed per process. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.

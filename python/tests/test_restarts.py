@@ -155,4 +155,4 @@ def test_strict_refused_for_no_key_prints_one_warning(local_recorder, service, c
 
 
 def test_version_is_0_2_0():
-    assert __version__ == "0.5.2"
+    assert __version__ == "0.5.3"

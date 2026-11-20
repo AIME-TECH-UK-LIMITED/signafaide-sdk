@@ -4,7 +4,7 @@ Notable changes to the signafAIde SDK: the TypeScript and Python packages, the M
 Every release shares one version number and is a git tag; changes to the spec (`spec/SPEC.md`) are noted with the release that made them.
 Records and packs written by a version verify with that version and later ones, unless an entry says otherwise.
 
-## Unreleased
+## v0.5.3 (2026-11-20)
 
 - README openings and package descriptions now say what signafAIde does: checks risky tool calls before they run, signs every call, verifies offline.
 - They no longer name EU AI Act, ISO/IEC 42001 or SOC 2.
