@@ -1,0 +1,52 @@
+# The published npm packages run on Node 20 or later (engines), while building them needs a newer
+# Node (tsup 9). This job builds and packs on Node 22, then installs the packed tarballs on Node 20
+# and checks that the CommonJS and ES module entries load and that the CLI runs.
+name: Packed package on Node 20
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node20-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Packed package on Node 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - name: Build and pack on Node 22
+        working-directory: js
+        run: |
+          npm ci
+          npm run build
+          mkdir -p "$RUNNER_TEMP/packs"
+          npm pack --pack-destination "$RUNNER_TEMP/packs"
+          (cd mcp && npm pack --pack-destination "$RUNNER_TEMP/packs")
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - name: Install the tarballs on Node 20 and smoke test
+        working-directory: ${{ runner.temp }}
+        run: |
+          node --version
+          mkdir smoke && cd smoke
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/packs/signafaide-[0-9]*.tgz "$RUNNER_TEMP"/packs/signafaide-mcp-*.tgz
+          node -e "const s = require('signafaide'); if (typeof s.record !== 'function') throw new Error('CommonJS entry has no record()')"
+          node --input-type=module -e "const s = await import('signafaide'); if (typeof s.record !== 'function') throw new Error('ES module entry has no record()'); const c = await import('signafaide/core'); if (typeof c.verifyPack !== 'function') throw new Error('signafaide/core has no verifyPack()')"
+          node --input-type=module -e "const m = await import('signafaide-mcp'); if (typeof m.createServer !== 'function') throw new Error('signafaide-mcp has no createServer()')"
+          npx --no-install signafaide --help > /dev/null
