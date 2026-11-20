@@ -47,6 +47,8 @@ class FakeService:
             "valid_to": None,
         }
         self.extra_keys = []  # more keys served after key_doc (a rotation in progress)
+        self.revoked = None  # the served `revoked` list (§5), when set
+        self.list_reset_seq = 0  # a client behind this seq gets the snapshot with `reset` (§11.2)
         self.projects = {}  # api_key -> project
         self.calls = []
         self.fail = None  # (status, code, message) returned once for the next /v1/records
@@ -127,7 +129,10 @@ class FakeService:
         if method == "GET" and path == "/healthz":
             return 200, "ok"
         if method == "GET" and path == "/.well-known/signafaide-keys.json":
-            return 200, {"keys": [self.key_doc, *self.extra_keys]}
+            return 200, {
+                "keys": [self.key_doc, *self.extra_keys],
+                **({} if self.revoked is None else {"revoked": self.revoked}),
+            }
         if method == "POST" and path == "/v1/sandbox":
             self.sandbox_n += 1
             key = "sfa_test_" + f"{self.sandbox_n:032d}"
@@ -379,6 +384,8 @@ class FakeService:
             since = query.get("since")
             if since is None:
                 return 200, {"snapshot": self.list_snapshot(), "updates": []}
+            if int(since) < self.list_reset_seq:
+                return 200, {"reset": True, "snapshot": self.list_snapshot(), "updates": []}
             return 200, {
                 "snapshot": None,
                 "updates": [u for u in self.list_updates if u["list"]["seq"] > int(since)][:1000],

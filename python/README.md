@@ -280,7 +280,7 @@ report.ok            # True / False
 ```
 
 
-**For an auditor** the agent keys must come from you, not from the pack (otherwise a service could add a key of its own): `signafaide keys export -o agent-keys.json` writes every agent key, each signed by itself. The auditor runs `npx signafaide verify pack.json --keys <witness>/.well-known/signafaide-keys.json --agent-keys agent-keys.json --head head.json` (or the Python CLI with the same arguments; `head.json` is your `.signafaide/head.json`, which catches records cut off at the end). Without `--agent-keys` the client-signature check says `NOT INDEPENDENT` and the result is FAIL; `--trust-embedded-agent-keys` accepts the pack's keys and says so in the result line. On your own machine, `signafaide verify pack.json` uses this project's agent keys automatically. Public timestamps are checked online (`--timestamp-check <url>`, default `https://mempool.space/api`); with `--offline` they show `NOT CHECKED`, never confirmed. `signafaide keys rotate --agent X` gives an agent a new key; the SDK signs the registration of the new key with the old one.
+**For an auditor** the agent keys must come from you, not from the pack (otherwise a service could add a key of its own): `signafaide keys export -o agent-keys.json` writes every agent key, each signed by itself. The auditor runs the standalone verifier, `uvx signafaide-verify@<version> pack.json --agent-keys agent-keys.json --head head.json` (`signafaide prove --files` prints it with this release's version; also on npm and as a single binary: [for auditors](../README.md#for-auditors)). It uses the hosted witness's keys pinned in it and checks them against the published list online; for a self-hosted witness add `--keys <witness>/.well-known/signafaide-keys.json`. `head.json` is your `.signafaide/head.json`, which catches records cut off at the end. Without `--agent-keys` the client-signature check says `NOT INDEPENDENT` and the result is FAIL; `--trust-embedded-agent-keys` accepts the pack's keys and says so in the result line. On your own machine, `signafaide verify pack.json` uses this project's agent keys automatically. Public timestamps are checked online (`--timestamp-check <url>`, default `https://mempool.space/api`); with `--offline` they show `NOT CHECKED`, never confirmed. `signafaide keys rotate --agent X` gives an agent a new key; the SDK signs the registration of the new key with the old one.
 
 ## Replay
 
@@ -331,7 +331,7 @@ The chain is verified first; then each recorded decision with a co-signed outcom
 Every request carries one header:
 
 ```
-X-Signafaide-Client: signafaide-python/0.5.3 (python 3.12.3; adapter=none; agent=claude-code; via=sdk)
+X-Signafaide-Client: signafaide-python/0.5.4 (python 3.12.3; adapter=none; agent=claude-code; via=sdk)
 ```
 
 It holds the SDK and its version, the Python runtime and its version, and the framework adapter in use (`langchain`, `openai-agents`, `otel` for the OpenTelemetry processor, or `none`). It also holds the coding agent that set the project up (`claude-code`, `codex`, `cursor`, `gemini-cli`, `copilot`, `windsurf` or `unknown`) and how the call was made (`sdk`, `cli` or `mcp`). The agent is found from that tool's environment variables when the project is set up (`signafaide init`) and kept in `.signafaide/config.json`; it is never guessed per process. `signafaide verify` and `signafaide export` also send `POST /v1/events {"name": "verify"}` (or `"export"`) when there is an API key. If that fails, the command is not affected. With no API key nothing at all is sent.

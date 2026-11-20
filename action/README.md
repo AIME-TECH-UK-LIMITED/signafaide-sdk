@@ -29,7 +29,7 @@ Pin the action by its full commit SHA, as above, not by a branch or tag.
 On a pull request it runs
 
 ```
-npx signafaide@0.5.3 check --ci --diff <the pull request's base commit>
+npx signafaide@0.5.4 check --ci --diff <the pull request's base commit>
 ```
 
 and, when the repository has Python files, the same check with the Python package (`pipx run signafaide check --ci`). On a push it checks every tool. For each risky tool that is not protected it prints one line, adds an error note on that line of the pull request, and writes a table to the job summary:
@@ -64,7 +64,7 @@ The `allow` input does the same for one workflow, without a reason (`allow: run_
 
 | Input | Default | What it does |
 | --- | --- | --- |
-| `version` | `0.5.3` | The signafaide version to run (npm and PyPI). |
+| `version` | `0.5.4` | The signafaide version to run (npm and PyPI). |
 | `working-directory` | `.` | The folder to check, where `signafaide.checks.json` is. |
 | `base` | the pull request's base commit | Compare with this git base; empty checks every tool. |
 | `allow` | | Reviewed exceptions, tool names separated by commas or new lines. |

@@ -210,6 +210,7 @@ class Recorder:
         self._halted: Optional[Tuple[str, SignafaideError]] = None
         self._ship_lock = threading.Lock()
         self._wake = threading.Event()
+        self._ticks = 0
         self._thread: Optional[threading.Thread] = None
         self._pending = 0
         self._next_attempt = 0.0  # monotonic time before which the background shipper waits
@@ -815,7 +816,6 @@ class Recorder:
         fix. Records of other projects (an earlier key) wait until that key is used again. An
         explicit flush always tries, even after a refusal."""
         if not background:
-            self._halted = None
             self._blocked.clear()
         shipped, errors = 0, {}
         # Local-first: with no API key nothing is sent and no sandbox is created. A human opts
@@ -845,6 +845,20 @@ class Recorder:
                     errors[self._key_label(api_key) if e.code == "invalid_key" else todo[0]] = e
                     if e.retryable or e.code in PROJECT_WIDE:
                         break  # the same error applies to every chain
+        clean = all(e.code in LOCAL_CODES for e in errors.values())
+        if not background and shipped > 0 and clean:
+            # Only an explicit flush that sent something and met no refusal or failure (a network
+            # error) shows the refusal no longer applies: it ends the background sender's halt.
+            # Never at its start: the sender would send alongside it while it runs.
+            self._halted = None
+        elif not background and self._halted is not None and clean and not shipped and api_key and not self._waiting():
+            # Nothing to ship (another process drained the outbox): one cheap authenticated
+            # request tells whether the witness accepts this configuration now.
+            try:
+                self.client(api_key=api_key).project()
+                self._halted = None
+            except SignafaideError:
+                pass  # still refused, or unreachable: the halt stays
         return {"shipped": shipped, "left": self._waiting(), "errors": errors}
 
     def stop(self, timeout: float = 10.0, *, background: bool = False) -> dict:
@@ -1185,6 +1199,7 @@ class Recorder:
 
         failures = 0
         while not self._stopped:
+            self._ticks += 1  # one round of the loop (tests wait on this, never on a sleep)
             delay = max(self.flush_interval if not self._next_attempt else self._next_attempt - time.monotonic(), 0.05)
             self._wake.wait(delay)
             self._wake.clear()
@@ -1246,6 +1261,7 @@ class Recorder:
 
         self._stopped = True
         self._wake.set()
+        self.checks.stop()  # no fetch of the rule set or list outlives the recorder
         self.release_tool_sources()  # a clean end: this program's tools leave the agent's tool list (§8)
         limit = self.exit_flush if timeout is None else timeout
         stop = self.instance_stop and bool(self._wrote) and not self.test
@@ -1538,6 +1554,7 @@ def configure(**kwargs) -> Recorder:
             _default._stopped = True
             _default._wake.set()
             _default._tool_stop.set()
+            _default.checks.stop()
             atexit.unregister(_default.close)
         _default = Recorder(**kwargs)
         return _default

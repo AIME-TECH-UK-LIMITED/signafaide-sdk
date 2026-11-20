@@ -21,7 +21,7 @@ from .crypto import hash_json
 from .drand import load_verifier as load_drand_verifier
 from .http import SignafaideError
 from .records import TIME_RE
-from .verifier import KeysRequired, Report, load_service_keys, verify_local
+from .verifier import KeysRequired, Report, load_service_key_set, pinned_revoked, verify_local
 
 DATE_RE = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
@@ -61,15 +61,16 @@ def verify_chain(rec: runtime.Recorder, chain: str, keys: Any = None) -> Report:
     """Run the §7 verifier over one local chain. Service keys come from *keys* (file, URL or
     dict) or from the service; with no receipts in the chain none are needed."""
     note = None
+    revoked: list = []
     if keys is not None:
-        service_keys = load_service_keys(keys)
+        service_keys, revoked = load_service_key_set(keys)
         note = f"service keys: {keys if isinstance(keys, (str, Path)) else 'given'}"
     elif not any("receipt" in r for r in rec.state.read_all(chain)):
         service_keys = []  # no request: nothing has been co-signed
         note = "service keys: none needed (nothing co-signed yet)"
     else:
         try:
-            service_keys = load_service_keys(
+            service_keys, revoked = load_service_key_set(
                 rec.client().request("GET", "/.well-known/signafaide-keys.json", auth=False)
             )
             note = f"service keys: {rec.url}/.well-known/signafaide-keys.json"
@@ -79,7 +80,14 @@ def verify_chain(rec: runtime.Recorder, chain: str, keys: Any = None) -> Report:
                     f"could not load service keys from {rec.url} ({e}); pass keys= (--keys <file|url>)"
                 ) from None
             service_keys = []
-    report = verify_local(rec.state, service_keys, drand=load_drand_verifier(), chains=[chain])
+    report = verify_local(
+        rec.state,
+        service_keys,
+        drand=load_drand_verifier(),
+        chains=[chain],
+        # The release's pinned revocations always apply (spec §7).
+        revoked_service_keys=revoked + [x for x in pinned_revoked() if x not in revoked],
+    )
     report.notes[:0] = [f"chain: {chain}"] + ([note] if note else [])
     return report
 

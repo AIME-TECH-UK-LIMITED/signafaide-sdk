@@ -11,6 +11,7 @@ pub mod coverage;
 pub mod drand;
 pub mod hash;
 pub mod jcs;
+pub mod keyset;
 pub mod merkle;
 pub mod model;
 pub mod ots;

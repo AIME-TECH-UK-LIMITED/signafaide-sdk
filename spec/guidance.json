@@ -211,8 +211,8 @@
     {
       "code": "rules_unavailable",
       "status": 0,
-      "means": "The witness accepted the decision of a protected tool but could not load or sign the project's rule set, so it gave no ruling. If signafAIde can't be reached is set to Stop (`closed`) the tool did not run; set to Let it run (`open`) it ran and is recorded as having had no ruling.",
-      "fix": "Nothing to change on this machine: call again shortly. If it persists, report it with the output of `signafaide checks status`."
+      "means": "Two causes. (1) The witness accepted the decision of a protected tool but could not load or sign the project's rule set, so it gave no ruling. If signafAIde can't be reached is set to Stop (`closed`) the tool did not run; set to Let it run (`open`) it ran and is recorded as having had no ruling. (2) The rule set or the shared list this client holds is stale (signed by a service key that is now revoked or no longer held, or its replacement was refused) and no verified replacement arrived within 7 days (REVOKED_GRACE_MS), or the copy held is unreadable or fails its own signature: every protected call is refused, its decision is still written, and the message names the cause.",
+      "fix": "For (1), nothing to change on this machine: call again shortly. For (2), do what the message says for its cause: run `signafaide pull` (the key list, the rule set and the list, fetched now); \"the witness now signs with a key this release does not know\": update the signafaide package (npm or PyPI), then `signafaide pull`; \"which its published key list does not name\": ask the witness's operator. `signafaide checks status` shows each stale rule set or list. If it persists, report it with the output of `signafaide checks status`."
     },
     {
       "code": "withheld",

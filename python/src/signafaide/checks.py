@@ -680,19 +680,56 @@ def _key_active(k: dict, at: str) -> bool:
         return False
 
 
-def accept_rules(held: Optional[dict], item: Any, service_keys: List[dict], project: str, env: str) -> Optional[str]:
+def key_problem(
+    service_keys: List[dict], revoked: Any, key_id: Any, at: Any, domain: str, h: str, sig: Any
+) -> Optional[str]:
+    """How one service key signature is judged (spec §5), in the order every implementation uses:
+    ``unknown_key``, ``revoked``, ``not_active`` (outside valid_from..valid_to at *at*),
+    ``signature``; None when it verifies. A revoked key never verifies, whatever its window."""
+    key = next((k for k in service_keys if isinstance(k, dict) and k.get("key_id") == key_id), None)
+    if key is None:
+        return "unknown_key"
+    if key.get("key_id") in (revoked or ()):
+        return "revoked"
+    if not _key_active(key, at):
+        return "not_active"
+    try:
+        ok = isinstance(sig, str) and verify_sig(key.get("public_key", ""), domain, h, sig)
+    except (ValueError, TypeError):
+        ok = False
+    return None if ok else "signature"
+
+
+def ruling_key_problem(receipt: Any, service_keys: List[dict], revoked: Any = ()) -> Optional[str]:
+    """A receipt's ruling signature (§3.5) as the tool-call checks runtime takes it: ``key_problem``
+    for the receipt's service key at the ruling's server_time."""
+    g = receipt.get("ruling") if isinstance(receipt, dict) else None
+    if not isinstance(g, dict):
+        return "signature"
+    return key_problem(
+        service_keys,
+        revoked,
+        receipt.get("service_key_id"),
+        g.get("server_time"),
+        "ruling",
+        hash_json(g),
+        receipt.get("ruling_sig"),
+    )
+
+
+def accept_rules(
+    held: Optional[dict], item: Any, service_keys: List[dict], project: str, env: str, revoked: Any = ()
+) -> Optional[str]:
     """The name of the first §10.2 step that refuses *item* (``{rules, sig, service_key_id}``),
-    or None when the client accepts it. *held* is the document the client holds."""
+    or None when the client accepts it. *held* is the document the client holds; *revoked* the
+    revoked service key ids (§5): a rule set one of them signed is refused at the signature step."""
     doc = item.get("rules") if isinstance(item, dict) else None
     if rule_set_errors(doc):
         return "schema"
     if doc["project"] != project or doc["env"] != env:
         return "project"
-    key = next((k for k in service_keys if k.get("key_id") == item.get("service_key_id")), None)
-    if (
-        key is None
-        or not _key_active(key, doc["issued"])
-        or not verify_sig(key.get("public_key", ""), "rules", hash_json(doc), item.get("sig"))
+    if key_problem(
+        service_keys, revoked, item.get("service_key_id"), doc["issued"], "rules", hash_json(doc), item.get("sig")
     ):
         return "signature"
     if held is None:
@@ -741,19 +778,25 @@ def empty_list() -> dict:
     return {"seq": 0, "last": None, "entries": []}
 
 
-def apply_list(held: dict, item: Any, service_keys: List[dict]) -> Tuple[dict, Optional[str]]:
+def apply_list(held: dict, item: Any, service_keys: List[dict], revoked: Any = ()) -> Tuple[dict, Optional[str]]:
     """One served item ``{list, sig, service_key_id}`` applied to *held* ``{seq, last, entries}``
     (§11.2): ``(new_held, None)``, or ``(held, refusal)`` with the refusal's name
     (``signature``, ``state``, ``older``, ``gap``, ``prev``, ``invalid``)."""
     obj = item.get("list") if isinstance(item, dict) else None
     if not isinstance(obj, dict):
         return held, "invalid"
-    key = next((k for k in service_keys if k.get("key_id") == item.get("service_key_id")), None)
     try:
         signed = (
-            key is not None
-            and _key_active(key, obj.get("issued"))
-            and verify_sig(key.get("public_key", ""), "fingerprints", hash_json(obj), item.get("sig"))
+            key_problem(
+                service_keys,
+                revoked,
+                item.get("service_key_id"),
+                obj.get("issued"),
+                "fingerprints",
+                hash_json(obj),
+                item.get("sig"),
+            )
+            is None
         )
     except (ValueError, TypeError):
         signed = False

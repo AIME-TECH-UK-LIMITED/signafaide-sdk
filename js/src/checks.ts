@@ -8,7 +8,7 @@
  * have done. The same names, rules and wording as the Rust core and the Python SDK.
  */
 
-import { HEX64, SALT_RE, hashJson, sha256Hex, verifySig } from "./crypto.js";
+import { HEX64, SALT_RE, hashJson, sha256Hex, verifySig, type Domain } from "./crypto.js";
 import { byCodePoint } from "./coverage.js";
 import { JsonNumber, canonicalBytes, canonicalize } from "./jcs.js";
 import {
@@ -677,23 +677,69 @@ export function keyActive(k: ServiceKey, at: unknown): boolean {
   }
 }
 
+/** How one service key signature is judged (spec §5), in the order every implementation uses:
+ * `unknown_key`, `revoked`, `not_active` (outside valid_from..valid_to at `at`), `signature`; null
+ * when it verifies. A revoked key never verifies, whatever its window. */
+export function keyProblem(
+  serviceKeys: ServiceKey[],
+  revoked: readonly string[],
+  keyId: unknown,
+  at: unknown,
+  domain: Domain,
+  hash: string,
+  sig: unknown,
+): "unknown_key" | "revoked" | "not_active" | "signature" | null {
+  const key = serviceKeys.find((k) => k?.key_id === keyId);
+  if (!key) return "unknown_key";
+  if (revoked.includes(key.key_id)) return "revoked";
+  if (!keyActive(key, at)) return "not_active";
+  try {
+    return typeof sig === "string" && verifySig(key.public_key ?? "", domain, hash, sig) ? null : "signature";
+  } catch {
+    return "signature";
+  }
+}
+
+/** A receipt's ruling signature (§3.5) as the tool-call checks runtime takes it: `keyProblem` for
+ * the receipt's service key at the ruling's server_time. */
+export function rulingKeyProblem(receipt: Json, serviceKeys: ServiceKey[], revoked: readonly string[] = []) {
+  const g = receipt?.ruling;
+  if (!isObj(g)) return "signature";
+  return keyProblem(
+    serviceKeys,
+    revoked,
+    receipt.service_key_id,
+    g.server_time,
+    "ruling",
+    hashJson(g),
+    receipt.ruling_sig,
+  );
+}
+
 /** The name of the first §10.2 step that refuses `item` (`{rules, sig, service_key_id}`), or
- * null when the client accepts it. `held` is the document the client holds. */
+ * null when the client accepts it. `held` is the document the client holds; `revoked` the revoked
+ * service key ids (§5): a rule set one of them signed is refused at the signature step. */
 export function acceptRules(
   held: Json | null | undefined,
   item: unknown,
   serviceKeys: ServiceKey[],
   project: string,
   env: string,
+  revoked: readonly string[] = [],
 ): string | null {
   const doc = isObj(item) ? item.rules : undefined;
   if (ruleSetErrors(doc)) return "schema";
   if (doc.project !== project || doc.env !== env) return "project";
-  const key = serviceKeys.find((k) => k?.key_id === (item as Json).service_key_id);
   if (
-    !key ||
-    !keyActive(key, doc.issued) ||
-    !verifySig(key.public_key ?? "", "rules", hashJson(doc), (item as Json).sig)
+    keyProblem(
+      serviceKeys,
+      revoked,
+      (item as Json).service_key_id,
+      doc.issued,
+      "rules",
+      hashJson(doc),
+      (item as Json).sig,
+    )
   )
     return "signature";
   if (!held) return null;
@@ -739,20 +785,29 @@ export function emptyList(): HeldList {
 
 /** One served item `{list, sig, service_key_id}` applied to `held` (§11.2): `[newHeld, null]`, or
  * `[held, refusal]` with the refusal's name (`signature`, `state`, `older`, `gap`, `prev`, `invalid`). */
-export function applyList(held: HeldList, item: unknown, serviceKeys: ServiceKey[]): [HeldList, string | null] {
+export function applyList(
+  held: HeldList,
+  item: unknown,
+  serviceKeys: ServiceKey[],
+  revoked: readonly string[] = [],
+): [HeldList, string | null] {
   const obj = isObj(item) ? item.list : undefined;
   if (!isObj(obj)) return [held, "invalid"];
-  const key = serviceKeys.find((k) => k?.key_id === (item as Json).service_key_id);
-  let signed = false;
+  let bad: string | null = "signature";
   try {
-    signed =
-      !!key &&
-      keyActive(key, obj.issued) &&
-      verifySig(key.public_key ?? "", "fingerprints", hashJson(obj), (item as Json).sig);
+    bad = keyProblem(
+      serviceKeys,
+      revoked,
+      (item as Json).service_key_id,
+      obj.issued,
+      "fingerprints",
+      hashJson(obj),
+      (item as Json).sig,
+    );
   } catch {
-    signed = false;
+    bad = "signature";
   }
-  if (!signed) return [held, "signature"];
+  if (bad) return [held, "signature"];
   if (obj.format !== LIST_FORMAT || obj.list !== "shared" || !isSafeInt(obj.seq)) return [held, "invalid"];
   if (obj.type === "snapshot") {
     if (!entriesOk(obj.entries)) return [held, "invalid"];

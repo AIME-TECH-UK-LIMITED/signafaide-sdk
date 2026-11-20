@@ -479,3 +479,33 @@ def test_rotation_in_a_running_process_registers_the_new_key(recorder, service):
     assert prj["agents"][agent][old.key_id]["valid_to"] == recorder.state.retired_at(agent, old.key_id)
     v = signafaide.verify()
     assert v.ok, str(v)
+
+
+def test_key_lifecycle_through_signafaide_verify(project, monkeypatch):
+    """Spec §5, §7: the vectors' key_lifecycle packs through the SDK's own ``signafaide.verify``
+    entry point (keys documents, trust_embedded_keys, the release's pinned revoked ids), with the
+    same result line and checks as every other implementation."""
+    from pathlib import Path
+
+    from signafaide import checks_runtime
+    from signafaide.drand import load_verifier
+
+    if load_verifier() is None:
+        pytest.skip("the signafaide[bls] extra (py_ecc) is not installed")
+    v = json.loads((Path(__file__).resolve().parents[2] / "spec" / "vectors.json").read_text())
+    for c in v["key_lifecycle"]["packs"]:
+        pack = (
+            v["pack"]["pack"]
+            if c["base"] == "pack"
+            else next(x for x in v["variants"] if x["name"] == c["base"])["pack"]
+        )
+        # The case's pinned revoked ids stand in for the release's own.
+        monkeypatch.setattr(checks_runtime, "DEFAULT_REVOKED", tuple(c.get("revoked", [])))
+        keys = (
+            {"trust_embedded_keys": True}
+            if c.get("trust_embedded_keys")
+            else {"keys": c.get("keys") or v["keys_document"]}
+        )
+        r = signafaide.verify(pack, **keys, agent_keys=v["agent_keys_document"], offline=True)
+        assert r.result_line == c["expect"]["result_line"], c["name"]
+        assert {x.id: x.value or x.status for x in r.checks} == c["expect"]["checks"], c["name"]

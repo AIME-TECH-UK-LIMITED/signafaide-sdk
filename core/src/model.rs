@@ -431,6 +431,23 @@ pub fn service_keys_hash(keys: &[KeyEntry], created_ms: i64) -> Result<Hash> {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct KeysDocument {
     pub keys: Vec<KeyEntry>,
+    /// Keys that must not be trusted at all (§5, 1.1): each stays in `keys` (and in the anchors'
+    /// `keys_hash`) and is named here; no signature by it verifies. Absent when there are none, so
+    /// a document without revocations is unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub revoked: Vec<RevokedKey>,
+}
+
+/// A revoked service key (§5, 1.1). Only `key_id` is needed; `revoked_at` and `reason` are for
+/// people, and fields this version does not know are ignored, so a later, narrower form of
+/// revocation is read as a whole revocation (it fails safe).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct RevokedKey {
+    pub key_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

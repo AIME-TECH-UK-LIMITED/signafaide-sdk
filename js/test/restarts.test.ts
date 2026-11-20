@@ -136,8 +136,8 @@ describe("the skill", () => {
     expect(body).not.toMatch(/—|–/);
   });
 
-  it("the version is 0.5.3 everywhere the package says it", () => {
-    expect(VERSION).toBe("0.5.3");
+  it("the version is 0.5.4 everywhere the package says it", () => {
+    expect(VERSION).toBe("0.5.4");
     expect(JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8")).version).toBe(VERSION);
     expect(JSON.parse(fs.readFileSync(path.join(__dirname, "../mcp/package.json"), "utf8")).version).toBe(VERSION);
   });
@@ -156,9 +156,11 @@ describe("the release check", () => {
   // The files the check reads, copied into a scratch git repository so tags can be made freely.
   const FILES = [
     "scripts/release-check.mjs",
+    "scripts/pinned-keys-append-only.mjs",
     "CHANGELOG.md",
     "js/package.json",
     "js/mcp/package.json",
+    "js/verify/package.json",
     "js/src/version.ts",
     "js/src/http.ts",
     "python/pyproject.toml",
@@ -167,11 +169,22 @@ describe("the release check", () => {
     "plugin/.claude-plugin/plugin.json",
     "core/Cargo.toml",
     "verifier/Cargo.toml",
+    "verifier/pyproject.toml",
     "verifier/src/main.rs",
     "gemini-extension.json",
     ".cursor-plugin/plugin.json",
     "mcp.json",
     "README.md",
+    "LICENSE",
+    "spec/service-keys.json",
+    "js/service-keys.json",
+    "python/src/signafaide/service-keys.json",
+    "verifier/service-keys.json",
+    "verifier/LICENSE",
+    "verifier/README.md",
+    "verifier/THIRD-PARTY-NOTICES.md",
+    "verifier/wheel-tags.json",
+    ".github/workflows/release.yml",
   ];
   const sdk = path.join(__dirname, "../..");
   const run = (dir: string): string =>

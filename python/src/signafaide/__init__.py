@@ -50,7 +50,8 @@ from .verifier import (
     load_agent_keys,
     load_content,
     load_heads,
-    load_service_keys,
+    load_service_key_set,
+    pinned_revoked,
     loads as _loads,
     plain_http,
     verify_local,
@@ -249,9 +250,10 @@ def verify(
     rec = runtime.get()
     notes = []
     service_keys = None
+    revoked: list = []
     keys_plain = False
     if keys is not None:
-        service_keys = load_service_keys(keys)
+        service_keys, revoked = load_service_key_set(keys)
         keys_plain = plain_http(keys)
         notes.append(f"service keys: {keys if isinstance(keys, (str, Path)) else 'given'}")
     elif pack is None and not rec.state.chain_heads():
@@ -264,7 +266,7 @@ def verify(
             )
         keys_plain = url.startswith("http://")
         try:
-            service_keys = load_service_keys(
+            service_keys, revoked = load_service_key_set(
                 rec.client().request("GET", "/.well-known/signafaide-keys.json", auth=False)
             )
             notes.append(
@@ -276,7 +278,14 @@ def verify(
             service_keys = []  # nothing has been shipped, so nothing needs a service key
     drand = load_drand_verifier()
     if pack is None:
-        report = verify_local(rec.state, service_keys, drand=drand, service_keys_plain_http=keys_plain)
+        report = verify_local(
+            rec.state,
+            service_keys,
+            drand=drand,
+            service_keys_plain_http=keys_plain,
+            # The release's pinned revocations always apply (spec §7).
+            revoked_service_keys=revoked + [x for x in pinned_revoked() if x not in revoked],
+        )
         notes.insert(0, f"local state: {rec.state.home}")
         records = [r for c in rec.state.chains() for r in rec.state.read_all(c)]
         unsent = sum(1 for r in records if "receipt" not in r)
@@ -343,6 +352,8 @@ def verify(
             drand=drand,
             service_keys_plain_http=keys_plain,
             agent_keys_plain_http=plain_http(agent_keys),
+            # The release's pinned revocations always apply, --trust-embedded-keys too (spec §7).
+            revoked_service_keys=revoked + [x for x in pinned_revoked() if x not in revoked],
         )
         if independent_agents is None and not trust_embedded_agent_keys:
             notes.append(

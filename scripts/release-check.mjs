@@ -5,7 +5,9 @@
 //
 // 1. The default witness URL in both SDKs is the hosted service (https://api.signafaide.co.uk),
 //    never a loopback address.
-// 2. Every version string agrees (npm packages, PyPI package, Rust crates, code, plugin, agent setup).
+// 2. Every version string agrees (npm packages, PyPI package, Rust crates, code, plugin, agent setup),
+//    including the standalone verifier packages: `signafaide-verify` on npm (js/verify) and on PyPI
+//    (verifier/pyproject.toml, whose version is the verifier crate's).
 // 3. The release is new and written up: the version is above the last git tag (or HEAD is that
 //    tag), and CHANGELOG.md has an entry for it.
 // 4. The verifier binary is built from this source: its --version is the release and its --help
@@ -13,15 +15,30 @@
 // 5. Nothing points at the .com domain, which is not ours: the service is on signafaide.co.uk
 //    (api.signafaide.co.uk for the witness). Every file of the repository and every built package
 //    file is checked.
-// 6. The package names coding agents and auditors are told to install are claimed: `signafaide`
-//    and `signafaide-mcp` on npm, `signafaide` on PyPI. Until they are, anyone could publish under
-//    those names and `npx signafaide verify` (or an agent's MCP config) would run their code.
-//    Set NPM_OWNER / PYPI_OWNER to also require that owner.
+// 6. The package names coding agents and auditors are told to install are claimed: `signafaide`,
+//    `signafaide-mcp` and `signafaide-verify` on npm, `signafaide` and `signafaide-verify` on PyPI.
+//    Until they are, anyone could publish under those names and `npx signafaide-verify` (or an
+//    agent's MCP config) would run their code. And `signafaide-verify` at this very version is
+//    published on both: `signafaide prove` and `keys export` print `npx signafaide-verify@<version>`
+//    and `uvx signafaide-verify@<version>`, so the SDK is released only after the verifier is
+//    (release.yml, run by hand on main, publishes it).
+//    On npm each name's maintainers must be NPM_OWNER alone (default aimetech). PyPI's API shows no
+//    owners: there the trusted publisher (release.yml, environment pypi) binds the name.
+// 8. One set of pinned service keys, append-only (§5): never a key removed or its key_id, public
+//    key or valid_from changed since the last release, and a valid_to only set once. spec/service-keys.json, the copies in the npm and PyPI SDK
+//    packages and the one built into the standalone verifier (verifier/service-keys.json) are
+//    the same bytes; verifier/LICENSE (shipped in the verifier's sdist) is LICENSE.
+// 7. The standalone verifiers agree: spec/vectors.json through the Rust binary (also what the
+//    PyPI wheel holds) and the npm package's bundle (js/verify/dist, built here unless --no-build)
+//    gives the vectors' results and the same output from both (scripts/verify-vectors.mjs). Set
+//    VERIFY_COMMANDS to more installed `signafaide-verify` paths (separated by the path delimiter,
+//    e.g. the one a `pip install` of the built wheel puts in a venv) to include them.
 
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { appendOnly } from "./pinned-keys-append-only.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
@@ -70,6 +87,7 @@ for (const [name, u] of [
 const versions = {
   "js/package.json": JSON.parse(read("js/package.json")).version,
   "js/mcp/package.json": JSON.parse(read("js/mcp/package.json")).version,
+  "js/verify/package.json": JSON.parse(read("js/verify/package.json")).version,
   "js/src/version.ts": read("js/src/version.ts").match(/"([^"]+)"/)?.[1],
   "python/pyproject.toml": read("python/pyproject.toml").match(/^version = "([^"]+)"/m)?.[1],
   "python/src/signafaide/_version.py": read("python/src/signafaide/_version.py").match(/"([^"]+)"/)?.[1],
@@ -85,8 +103,23 @@ const versions = {
       m[1],
     ]),
   ),
+  // The auditor commands and attestation examples name the release they belong to.
+  ...Object.fromEntries(
+    ["README.md", "verifier/README.md"].flatMap((f) =>
+      [...read(f).matchAll(/signafaide-verify(?:@|==)([0-9]+\.[0-9]+\.[0-9]+)/g)].map((m, i) => [
+        `${f} (signafaide-verify mention ${i + 1})`,
+        m[1],
+      ]),
+    ),
+  ),
 };
 const v = versions["js/package.json"];
+// The PyPI verifier is the Rust binary in a wheel: its version must come from verifier/Cargo.toml.
+const pyVerify = read("verifier/pyproject.toml");
+if (!/^dynamic = \["version"\]/m.test(pyVerify) || /^version = /m.test(pyVerify))
+  fail(
+    'verifier/pyproject.toml must take its version from verifier/Cargo.toml (dynamic = ["version"], no version line)',
+  );
 // The Claude Code plugin pins no package (its MCP server is the hosted one), so it has its own
 // version, raised for each change to the plugin. It must never fall behind the packages.
 const pluginVersion = JSON.parse(read("plugin/.claude-plugin/plugin.json")).version;
@@ -190,7 +223,7 @@ else {
     fs.existsSync(path.join(root, dir))
       ? fs.readdirSync(path.join(root, dir), { recursive: true }).map((f) => path.join(dir, String(f)))
       : [];
-  for (const dir of ["js/dist", "js/mcp/dist", "python/dist"]) files.push(...walk(dir));
+  for (const dir of ["js/dist", "js/mcp/dist", "js/verify/dist", "python/dist"]) files.push(...walk(dir));
   const hits = [];
   for (const f of new Set(files)) {
     const p = path.join(root, f);
@@ -208,6 +241,101 @@ else {
   else ok(`no reference to the .com domain in ${new Set(files).size} files (the service is on signafaide.co.uk)`);
 }
 
+// 8. one set of pinned keys, one licence, one list of wheels
+{
+  // release.yml builds a wheel for exactly the tags in verifier/wheel-tags.json.
+  const tags = JSON.parse(read("verifier/wheel-tags.json")).tags;
+  const built = [...read(".github/workflows/release.yml").matchAll(/\btag: ([a-z0-9_.]+)/g)].map((m) => m[1]);
+  if (built.sort().join() !== [...tags].sort().join())
+    fail(`release.yml builds wheels for ${built.join(", ")}, but verifier/wheel-tags.json lists ${tags.join(", ")}`);
+  else ok(`release.yml builds the ${tags.length} wheels verifier/wheel-tags.json lists`);
+  // Append-only (§5), against the last release's file (scripts/pinned-keys-append-only.mjs; without
+  // tags, as in CI's shallow checkout, skipped here: the release workflow's preflight runs it with tags).
+  {
+    const r = appendOnly();
+    if (!r) console.log("skip  pinned keys only ever gain keys (no earlier release to compare with)");
+    else if (r.problems.length)
+      fail(`spec/service-keys.json must only gain keys since ${r.tag}: ${r.problems.join("; ")}`);
+    else ok(`spec/service-keys.json keeps every key of ${r.tag} unchanged (${r.added} added)`);
+  }
+  const keys = [
+    "spec/service-keys.json",
+    "js/service-keys.json",
+    "python/src/signafaide/service-keys.json",
+    "verifier/service-keys.json",
+  ];
+  const off = keys.filter((f) => read(f) !== read(keys[0]));
+  if (off.length) fail(`the pinned service keys differ from ${keys[0]}: ${off.join(", ")}`);
+  else ok(`the pinned service keys are the same in ${keys.length} files`);
+  if (read("verifier/LICENSE") !== read("LICENSE")) fail("verifier/LICENSE is not LICENSE: copy it");
+  else ok("verifier/LICENSE is LICENSE");
+  // The Rust crates' licences, shipped beside LICENSE in the binaries' release, the wheels and the
+  // sdist (release.yml makes it again with cargo-about and fails if it changed).
+  const notices = fs.existsSync(path.join(root, "verifier/THIRD-PARTY-NOTICES.md"))
+    ? read("verifier/THIRD-PARTY-NOTICES.md")
+    : "";
+  if (!notices.startsWith("# Third-party notices") || !/Used by: .*\bureq\b/.test(notices))
+    fail("verifier/THIRD-PARTY-NOTICES.md is missing or not cargo-about's (cargo about generate, verifier/about.toml)");
+  else ok("verifier/THIRD-PARTY-NOTICES.md is there");
+}
+
+// 7. the standalone verifiers agree
+{
+  const exe = process.platform === "win32" ? ".exe" : "";
+  const target = process.env.CARGO_TARGET_DIR || path.join(root, "verifier/target");
+  const bin = path.join(target, "release", `signafaide-verify${exe}`);
+  // The tests' builds: the only ones that read SIGNAFAIDE_VERIFY_KEYS_URL (the pinned-keys cases).
+  const testTarget = path.join(root, "verifier/target/test-keys-url");
+  const testBin = path.join(testTarget, "release", `signafaide-verify${exe}`);
+  const npmBin = path.join(root, "js/verify/dist/cli.js");
+  const npmTest = path.join(root, "js/verify/dist-test/cli.js");
+  try {
+    if (!noBuild) {
+      execFileSync("npx", ["tsup", "--config", "tsup.verify.config.ts"], {
+        cwd: path.join(root, "js"),
+        stdio: ["ignore", "ignore", "inherit"],
+      });
+      execFileSync(
+        "cargo",
+        [
+          "build",
+          "--release",
+          "--manifest-path",
+          "verifier/Cargo.toml",
+          "--features",
+          "test-keys-url",
+          "--target-dir",
+          testTarget,
+        ],
+        { cwd: root, stdio: ["ignore", "ignore", "inherit"] },
+      );
+    }
+    const more = (process.env.VERIFY_COMMANDS ?? "").split(path.delimiter).filter(Boolean);
+    const missing = [bin, npmBin, testBin, npmTest, ...more].filter((c) => !fs.existsSync(c));
+    if (missing.length) fail(`the standalone verifiers are not built: ${missing.join(", ")}`);
+    else {
+      // A release build has no trace of the tests' variable.
+      const leaks = [bin, npmBin].filter((f) => fs.readFileSync(f).includes("SIGNAFAIDE_VERIFY_KEYS_URL"));
+      if (leaks.length) fail(`a release build reads SIGNAFAIDE_VERIFY_KEYS_URL: ${leaks.join(", ")}`);
+      else ok("the release builds have no SIGNAFAIDE_VERIFY_KEYS_URL");
+      const out = sh(process.execPath, [
+        "scripts/verify-vectors.mjs",
+        bin,
+        npmBin,
+        ...more,
+        "--test",
+        testBin,
+        "--test",
+        npmTest,
+      ]);
+      ok(out.split("\n")[0].replace(/^verify-vectors: /, "standalone verifiers agree on the vectors: "));
+    }
+  } catch (e) {
+    const out = `${e.stdout ?? ""}`.trim().split("\n");
+    fail(`the standalone verifiers disagree with the vectors or each other:\n${out.slice(-12).join("\n")}`);
+  }
+}
+
 // 6. claimed package names
 async function lookup(url) {
   const r = await fetch(url, {
@@ -218,30 +346,68 @@ async function lookup(url) {
   if (!r.ok) throw new Error(`${url} answered ${r.status}`);
   return r.json();
 }
+// The npm account that owns every package (the registry's `maintainers`). PyPI's JSON has no owner
+// roles: there, the release workflow's trusted publisher (release.yml, environment pypi) is what
+// ties the name to this repository.
+const NPM_OWNER = process.env.NPM_OWNER ?? "aimetech";
 if (offline) console.log("skip  package-name checks (--offline)");
 else {
-  for (const name of ["signafaide", "signafaide-mcp"]) {
+  for (const name of ["signafaide", "signafaide-mcp", "signafaide-verify"]) {
     try {
       const doc = await lookup(`https://registry.npmjs.org/${name}`);
       if (!doc)
         fail(
           `npm: "${name}" is not claimed; publish (or reserve) it before any docs, agent configs or auditor commands point at it`,
         );
-      else if (process.env.NPM_OWNER && !(doc.maintainers ?? []).some((m) => m.name === process.env.NPM_OWNER))
-        fail(`npm: "${name}" exists but ${process.env.NPM_OWNER} is not a maintainer`);
+      else if ((doc.maintainers ?? []).map((m) => m.name).join(",") !== NPM_OWNER)
+        fail(
+          `npm: "${name}" maintainers are ${(doc.maintainers ?? []).map((m) => m.name).join(", ") || "none"}, not ${NPM_OWNER} alone`,
+        );
       else ok(`npm: "${name}" is claimed`);
     } catch (e) {
       fail(`npm: could not check "${name}" (${e.message})`);
     }
   }
+  for (const name of ["signafaide", "signafaide-verify"]) {
+    try {
+      const doc = await lookup(`https://pypi.org/pypi/${name}/json`);
+      if (!doc) fail(`PyPI: "${name}" is not claimed; publish (or reserve) it first`);
+      else ok(`PyPI: "${name}" is claimed`);
+    } catch (e) {
+      fail(`PyPI: could not check "${name}" (${e.message})`);
+    }
+  }
+  // The version the SDK tells auditors to run must exist before the SDK goes out: on npm, and on
+  // PyPI with every file the release workflow makes (a partial upload is not "published").
+  // The wheel tags release.yml builds (verifier/wheel-tags.json; the service's site build reads it too).
+  const WHEEL_TAGS = JSON.parse(read("verifier/wheel-tags.json")).tags;
+  const expected = [
+    ...WHEEL_TAGS.map((t) => `signafaide_verify-${v}-py3-none-${t}.whl`),
+    `signafaide_verify-${v}.tar.gz`,
+  ];
   try {
-    const doc = await lookup("https://pypi.org/pypi/signafaide/json");
-    if (!doc) fail('PyPI: "signafaide" is not claimed; publish (or reserve) it first');
-    else if (process.env.PYPI_OWNER && !JSON.stringify(doc.info ?? {}).includes(process.env.PYPI_OWNER))
-      fail(`PyPI: "signafaide" exists but does not name ${process.env.PYPI_OWNER}`);
-    else ok('PyPI: "signafaide" is claimed');
+    if (await lookup(`https://registry.npmjs.org/signafaide-verify/${v}`))
+      ok(`npm: signafaide-verify ${v} is published`);
+    else
+      fail(
+        `npm: signafaide-verify ${v} is not published; the SDK prints npx/uvx signafaide-verify@${v} for auditors, so publish the verifier first (Actions, Release verifier, run on main with ${v})`,
+      );
   } catch (e) {
-    fail(`PyPI: could not check "signafaide" (${e.message})`);
+    fail(`npm: could not check signafaide-verify ${v} (${e.message})`);
+  }
+  try {
+    const doc = await lookup(`https://pypi.org/pypi/signafaide-verify/${v}/json`);
+    const have = new Set((doc?.urls ?? []).map((u) => u.filename));
+    const missing = expected.filter((f) => !have.has(f));
+    if (!doc)
+      fail(
+        `PyPI: signafaide-verify ${v} is not published; publish the verifier first (Actions, Release verifier, run on main with ${v})`,
+      );
+    else if (missing.length)
+      fail(`PyPI: signafaide-verify ${v} lacks ${missing.join(", ")}: re-run the release's publish-pypi job`);
+    else ok(`PyPI: signafaide-verify ${v} is published with all ${expected.length} files`);
+  } catch (e) {
+    fail(`PyPI: could not check signafaide-verify ${v} (${e.message})`);
   }
 }
 

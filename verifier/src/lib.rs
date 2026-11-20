@@ -1,8 +1,8 @@
 //! signafAIde pack verification for the CLI and, behind the `wasm` feature, for browsers.
 
 pub use signafaide_core::verify::{
-    agent_keys_from_text, bitcoin_heights, block_header_from_hex, contents_from_text, heads_from_text, verify_pack,
-    Bitcoin, Check, Options, Report, Status,
+    agent_keys_from_text, bitcoin_heights, block_header_from_hex, clean_line, contents_from_text, heads_from_text,
+    verify_pack, Bitcoin, Check, Options, Report, Status,
 };
 use signafaide_core::{from_value, Error, KeyEntry, KeysDocument, Result};
 use std::collections::BTreeMap;
@@ -10,16 +10,27 @@ use std::collections::BTreeMap;
 /// Bitcoin block headers by height: (block hash, raw header hex), or why they could not be fetched.
 pub type BitcoinHeaders = BTreeMap<u64, std::result::Result<(String, String), String>>;
 
-/// Parse a keys document: `{"keys":[...]}` as served at `/.well-known/signafaide-keys.json`.
-pub fn parse_keys(text: &str) -> Result<Vec<KeyEntry>> {
+/// Parse a keys document: `{"keys":[...], "revoked"?: [{"key_id", ...}]}` as served at
+/// `/.well-known/signafaide-keys.json` (§5). Each key is checked; a revoked entry needs only its
+/// `key_id` (other fields are ignored).
+pub fn parse_keys_document(text: &str) -> Result<KeysDocument> {
     let v: serde_json::Value = serde_json::from_str(text).map_err(|e| Error::new(format!("keys: {e}")))?;
-    let keys = from_value::<KeysDocument>(&v)
-        .map_err(|e| Error::new(format!("keys: {e}")))?
-        .keys;
-    for k in &keys {
+    let doc = from_value::<KeysDocument>(&v).map_err(|e| Error::new(format!("keys: {e}")))?;
+    for k in &doc.keys {
         k.validate().map_err(|e| Error::new(format!("keys: {e}")))?;
     }
-    Ok(keys)
+    Ok(doc)
+}
+
+/// The one service-key loader: the whole key list (every key, revoked ones too, as the anchors'
+/// `keys_hash` covers them) and the ids of the revoked keys (no signature by one of them verifies).
+pub fn load_service_keys(text: &str) -> Result<(Vec<KeyEntry>, Vec<String>)> {
+    signafaide_core::keyset::load(text)
+}
+
+/// The whole key list of a keys document (revoked keys included).
+pub fn parse_keys(text: &str) -> Result<Vec<KeyEntry>> {
+    Ok(parse_keys_document(text)?.keys)
 }
 
 /// Text inputs besides the pack.
@@ -27,10 +38,14 @@ pub fn parse_keys(text: &str) -> Result<Vec<KeyEntry>> {
 pub struct Inputs<'a> {
     pub keys: Option<&'a str>,
     pub trust_embedded_keys: bool,
+    /// Revoked service key ids applied besides the ones `keys` lists: the release's pinned
+    /// revocations when the keys come from the pack (`--trust-embedded-keys`, spec §7).
+    pub revoked: Vec<String>,
     pub agent_keys: Option<&'a str>,
     pub trust_embedded_agent_keys: bool,
     pub head: Option<&'a str>,
-    pub contents: Option<&'a str>,
+    /// Local content files (§7 check 12), each JSON lines or one JSON array; a later file wins.
+    pub contents: Vec<&'a str>,
     /// `None`: offline. `Some`: height -> (block hash, raw header hex) as an explorer served
     /// them, or why they could not be fetched.
     pub bitcoin: Option<BitcoinHeaders>,
@@ -75,14 +90,30 @@ pub fn verify_text(pack: &str, inputs: &Inputs) -> Result<Report> {
                 .collect(),
         ),
     };
+    let (service_keys, mut revoked_service_keys) = match inputs.keys.map(load_service_keys).transpose()? {
+        Some((keys, revoked)) => (Some(keys), revoked),
+        None => (None, Vec::new()),
+    };
+    for id in &inputs.revoked {
+        if !revoked_service_keys.contains(id) {
+            revoked_service_keys.push(id.clone());
+        }
+    }
     let opts = Options {
-        service_keys: inputs.keys.map(parse_keys).transpose()?,
+        service_keys,
+        revoked_service_keys,
         trust_embedded_keys: inputs.trust_embedded_keys,
         agent_keys: inputs.agent_keys.map(agent_keys_from_text).transpose()?,
         trust_embedded_agent_keys: inputs.trust_embedded_agent_keys,
         heads: inputs.head.map(heads_from_text).transpose()?,
         bitcoin,
-        contents: inputs.contents.map(contents_from_text).transpose()?.unwrap_or_default(),
+        contents: {
+            let mut all = std::collections::HashMap::new();
+            for text in &inputs.contents {
+                all.extend(contents_from_text(text)?);
+            }
+            all
+        },
         service_keys_plain_http: inputs.keys_plain_http,
         agent_keys_plain_http: inputs.agent_keys_plain_http,
         by_service: false,
@@ -92,6 +123,8 @@ pub fn verify_text(pack: &str, inputs: &Inputs) -> Result<Report> {
 
 /// Browser entry point: returns the report as JSON, or throws with the reason. `bitcoin` is a
 /// JSON object of height -> `{hash, header}` (hex) the page fetched over https, or absent for offline.
+/// `revoked` is a JSON list of revoked service key ids applied besides the keys document's: the
+/// page's pinned ones (spec §5, §7), whatever the keys' source.
 #[cfg(feature = "wasm")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
@@ -104,6 +137,7 @@ pub fn verify(
     head: Option<String>,
     contents: Option<String>,
     bitcoin: Option<String>,
+    revoked: Option<String>,
 ) -> Result<String, wasm_bindgen::JsValue> {
     let run = || -> Result<Report> {
         let bitcoin = match bitcoin.as_deref() {
@@ -127,13 +161,18 @@ pub fn verify(
                 )
             }
         };
+        let revoked: Vec<String> = match revoked.as_deref() {
+            None => Vec::new(),
+            Some(r) => serde_json::from_str(r).map_err(|e| Error::new(format!("revoked: {e} (a list of key ids)")))?,
+        };
         let inputs = Inputs {
             keys: keys.as_deref(),
             trust_embedded_keys,
+            revoked,
             agent_keys: agent_keys.as_deref(),
             trust_embedded_agent_keys,
             head: head.as_deref(),
-            contents: contents.as_deref(),
+            contents: contents.as_deref().into_iter().collect(),
             bitcoin,
             ..Default::default()
         };

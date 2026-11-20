@@ -23,6 +23,22 @@ from .records import record_hash
 from .words import field_words, number_words, rule_words, state_word
 
 Out = Callable[[str], None]
+# How auditors install the standalone verifier (§7).
+AUDITOR_DOCS_URL = "https://signafaide.co.uk/docs/verify"
+# The hosted witness, whose service keys are pinned in signafaide-verify.
+_HOSTED = ("https://api.signafaide.co.uk", "https://signafaide.co.uk")
+
+
+def auditor_commands(witness: str, agent_keys: str, extra: str = "") -> List[str]:
+    """The one command an auditor runs, as npx and uvx lines, pinned to this release. For the hosted
+    witness it passes no --keys: signafaide-verify uses the keys pinned in it and checks them against
+    the published list. A self-hosted witness's keys come from that witness."""
+    base = witness.rstrip("/")
+    keys = "" if base in _HOSTED else f" --keys {base}/.well-known/signafaide-keys.json"
+    args = f"pack.json{keys} --agent-keys {agent_keys} --head head.json{extra}"
+    return [f"npx signafaide-verify@{__version__} {args}", f"uvx signafaide-verify@{__version__} {args}"]
+
+
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -246,7 +262,7 @@ def run_pull(rec: Any, prompt: Prompter, out: Out) -> int:
     before = held["version"] if held else None
     code = 0
     if rec.api_key:
-        said = rec.checks.pull_rules()
+        said = rec.checks.forced_pull()  # a person asked: key list, rule set and list, never waiting
         if "rules" in rec.checks.problems:
             out(f"Rules      {said}")
             code = 1
@@ -782,9 +798,8 @@ def run_prove(
     except ValueError:
         rel = d
     out(f"Wrote {rel}/  {' '.join(written)}")
-    out("Your auditor checks them with:")
-    out(
-        f"  signafaide verify pack.json --keys https://cdn.jsdelivr.net/npm/signafaide@{__version__}/service-keys.json "
-        f"--agent-keys agent-keys.json --head head.json" + (" --content content.jsonl" if content else "")
-    )
+    out("Your auditor checks them with the standalone verifier (no account, no SDK), one of:")
+    for line in auditor_commands(rec.url, "agent-keys.json", " --content content.jsonl" if content else ""):
+        out(f"  {line}")
+    out(f"or with the signafaide-verify binary and the same arguments: {AUDITOR_DOCS_URL}")
     return 0

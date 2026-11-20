@@ -1,0 +1,14 @@
+# Third-party notices
+
+The signafaide-verify program (the release binaries, the PyPI wheels and the sdist) includes the following crates.
+
+{{#each licenses}}
+## {{{name}}}
+
+Used by: {{#each used_by}}{{crate.name}} {{crate.version}}{{#unless @last}}, {{/unless}}{{/each}}
+
+```
+{{{text}}}
+```
+
+{{/each}}

@@ -27550,6 +27550,2281 @@
     }
   ],
   "jcs_note": "Numbers are judged by their literal: an integer literal (no fraction, no exponent) beyond ±(2^53-1) is rejected; every other literal is a double. Entries with exact_integer_only need a parser that keeps integer literals (Python json, a BigInt-aware JS parser); plain JSON.parse cannot run them. A JavaScript SDK canonicalizing its own values rejects integer-valued numbers with 2^53 <= |x| < 1e21, because JSON.stringify writes those as integer literals.",
+  "key_lifecycle": {
+    "about": "Spec 5 and 7: service key revocation and rotation, the same in every implementation. packs: base is \"pack\" or a variant's name; keys and trust_embedded_keys as for variants; revoked: the release's pinned revoked ids, which every verifier applies whatever the keys' source (the keys document's ids are applied too); expect as for variants, plus failed_items: the items that failed, per check. rule_sets, rulings, fingerprint_lists: keys and revoked are the service keys and revoked ids the client holds; expect is null when accepted, else the refusal (rule sets and lists: signature; rulings: unknown_key, revoked, not_active or signature, judged in that order); a list's expect also holds the seq held after. cross_check: a release's pinned keys document against the published one; expect is {unreadable: true}, {differ: [problems]}, or the newer key ids, the retirements applied, the revoked ids named, and the keys and revoked ids verified with. stale_transitions (spec 8): a held rule set's or list's stale state {since, refused, retry, confirmed when true}, an event (signer_bad, refused, verified, pull_done, merge, unsigned, network, keys_changed, resaved), whether an object is held, and now; expect is the state after.",
+    "cross_check": [
+      {
+        "expect": {
+          "applied_revoked": [],
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "newer": [],
+          "retired": [],
+          "revoked": []
+        },
+        "name": "the same keys",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "applied_revoked": [],
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "newer": [
+            "03396219237f75a6"
+          ],
+          "retired": [],
+          "revoked": []
+        },
+        "name": "a newer key there",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            },
+            {
+              "key_id": "03396219237f75a6",
+              "public_key": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+              "valid_from": "2026-12-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "applied_revoked": [],
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": "2026-12-01T00:00:00.000Z"
+            }
+          ],
+          "newer": [],
+          "retired": [
+            [
+              "24f6ed6acbfe1009",
+              "2026-12-01T00:00:00.000Z"
+            ]
+          ],
+          "revoked": []
+        },
+        "name": "retired there: the valid_to applies",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": "2026-12-01T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "applied_revoked": [],
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": "2026-12-01T00:00:00.000Z"
+            }
+          ],
+          "newer": [],
+          "retired": [],
+          "revoked": []
+        },
+        "name": "a valid_to there later than the pinned one: the pinned (earlier) one stays",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": "2026-12-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": "2027-01-01T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "applied_revoked": [],
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": "2026-11-20T00:00:00.000Z"
+            }
+          ],
+          "newer": [],
+          "retired": [
+            [
+              "24f6ed6acbfe1009",
+              "2026-11-20T00:00:00.000Z"
+            ]
+          ],
+          "revoked": []
+        },
+        "name": "a valid_to there earlier than the pinned one: it applies",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": "2026-12-01T00:00:00.000Z"
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": "2026-11-20T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "applied_revoked": [
+            "24f6ed6acbfe1009"
+          ],
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "newer": [],
+          "retired": [],
+          "revoked": [
+            "24f6ed6acbfe1009"
+          ]
+        },
+        "name": "revoked there: applied and named",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "revoked": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "later": 1,
+              "reason": null,
+              "revoked_at": null
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "applied_revoked": [
+            "1111111111111111",
+            "24f6ed6acbfe1009"
+          ],
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "newer": [],
+          "retired": [],
+          "revoked": [
+            "24f6ed6acbfe1009"
+          ]
+        },
+        "name": "revoked in the pinned file: always applied, the published ones added",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "revoked": [
+            {
+              "key_id": "1111111111111111"
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "revoked": [
+            {
+              "key_id": "24f6ed6acbfe1009"
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "differ": [
+            "24f6ed6acbfe1009 is not in the published list"
+          ]
+        },
+        "name": "a pinned key missing there",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "03396219237f75a6",
+              "public_key": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+              "valid_from": "2026-12-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "differ": [
+            "24f6ed6acbfe1009 has another public key there"
+          ]
+        },
+        "name": "a pinned key with other bytes there",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "differ": [
+            "24f6ed6acbfe1009 has an invalid valid_to there"
+          ]
+        },
+        "name": "a valid_to there that is a number",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": 5
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "differ": [
+            "24f6ed6acbfe1009 has an invalid valid_to there"
+          ]
+        },
+        "name": "a valid_to there that is not a time",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": "tomorrow"
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "differ": [
+            "its `revoked` is not a list of entries with a key_id"
+          ]
+        },
+        "name": "a revoked that is not a list",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "revoked": {
+            "key_id": "24f6ed6acbfe1009"
+          }
+        }
+      },
+      {
+        "expect": {
+          "differ": [
+            "its `revoked` is not a list of entries with a key_id"
+          ]
+        },
+        "name": "a revoked entry with a number for revoked_at",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "revoked": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "revoked_at": 5
+            }
+          ]
+        }
+      },
+      {
+        "expect": {
+          "unreadable": true
+        },
+        "name": "not a keys document",
+        "pinned": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ]
+        },
+        "published": {
+          "key": []
+        }
+      }
+    ],
+    "fingerprint_lists": [
+      {
+        "apply": [
+          {
+            "list": {
+              "add": [
+                {
+                  "fingerprint": "763cd7839b8402a7085a766590dc0eafd9ea90b6d35207fe68d556e65f9d3b05",
+                  "kind": "tool"
+                }
+              ],
+              "format": "signafaide-fingerprints/1",
+              "issued": "2026-11-17T08:00:00.000Z",
+              "list": "shared",
+              "prev": null,
+              "remove": [],
+              "seq": 1,
+              "state_hash": "9a6e902d5c9b50f8def8775db841bbc02e94b6f79713827a1d64fb97611e87de",
+              "type": "update"
+            },
+            "list_hash": "d0f2a813a3a624e29e7d6651c6f74c949489a6c3fd779863e253fe4bc5f1541b",
+            "service_key_id": "24f6ed6acbfe1009",
+            "sig": "O2uZnVDHivEWeEOcU_4G-C5ZFoCmFoO4XoaCTHVOFdv92X8LrCGDV4Oe53laA8kSD_IA-H-g9UPp5vikFs5aBg"
+          }
+        ],
+        "expect": {
+          "error": null,
+          "seq": 1
+        },
+        "keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "name": "accepted",
+        "revoked": []
+      },
+      {
+        "apply": [
+          {
+            "list": {
+              "add": [
+                {
+                  "fingerprint": "763cd7839b8402a7085a766590dc0eafd9ea90b6d35207fe68d556e65f9d3b05",
+                  "kind": "tool"
+                }
+              ],
+              "format": "signafaide-fingerprints/1",
+              "issued": "2026-11-17T08:00:00.000Z",
+              "list": "shared",
+              "prev": null,
+              "remove": [],
+              "seq": 1,
+              "state_hash": "9a6e902d5c9b50f8def8775db841bbc02e94b6f79713827a1d64fb97611e87de",
+              "type": "update"
+            },
+            "list_hash": "d0f2a813a3a624e29e7d6651c6f74c949489a6c3fd779863e253fe4bc5f1541b",
+            "service_key_id": "24f6ed6acbfe1009",
+            "sig": "O2uZnVDHivEWeEOcU_4G-C5ZFoCmFoO4XoaCTHVOFdv92X8LrCGDV4Oe53laA8kSD_IA-H-g9UPp5vikFs5aBg"
+          }
+        ],
+        "expect": {
+          "error": "signature",
+          "seq": 0
+        },
+        "keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "name": "refused: the signing key is revoked",
+        "revoked": [
+          "24f6ed6acbfe1009"
+        ]
+      },
+      {
+        "apply": [
+          {
+            "list": {
+              "add": [
+                {
+                  "fingerprint": "763cd7839b8402a7085a766590dc0eafd9ea90b6d35207fe68d556e65f9d3b05",
+                  "kind": "tool"
+                }
+              ],
+              "format": "signafaide-fingerprints/1",
+              "issued": "2026-11-17T08:00:00.000Z",
+              "list": "shared",
+              "prev": null,
+              "remove": [],
+              "seq": 1,
+              "state_hash": "9a6e902d5c9b50f8def8775db841bbc02e94b6f79713827a1d64fb97611e87de",
+              "type": "update"
+            },
+            "list_hash": "d0f2a813a3a624e29e7d6651c6f74c949489a6c3fd779863e253fe4bc5f1541b",
+            "service_key_id": "24f6ed6acbfe1009",
+            "sig": "O2uZnVDHivEWeEOcU_4G-C5ZFoCmFoO4XoaCTHVOFdv92X8LrCGDV4Oe53laA8kSD_IA-H-g9UPp5vikFs5aBg"
+          }
+        ],
+        "expect": {
+          "error": "signature",
+          "seq": 0
+        },
+        "keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": "2026-11-01T00:00:00.001Z"
+          }
+        ],
+        "name": "refused: the signing key was retired before it was issued",
+        "revoked": []
+      }
+    ],
+    "packs": [
+      {
+        "base": "pack",
+        "expect": {
+          "checks": {
+            "anchor": "fail",
+            "batch_chain": "pass",
+            "batch_sig": "fail",
+            "chain": "pass",
+            "content": "pass",
+            "drand": "pass",
+            "head_sig": "fail",
+            "merkle": "pass",
+            "ots": "pending",
+            "record_hash": "pass",
+            "record_sig": "pass",
+            "schema": "pass"
+          },
+          "coverage": {
+            "agent-a": {
+              "declared": [],
+              "declared_at_seq": null,
+              "undeclared_recorded": []
+            }
+          },
+          "coverage_lines": [
+            "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+          ],
+          "failed_items": {
+            "anchor": [
+              "anchor 1"
+            ],
+            "batch_sig": [
+              "batch 1",
+              "batch 2"
+            ],
+            "head_sig": [
+              "head agent-a#3",
+              "head agent-a#4",
+              "export statement"
+            ]
+          },
+          "result": "FAIL",
+          "result_line": "FAIL: 3 of 12 checks failed (batch signatures, signed heads, anchors), 8 passed, 1 pending; export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+          "rules": [],
+          "rules_lines": [],
+          "telemetry": {},
+          "telemetry_lines": [],
+          "tool_call_checks": {},
+          "tool_call_checks_lines": []
+        },
+        "keys": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "revoked": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "later": 1,
+              "reason": "compromised",
+              "revoked_at": null
+            }
+          ]
+        },
+        "name": "the service key revoked: batches, heads, the export and the anchors it signed fail; keys_hash still matches"
+      },
+      {
+        "base": "tool-call checks: a protected call ruled allow by the witness, its outcome, the rule set version and the disclosed values",
+        "expect": {
+          "checks": {
+            "anchor": "fail",
+            "batch_chain": "pass",
+            "batch_sig": "fail",
+            "chain": "pass",
+            "content": "pass",
+            "drand": "not_checked",
+            "head_sig": "fail",
+            "merkle": "pass",
+            "ots": "pending",
+            "record_hash": "pass",
+            "record_sig": "pass",
+            "schema": "pass"
+          },
+          "coverage": {
+            "agent-a": {
+              "declared": [],
+              "declared_at_seq": null,
+              "undeclared_recorded": []
+            }
+          },
+          "coverage_lines": [
+            "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+          ],
+          "failed_items": {
+            "anchor": [
+              "anchor 1"
+            ],
+            "batch_sig": [
+              "batch 1",
+              "batch 2",
+              "ruling on agent-a#1"
+            ],
+            "head_sig": [
+              "head agent-a#1",
+              "head agent-a#2",
+              "export statement",
+              "rule_sets[0]"
+            ]
+          },
+          "result": "FAIL",
+          "result_line": "FAIL: 3 of 12 checks failed (batch signatures, signed heads, anchors), 7 passed, 1 pending, 1 not checked; export of every agent, all records, generated 2026-11-17T12:00:00.000Z",
+          "rules": [],
+          "rules_lines": [],
+          "telemetry": {},
+          "telemetry_lines": [],
+          "tool_call_checks": {
+            "agent-a": {
+              "allowed": 0,
+              "blocked_by_witness": 0,
+              "blocked_here": 0,
+              "checked": 1,
+              "no_ruling": {
+                "no_outcome": 0,
+                "not_run": 0,
+                "ran": 0
+              },
+              "noted": 1,
+              "notes": {
+                "rule": 1
+              },
+              "ran_after_block": [],
+              "rule_sets": [
+                {
+                  "hash": "8e1db674169d14449ce235b33a8bd2458c39e8b9b14e24c7af49e459b01ed984",
+                  "set": "local",
+                  "version": null
+                },
+                {
+                  "hash": "441af83caeccd0ae5211e919a4a6741c8cfcbc2771d45e3cdbb72ab65827f4d6",
+                  "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+                  "version": 2
+                }
+              ],
+              "ruled": {
+                "allow": 1,
+                "block": 0,
+                "by_exception": 0,
+                "calibrating_would_block": 0,
+                "not_calibrated": 0,
+                "watch_would_block": 0
+              },
+              "withheld": []
+            }
+          },
+          "tool_call_checks_lines": [
+            "agent-a: 1 tool call checked: 0 allowed, 1 with notes",
+            "agent-a: notes: rule 1",
+            "agent-a: 1 protected call ruled by the witness: 1 allowed",
+            "agent-a: rule sets used: local 8e1db674, rs_01JD2K8Z5X3V7N2M4K6H8G0F1A version 2"
+          ]
+        },
+        "keys": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": null
+            }
+          ],
+          "revoked": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "later": 1,
+              "reason": "compromised",
+              "revoked_at": null
+            }
+          ]
+        },
+        "name": "variant 30 with its service key revoked: the rule set and the ruling fail too"
+      },
+      {
+        "base": "pack",
+        "expect": {
+          "checks": {
+            "anchor": "fail",
+            "batch_chain": "pass",
+            "batch_sig": "fail",
+            "chain": "pass",
+            "content": "pass",
+            "drand": "pass",
+            "head_sig": "fail",
+            "merkle": "pass",
+            "ots": "pending",
+            "record_hash": "pass",
+            "record_sig": "pass",
+            "schema": "pass"
+          },
+          "coverage": {
+            "agent-a": {
+              "declared": [],
+              "declared_at_seq": null,
+              "undeclared_recorded": []
+            }
+          },
+          "coverage_lines": [
+            "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+          ],
+          "failed_items": {
+            "anchor": [
+              "anchor 1"
+            ],
+            "batch_sig": [
+              "batch 1",
+              "batch 2"
+            ],
+            "head_sig": [
+              "head agent-a#3",
+              "head agent-a#4",
+              "export statement"
+            ]
+          },
+          "result": "FAIL",
+          "result_line": "FAIL: 3 of 12 checks failed (batch signatures, signed heads, anchors), 8 passed, 1 pending; export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+          "rules": [],
+          "rules_lines": [],
+          "telemetry": {},
+          "telemetry_lines": [],
+          "tool_call_checks": {},
+          "tool_call_checks_lines": []
+        },
+        "keys": {
+          "keys": [
+            {
+              "key_id": "24f6ed6acbfe1009",
+              "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+              "valid_from": "2026-11-01T00:00:00.000Z",
+              "valid_to": "2026-11-01T00:00:00.001Z"
+            }
+          ]
+        },
+        "name": "the service key retired before the batches: its signatures after valid_to fail"
+      },
+      {
+        "base": "pack",
+        "expect": {
+          "checks": {
+            "anchor": "fail",
+            "batch_chain": "pass",
+            "batch_sig": "fail",
+            "chain": "pass",
+            "content": "pass",
+            "drand": "pass",
+            "head_sig": "fail",
+            "merkle": "pass",
+            "ots": "pending",
+            "record_hash": "pass",
+            "record_sig": "pass",
+            "schema": "pass"
+          },
+          "coverage": {
+            "agent-a": {
+              "declared": [],
+              "declared_at_seq": null,
+              "undeclared_recorded": []
+            }
+          },
+          "coverage_lines": [
+            "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+          ],
+          "failed_items": {
+            "anchor": [
+              "anchor 1"
+            ],
+            "batch_sig": [
+              "batch 1",
+              "batch 2"
+            ],
+            "head_sig": [
+              "head agent-a#3",
+              "head agent-a#4",
+              "export statement"
+            ]
+          },
+          "result": "FAIL",
+          "result_line": "FAIL: 3 of 12 checks failed (batch signatures, signed heads, anchors), 8 passed, 1 pending; export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+          "rules": [],
+          "rules_lines": [],
+          "telemetry": {},
+          "telemetry_lines": [],
+          "tool_call_checks": {},
+          "tool_call_checks_lines": []
+        },
+        "name": "service keys from the pack (--trust-embedded-keys) with the release's pinned revoked ids",
+        "revoked": [
+          "24f6ed6acbfe1009"
+        ],
+        "trust_embedded_keys": true
+      },
+      {
+        "base": "pack",
+        "expect": {
+          "checks": {
+            "anchor": "pass",
+            "batch_chain": "pass",
+            "batch_sig": "pass",
+            "chain": "pass",
+            "content": "pass",
+            "drand": "pass",
+            "head_sig": "pass",
+            "merkle": "pass",
+            "ots": "pending",
+            "record_hash": "pass",
+            "record_sig": "pass",
+            "schema": "pass"
+          },
+          "coverage": {
+            "agent-a": {
+              "declared": [],
+              "declared_at_seq": null,
+              "undeclared_recorded": []
+            }
+          },
+          "coverage_lines": [
+            "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+          ],
+          "failed_items": {},
+          "result": "PASS",
+          "result_line": "PASS (service keys taken from the pack, not independent): 11 of 12 checks passed, 1 pending (public timestamp); export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+          "rules": [],
+          "rules_lines": [],
+          "telemetry": {},
+          "telemetry_lines": [],
+          "tool_call_checks": {},
+          "tool_call_checks_lines": []
+        },
+        "name": "service keys from the pack (--trust-embedded-keys), nothing revoked",
+        "trust_embedded_keys": true
+      },
+      {
+        "base": "pack",
+        "expect": {
+          "checks": {
+            "anchor": "fail",
+            "batch_chain": "pass",
+            "batch_sig": "fail",
+            "chain": "pass",
+            "content": "pass",
+            "drand": "pass",
+            "head_sig": "fail",
+            "merkle": "pass",
+            "ots": "pending",
+            "record_hash": "pass",
+            "record_sig": "pass",
+            "schema": "pass"
+          },
+          "coverage": {
+            "agent-a": {
+              "declared": [],
+              "declared_at_seq": null,
+              "undeclared_recorded": []
+            }
+          },
+          "coverage_lines": [
+            "agent-a: no tool list was declared, so the pack cannot show which of the agent's tools are recorded"
+          ],
+          "failed_items": {
+            "anchor": [
+              "anchor 1"
+            ],
+            "batch_sig": [
+              "batch 1",
+              "batch 2"
+            ],
+            "head_sig": [
+              "head agent-a#3",
+              "head agent-a#4",
+              "export statement"
+            ]
+          },
+          "result": "FAIL",
+          "result_line": "FAIL: 3 of 12 checks failed (batch signatures, signed heads, anchors), 8 passed, 1 pending; export of every agent, all records, generated 2026-11-13T12:00:00.000Z",
+          "rules": [],
+          "rules_lines": [],
+          "telemetry": {},
+          "telemetry_lines": [],
+          "tool_call_checks": {},
+          "tool_call_checks_lines": []
+        },
+        "name": "keys given (--keys) without the revocation, with the release's pinned revoked ids: they always apply",
+        "revoked": [
+          "24f6ed6acbfe1009"
+        ]
+      }
+    ],
+    "rule_sets": [
+      {
+        "env": "live",
+        "expect": null,
+        "item": {
+          "rules": {
+            "addresses": {
+              "cidrs": [
+                "10.20.0.0/16"
+              ],
+              "hosts": [
+                "*.corp.example"
+              ]
+            },
+            "approved": null,
+            "default": "allow",
+            "env": "live",
+            "fail": {
+              "approve_payout": "closed"
+            },
+            "format": "signafaide-rules/1",
+            "issued": "2026-11-17T10:00:00.000Z",
+            "mode": "enforce",
+            "prev": "5567d144e214a317db7f929fc1b68d44d86c6de2cc5bbe654cfffe52bdf867dc",
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "rules": [
+              {
+                "about": "Agents never delete accounts.",
+                "action": "block",
+                "agents": null,
+                "id": "no-delete",
+                "tools": [
+                  "delete_account"
+                ],
+                "when": []
+              },
+              {
+                "about": "Payouts over 1000 need a person.",
+                "action": "block",
+                "agents": null,
+                "id": "payout-limit",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/amount",
+                    "op": "gt",
+                    "value": 1000
+                  }
+                ]
+              },
+              {
+                "about": "Only GBP and EUR.",
+                "action": "block",
+                "agents": null,
+                "id": "payout-currency",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/currency",
+                    "op": "not_in",
+                    "value": [
+                      "GBP",
+                      "EUR"
+                    ]
+                  }
+                ]
+              },
+              {
+                "about": "No payouts to country XX.",
+                "action": "block",
+                "agents": null,
+                "id": "payee-country",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/payee/country",
+                    "op": "eq",
+                    "value": "XX"
+                  }
+                ]
+              },
+              {
+                "about": "At most 2 payouts a minute per agent.",
+                "action": "block",
+                "agents": null,
+                "id": "payout-rate",
+                "limit": {
+                  "calls": 2,
+                  "per": "agent_tool",
+                  "seconds": 60
+                },
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": []
+              },
+              {
+                "about": "Payees with an account id.",
+                "action": "allow",
+                "agents": null,
+                "id": "known-payee",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/payee/id",
+                    "op": "prefix",
+                    "value": "acct_"
+                  }
+                ]
+              },
+              {
+                "about": "agent-b does not refund.",
+                "action": "block",
+                "agents": [
+                  "agent-b"
+                ],
+                "id": "bot-b-no-refunds",
+                "tools": [
+                  "refund"
+                ],
+                "when": []
+              }
+            ],
+            "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+            "version": 2
+          },
+          "service_key_id": "24f6ed6acbfe1009",
+          "sig": "ZdNjE2CjaNM9i5fjEfiZIMcpdzaDK6ICzYEDAyoZNMQmpGebaKMZH5xfU3sUGobdgBhzbX_ebenQJNFYVa0MAQ"
+        },
+        "keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "name": "accepted with the key active and not revoked",
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "revoked": []
+      },
+      {
+        "env": "live",
+        "expect": "signature",
+        "item": {
+          "rules": {
+            "addresses": {
+              "cidrs": [
+                "10.20.0.0/16"
+              ],
+              "hosts": [
+                "*.corp.example"
+              ]
+            },
+            "approved": null,
+            "default": "allow",
+            "env": "live",
+            "fail": {
+              "approve_payout": "closed"
+            },
+            "format": "signafaide-rules/1",
+            "issued": "2026-11-17T10:00:00.000Z",
+            "mode": "enforce",
+            "prev": "5567d144e214a317db7f929fc1b68d44d86c6de2cc5bbe654cfffe52bdf867dc",
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "rules": [
+              {
+                "about": "Agents never delete accounts.",
+                "action": "block",
+                "agents": null,
+                "id": "no-delete",
+                "tools": [
+                  "delete_account"
+                ],
+                "when": []
+              },
+              {
+                "about": "Payouts over 1000 need a person.",
+                "action": "block",
+                "agents": null,
+                "id": "payout-limit",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/amount",
+                    "op": "gt",
+                    "value": 1000
+                  }
+                ]
+              },
+              {
+                "about": "Only GBP and EUR.",
+                "action": "block",
+                "agents": null,
+                "id": "payout-currency",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/currency",
+                    "op": "not_in",
+                    "value": [
+                      "GBP",
+                      "EUR"
+                    ]
+                  }
+                ]
+              },
+              {
+                "about": "No payouts to country XX.",
+                "action": "block",
+                "agents": null,
+                "id": "payee-country",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/payee/country",
+                    "op": "eq",
+                    "value": "XX"
+                  }
+                ]
+              },
+              {
+                "about": "At most 2 payouts a minute per agent.",
+                "action": "block",
+                "agents": null,
+                "id": "payout-rate",
+                "limit": {
+                  "calls": 2,
+                  "per": "agent_tool",
+                  "seconds": 60
+                },
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": []
+              },
+              {
+                "about": "Payees with an account id.",
+                "action": "allow",
+                "agents": null,
+                "id": "known-payee",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/payee/id",
+                    "op": "prefix",
+                    "value": "acct_"
+                  }
+                ]
+              },
+              {
+                "about": "agent-b does not refund.",
+                "action": "block",
+                "agents": [
+                  "agent-b"
+                ],
+                "id": "bot-b-no-refunds",
+                "tools": [
+                  "refund"
+                ],
+                "when": []
+              }
+            ],
+            "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+            "version": 2
+          },
+          "service_key_id": "24f6ed6acbfe1009",
+          "sig": "ZdNjE2CjaNM9i5fjEfiZIMcpdzaDK6ICzYEDAyoZNMQmpGebaKMZH5xfU3sUGobdgBhzbX_ebenQJNFYVa0MAQ"
+        },
+        "keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "name": "refused: the signing key is revoked",
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "revoked": [
+          "24f6ed6acbfe1009"
+        ]
+      },
+      {
+        "env": "live",
+        "expect": "signature",
+        "item": {
+          "rules": {
+            "addresses": {
+              "cidrs": [
+                "10.20.0.0/16"
+              ],
+              "hosts": [
+                "*.corp.example"
+              ]
+            },
+            "approved": null,
+            "default": "allow",
+            "env": "live",
+            "fail": {
+              "approve_payout": "closed"
+            },
+            "format": "signafaide-rules/1",
+            "issued": "2026-11-17T10:00:00.000Z",
+            "mode": "enforce",
+            "prev": "5567d144e214a317db7f929fc1b68d44d86c6de2cc5bbe654cfffe52bdf867dc",
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "rules": [
+              {
+                "about": "Agents never delete accounts.",
+                "action": "block",
+                "agents": null,
+                "id": "no-delete",
+                "tools": [
+                  "delete_account"
+                ],
+                "when": []
+              },
+              {
+                "about": "Payouts over 1000 need a person.",
+                "action": "block",
+                "agents": null,
+                "id": "payout-limit",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/amount",
+                    "op": "gt",
+                    "value": 1000
+                  }
+                ]
+              },
+              {
+                "about": "Only GBP and EUR.",
+                "action": "block",
+                "agents": null,
+                "id": "payout-currency",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/currency",
+                    "op": "not_in",
+                    "value": [
+                      "GBP",
+                      "EUR"
+                    ]
+                  }
+                ]
+              },
+              {
+                "about": "No payouts to country XX.",
+                "action": "block",
+                "agents": null,
+                "id": "payee-country",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/payee/country",
+                    "op": "eq",
+                    "value": "XX"
+                  }
+                ]
+              },
+              {
+                "about": "At most 2 payouts a minute per agent.",
+                "action": "block",
+                "agents": null,
+                "id": "payout-rate",
+                "limit": {
+                  "calls": 2,
+                  "per": "agent_tool",
+                  "seconds": 60
+                },
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": []
+              },
+              {
+                "about": "Payees with an account id.",
+                "action": "allow",
+                "agents": null,
+                "id": "known-payee",
+                "tools": [
+                  "approve_payout"
+                ],
+                "when": [
+                  {
+                    "field": "/payee/id",
+                    "op": "prefix",
+                    "value": "acct_"
+                  }
+                ]
+              },
+              {
+                "about": "agent-b does not refund.",
+                "action": "block",
+                "agents": [
+                  "agent-b"
+                ],
+                "id": "bot-b-no-refunds",
+                "tools": [
+                  "refund"
+                ],
+                "when": []
+              }
+            ],
+            "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+            "version": 2
+          },
+          "service_key_id": "24f6ed6acbfe1009",
+          "sig": "ZdNjE2CjaNM9i5fjEfiZIMcpdzaDK6ICzYEDAyoZNMQmpGebaKMZH5xfU3sUGobdgBhzbX_ebenQJNFYVa0MAQ"
+        },
+        "keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": "2026-11-01T00:00:00.001Z"
+          }
+        ],
+        "name": "refused: the signing key was retired before it was issued",
+        "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+        "revoked": []
+      }
+    ],
+    "rulings": [
+      {
+        "expect": null,
+        "keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "name": "accepted",
+        "receipt": {
+          "batch": {
+            "drand": null,
+            "env": "live",
+            "prev": null,
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "root": "6ed630530954084f80be5193d893380f911711151f29e0c72e776bb792f5970c",
+            "seq": 1,
+            "server_time": "2026-11-17T10:30:00.250Z",
+            "size": 1,
+            "v": 1
+          },
+          "batch_hash": "370979fc956c0972f399ec62d9a2ad88c99897e4ad06a1c6a921070bb9c7c6ce",
+          "batch_sig": "2GUVnLsT2r9fJdkMJE-JMXZmYNFcOaIFgRkBco4PdRyoRXTL_u61ABY92NisjVi52e18LULkOYiIhTKOFkRRAg",
+          "head": {
+            "agent": "agent-a",
+            "env": "live",
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+            "seq": 1,
+            "server_time": "2026-11-17T10:30:00.250Z"
+          },
+          "head_sig": "ltCb8hB45K7wjR5mT_ogKe-60dRvvRNKUQGuh35qUVpi5HSOM72IqpckpfXWBlkrX319MBlrM324EcHrDZSOCQ",
+          "index": 0,
+          "proof": [],
+          "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+          "ruling": {
+            "basis": "rule",
+            "batch_hash": "370979fc956c0972f399ec62d9a2ad88c99897e4ad06a1c6a921070bb9c7c6ce",
+            "fingerprints": 4,
+            "matched": [
+              "known-payee"
+            ],
+            "missing": [],
+            "mode": "enforce",
+            "reason": "Allowed by rule known-payee of rule set version 2.",
+            "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+            "rules": {
+              "hash": "441af83caeccd0ae5211e919a4a6741c8cfcbc2771d45e3cdbb72ab65827f4d6",
+              "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+              "version": 2
+            },
+            "ruling": "allow",
+            "server_time": "2026-11-17T10:30:00.250Z",
+            "v": 1
+          },
+          "ruling_sig": "p_AT0qlMA223EtqBH4l11mOya2d28duEao27XTv2qKFcy7mVCKkfZmR_OdHV9sIkOX57Wo1JCENDdRtFv4kNBw",
+          "service_key_id": "24f6ed6acbfe1009"
+        },
+        "revoked": []
+      },
+      {
+        "expect": "revoked",
+        "keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": null
+          }
+        ],
+        "name": "refused: the signing key is revoked",
+        "receipt": {
+          "batch": {
+            "drand": null,
+            "env": "live",
+            "prev": null,
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "root": "6ed630530954084f80be5193d893380f911711151f29e0c72e776bb792f5970c",
+            "seq": 1,
+            "server_time": "2026-11-17T10:30:00.250Z",
+            "size": 1,
+            "v": 1
+          },
+          "batch_hash": "370979fc956c0972f399ec62d9a2ad88c99897e4ad06a1c6a921070bb9c7c6ce",
+          "batch_sig": "2GUVnLsT2r9fJdkMJE-JMXZmYNFcOaIFgRkBco4PdRyoRXTL_u61ABY92NisjVi52e18LULkOYiIhTKOFkRRAg",
+          "head": {
+            "agent": "agent-a",
+            "env": "live",
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+            "seq": 1,
+            "server_time": "2026-11-17T10:30:00.250Z"
+          },
+          "head_sig": "ltCb8hB45K7wjR5mT_ogKe-60dRvvRNKUQGuh35qUVpi5HSOM72IqpckpfXWBlkrX319MBlrM324EcHrDZSOCQ",
+          "index": 0,
+          "proof": [],
+          "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+          "ruling": {
+            "basis": "rule",
+            "batch_hash": "370979fc956c0972f399ec62d9a2ad88c99897e4ad06a1c6a921070bb9c7c6ce",
+            "fingerprints": 4,
+            "matched": [
+              "known-payee"
+            ],
+            "missing": [],
+            "mode": "enforce",
+            "reason": "Allowed by rule known-payee of rule set version 2.",
+            "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+            "rules": {
+              "hash": "441af83caeccd0ae5211e919a4a6741c8cfcbc2771d45e3cdbb72ab65827f4d6",
+              "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+              "version": 2
+            },
+            "ruling": "allow",
+            "server_time": "2026-11-17T10:30:00.250Z",
+            "v": 1
+          },
+          "ruling_sig": "p_AT0qlMA223EtqBH4l11mOya2d28duEao27XTv2qKFcy7mVCKkfZmR_OdHV9sIkOX57Wo1JCENDdRtFv4kNBw",
+          "service_key_id": "24f6ed6acbfe1009"
+        },
+        "revoked": [
+          "24f6ed6acbfe1009"
+        ]
+      },
+      {
+        "expect": "not_active",
+        "keys": [
+          {
+            "key_id": "24f6ed6acbfe1009",
+            "public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+            "valid_from": "2026-11-01T00:00:00.000Z",
+            "valid_to": "2026-11-01T00:00:00.001Z"
+          }
+        ],
+        "name": "refused: the signing key was not active when it ruled",
+        "receipt": {
+          "batch": {
+            "drand": null,
+            "env": "live",
+            "prev": null,
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "root": "6ed630530954084f80be5193d893380f911711151f29e0c72e776bb792f5970c",
+            "seq": 1,
+            "server_time": "2026-11-17T10:30:00.250Z",
+            "size": 1,
+            "v": 1
+          },
+          "batch_hash": "370979fc956c0972f399ec62d9a2ad88c99897e4ad06a1c6a921070bb9c7c6ce",
+          "batch_sig": "2GUVnLsT2r9fJdkMJE-JMXZmYNFcOaIFgRkBco4PdRyoRXTL_u61ABY92NisjVi52e18LULkOYiIhTKOFkRRAg",
+          "head": {
+            "agent": "agent-a",
+            "env": "live",
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+            "seq": 1,
+            "server_time": "2026-11-17T10:30:00.250Z"
+          },
+          "head_sig": "ltCb8hB45K7wjR5mT_ogKe-60dRvvRNKUQGuh35qUVpi5HSOM72IqpckpfXWBlkrX319MBlrM324EcHrDZSOCQ",
+          "index": 0,
+          "proof": [],
+          "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+          "ruling": {
+            "basis": "rule",
+            "batch_hash": "370979fc956c0972f399ec62d9a2ad88c99897e4ad06a1c6a921070bb9c7c6ce",
+            "fingerprints": 4,
+            "matched": [
+              "known-payee"
+            ],
+            "missing": [],
+            "mode": "enforce",
+            "reason": "Allowed by rule known-payee of rule set version 2.",
+            "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+            "rules": {
+              "hash": "441af83caeccd0ae5211e919a4a6741c8cfcbc2771d45e3cdbb72ab65827f4d6",
+              "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+              "version": 2
+            },
+            "ruling": "allow",
+            "server_time": "2026-11-17T10:30:00.250Z",
+            "v": 1
+          },
+          "ruling_sig": "p_AT0qlMA223EtqBH4l11mOya2d28duEao27XTv2qKFcy7mVCKkfZmR_OdHV9sIkOX57Wo1JCENDdRtFv4kNBw",
+          "service_key_id": "24f6ed6acbfe1009"
+        },
+        "revoked": []
+      },
+      {
+        "expect": "unknown_key",
+        "keys": [],
+        "name": "refused: a key the witness does not have",
+        "receipt": {
+          "batch": {
+            "drand": null,
+            "env": "live",
+            "prev": null,
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "root": "6ed630530954084f80be5193d893380f911711151f29e0c72e776bb792f5970c",
+            "seq": 1,
+            "server_time": "2026-11-17T10:30:00.250Z",
+            "size": 1,
+            "v": 1
+          },
+          "batch_hash": "370979fc956c0972f399ec62d9a2ad88c99897e4ad06a1c6a921070bb9c7c6ce",
+          "batch_sig": "2GUVnLsT2r9fJdkMJE-JMXZmYNFcOaIFgRkBco4PdRyoRXTL_u61ABY92NisjVi52e18LULkOYiIhTKOFkRRAg",
+          "head": {
+            "agent": "agent-a",
+            "env": "live",
+            "project": "prj_01JCZQ8Z5X3V7N2M4K6H8G0F1D",
+            "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+            "seq": 1,
+            "server_time": "2026-11-17T10:30:00.250Z"
+          },
+          "head_sig": "ltCb8hB45K7wjR5mT_ogKe-60dRvvRNKUQGuh35qUVpi5HSOM72IqpckpfXWBlkrX319MBlrM324EcHrDZSOCQ",
+          "index": 0,
+          "proof": [],
+          "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+          "ruling": {
+            "basis": "rule",
+            "batch_hash": "370979fc956c0972f399ec62d9a2ad88c99897e4ad06a1c6a921070bb9c7c6ce",
+            "fingerprints": 4,
+            "matched": [
+              "known-payee"
+            ],
+            "missing": [],
+            "mode": "enforce",
+            "reason": "Allowed by rule known-payee of rule set version 2.",
+            "record_hash": "518b15595bfcca4ce727aa69d06152d86a8e302d2ff4428f52b40a19cb296183",
+            "rules": {
+              "hash": "441af83caeccd0ae5211e919a4a6741c8cfcbc2771d45e3cdbb72ab65827f4d6",
+              "set": "rs_01JD2K8Z5X3V7N2M4K6H8G0F1A",
+              "version": 2
+            },
+            "ruling": "allow",
+            "server_time": "2026-11-17T10:30:00.250Z",
+            "v": 1
+          },
+          "ruling_sig": "p_AT0qlMA223EtqBH4l11mOya2d28duEao27XTv2qKFcy7mVCKkfZmR_OdHV9sIkOX57Wo1JCENDdRtFv4kNBw",
+          "service_key_id": "24f6ed6acbfe1009"
+        },
+        "revoked": []
+      }
+    ],
+    "stale_transitions": [
+      {
+        "event": {
+          "type": "signer_bad"
+        },
+        "expect": {
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-21T12:00:00.000Z"
+        },
+        "held": true,
+        "name": "the held object's signer revoked or no longer held: the clock starts",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": null,
+          "since": null
+        }
+      },
+      {
+        "event": {
+          "type": "signer_bad"
+        },
+        "expect": {
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "the signer still bad: an earlier since stays",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "type": "refused"
+        },
+        "expect": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:01:00.000Z"
+          },
+          "since": "2026-11-21T12:00:00.000Z"
+        },
+        "held": true,
+        "name": "a refused signed item: the clock starts, the refusal kept for the words, a wait of 60 s",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": null,
+          "since": null
+        }
+      },
+      {
+        "event": {
+          "refused": {
+            "cause": "unknown_key",
+            "key_id": "0f1e2d3c4b5a6978",
+            "offered": 4,
+            "step": "signature"
+          },
+          "type": "refused"
+        },
+        "expect": {
+          "refused": {
+            "cause": "unknown_key",
+            "key_id": "0f1e2d3c4b5a6978",
+            "offered": 4,
+            "step": "signature"
+          },
+          "retry": {
+            "failures": 4,
+            "until": "2026-11-21T12:08:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "refused again: since stays, the refusal overwritten, the wait doubles",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 3,
+            "until": "2026-11-21T11:59:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "type": "refused"
+        },
+        "expect": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 11,
+            "until": "2026-11-21T13:00:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "the wait never passes an hour",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 10,
+            "until": "2026-11-21T11:59:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "type": "network"
+        },
+        "expect": {
+          "refused": null,
+          "retry": {
+            "failures": 2,
+            "until": "2026-11-21T13:00:00.000Z"
+          },
+          "since": null
+        },
+        "held": true,
+        "name": "a wait ending more than an hour from now ends an hour from now",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": {
+            "failures": 2,
+            "until": "2027-01-01T00:00:00.000Z"
+          },
+          "since": null
+        }
+      },
+      {
+        "event": {
+          "type": "unsigned"
+        },
+        "expect": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:05:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "an unsigned answer (304, null, empty) neither starts nor clears",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:05:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "type": "network"
+        },
+        "expect": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:05:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "a network error neither starts nor clears",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:05:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "type": "keys_changed"
+        },
+        "expect": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:05:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "a key list change neither starts nor clears",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:05:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "type": "resaved"
+        },
+        "expect": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:05:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "a re-save neither starts nor clears",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:05:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "type": "verified"
+        },
+        "expect": {
+          "refused": null,
+          "retry": null,
+          "since": null
+        },
+        "held": true,
+        "name": "only a verified object written clears, the wait too",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "confirmed": true,
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:05:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "type": "unsigned"
+        },
+        "expect": {
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-21T12:00:00.000Z"
+        },
+        "held": true,
+        "name": "a since in the future counts as now",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": null,
+          "since": "2999-01-01T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "type": "refused"
+        },
+        "expect": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:01:00.000Z"
+          },
+          "since": null
+        },
+        "held": false,
+        "name": "nothing held: a refusal waits but starts no clock",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": null,
+          "since": null
+        }
+      },
+      {
+        "event": {
+          "refused": {
+            "cause": "step",
+            "key_id": null,
+            "offered": null,
+            "step": "reset"
+          },
+          "type": "refused"
+        },
+        "expect": {
+          "refused": {
+            "cause": "step",
+            "key_id": null,
+            "offered": null,
+            "step": "reset"
+          },
+          "retry": {
+            "failures": 2,
+            "until": "2026-11-21T12:02:00.000Z"
+          },
+          "since": null
+        },
+        "held": false,
+        "name": "nothing held: a second refusal doubles the wait, still no clock",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": {
+            "cause": "step",
+            "key_id": null,
+            "offered": null,
+            "step": "reset"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T11:59:30.000Z"
+          },
+          "since": null
+        }
+      },
+      {
+        "event": {
+          "type": "signer_bad"
+        },
+        "expect": {
+          "refused": null,
+          "retry": null,
+          "since": null
+        },
+        "held": false,
+        "name": "nothing held: no signer, no clock",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": null,
+          "since": null
+        }
+      },
+      {
+        "event": {
+          "since": "2026-11-20T00:00:00.000Z",
+          "type": "merge"
+        },
+        "expect": {
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "two processes: the earlier since stays",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-21T12:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "since": "2999-01-01T00:00:00.000Z",
+          "type": "merge"
+        },
+        "expect": {
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-21T12:00:00.000Z"
+        },
+        "held": true,
+        "name": "two processes: a since in the future from the other counts as now",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": null,
+          "since": null
+        }
+      },
+      {
+        "event": {
+          "stale_before": true,
+          "type": "pull_done"
+        },
+        "expect": {
+          "confirmed": true,
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "a pull that began stale and did not clear: the mark is confirmed (noted from now on)",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "stale_before": false,
+          "type": "pull_done"
+        },
+        "expect": {
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "a pull that began fresh: not confirmed (a one-off glitch is never noted)",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      },
+      {
+        "event": {
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "type": "refused"
+        },
+        "expect": {
+          "confirmed": true,
+          "refused": {
+            "cause": "step",
+            "key_id": "a1b2c3d4e5f60718",
+            "offered": 3,
+            "step": "prev"
+          },
+          "retry": {
+            "failures": 1,
+            "until": "2026-11-21T12:01:00.000Z"
+          },
+          "since": "2026-11-20T00:00:00.000Z"
+        },
+        "held": true,
+        "name": "a refusal keeps the confirmation",
+        "now": "2026-11-21T12:00:00.000Z",
+        "state": {
+          "confirmed": true,
+          "refused": null,
+          "retry": null,
+          "since": "2026-11-20T00:00:00.000Z"
+        }
+      }
+    ]
+  },
   "keys": [
     {
       "key_id": "56475aa75463474c",

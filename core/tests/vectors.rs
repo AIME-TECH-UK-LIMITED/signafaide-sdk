@@ -923,6 +923,7 @@ fn checks_rule_set_documents_and_updates() {
             &keys,
             u["project"].as_str().unwrap(),
             u["env"].as_str().unwrap(),
+            &[],
         );
         assert_eq!(json!(got), t["expect"], "{}", t["name"]);
     }
@@ -990,7 +991,7 @@ fn checks_tool_fingerprints_and_shared_list() {
         let mut held = fingerprints::Held::default();
         let mut err = None;
         for it in t["apply"].as_array().unwrap() {
-            match fingerprints::accept(&held, it, &keys) {
+            match fingerprints::accept(&held, it, &keys, &[]) {
                 Ok(next) => held = next,
                 Err(e) => {
                     err = Some(e);
@@ -1407,5 +1408,97 @@ fn published_service_keys() {
             sha256(&raw).hex()[..16],
             "key_id is the first 16 hex of sha256(public key)"
         );
+    }
+}
+
+/// `key_lifecycle` (spec §5, §7): the packs and the cross-check cases, by the core's own code.
+#[test]
+fn key_lifecycle_vectors() {
+    let v = vectors();
+    let kl = &v["key_lifecycle"];
+    for t in kl["packs"].as_array().unwrap() {
+        let pack = if t["base"] == "pack" {
+            v["pack"]["pack"].clone()
+        } else {
+            v["variants"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|x| x["name"] == t["base"])
+                .unwrap()["pack"]
+                .clone()
+        };
+        let r = verify_pack(&pack, &vectors::Inputs::options(t, &v)).unwrap();
+        assert_eq!(
+            r.result_line(),
+            t["expect"]["result_line"].as_str().unwrap(),
+            "{}",
+            t["name"]
+        );
+        for (id, want) in t["expect"]["checks"].as_object().unwrap() {
+            let c = r.check(id);
+            let got = c
+                .value
+                .clone()
+                .unwrap_or_else(|| serde_json::to_value(c.status).unwrap().as_str().unwrap().to_string());
+            assert_eq!(&json!(got), want, "{} check {id}", t["name"]);
+        }
+        let failed: serde_json::Map<String, Value> = r
+            .checks
+            .iter()
+            .filter(|c| !c.failures.is_empty())
+            .map(|c| {
+                (
+                    c.id.to_string(),
+                    json!(c.failures.iter().map(|f| f.item.clone()).collect::<Vec<_>>()),
+                )
+            })
+            .collect();
+        assert_eq!(Value::Object(failed), t["expect"]["failed_items"], "{}", t["name"]);
+    }
+    // The tool-call checks' acceptance, by the same key judgement (keyset::key_problem).
+    let ids = |x: &Value| -> Vec<String> { serde_json::from_value(x.clone()).unwrap() };
+    let entries = |x: &Value| -> Vec<KeyEntry> { serde_json::from_value(x.clone()).unwrap() };
+    for t in kl["rule_sets"].as_array().unwrap() {
+        let got = rules::accept(
+            None,
+            &t["item"],
+            &entries(&t["keys"]),
+            t["project"].as_str().unwrap(),
+            t["env"].as_str().unwrap(),
+            &ids(&t["revoked"]),
+        );
+        assert_eq!(json!(got), t["expect"], "{}", t["name"]);
+    }
+    for t in kl["fingerprint_lists"].as_array().unwrap() {
+        let mut held = fingerprints::Held::default();
+        let mut err = None;
+        for it in t["apply"].as_array().unwrap() {
+            match fingerprints::accept(&held, it, &entries(&t["keys"]), &ids(&t["revoked"])) {
+                Ok(h) => held = h,
+                Err(e) => {
+                    err = Some(e);
+                    break;
+                }
+            }
+        }
+        assert_eq!(json!({"error": err, "seq": held.seq}), t["expect"], "{}", t["name"]);
+    }
+    for t in kl["rulings"].as_array().unwrap() {
+        let r = &t["receipt"];
+        let got = signafaide_core::keyset::key_problem(
+            &entries(&t["keys"]),
+            &ids(&t["revoked"]),
+            r["service_key_id"].as_str().unwrap(),
+            r["ruling"]["server_time"].as_str().unwrap(),
+            Domain::Ruling,
+            &hash_json(&r["ruling"]).unwrap(),
+            r["ruling_sig"].as_str().unwrap(),
+        );
+        assert_eq!(json!(got), t["expect"], "{}", t["name"]);
+    }
+    for t in kl["cross_check"].as_array().unwrap() {
+        let got = signafaide_core::keyset::cross_check_json(&t["pinned"].to_string(), &t["published"].to_string());
+        assert_eq!(got, t["expect"], "{}", t["name"]);
     }
 }

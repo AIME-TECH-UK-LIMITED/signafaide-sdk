@@ -1,0 +1,33 @@
+# The PyPI package `signafaide-verify`: the Rust `signafaide-verify` binary in a wheel, with no
+# Python dependencies. The release wheels are made from the release binaries themselves
+# (scripts/binary-wheel.py), so pip installs the file that is checksummed and attested on GitHub
+# Releases. This file also builds the sdist (maturin, bindings = "bin"), which compiles the binary
+# on a platform without a wheel and needs a Rust toolchain there. The version is Cargo.toml's.
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "signafaide-verify"
+dynamic = ["version"]
+description = "Verify a signafAIde verification pack offline: the same checks and result line as every signafAIde verifier. Nothing else, no dependencies."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
+keywords = ["signafaide", "verifier", "audit", "verification-pack", "offline"]
+classifiers = [
+  "Topic :: Security :: Cryptography",
+  "Programming Language :: Rust",
+  "Environment :: Console",
+]
+
+[project.urls]
+Homepage = "https://signafaide.co.uk"
+Documentation = "https://signafaide.co.uk/docs/verify"
+Repository = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk"
+Changelog = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues"
+
+[tool.maturin]
+bindings = "bin"

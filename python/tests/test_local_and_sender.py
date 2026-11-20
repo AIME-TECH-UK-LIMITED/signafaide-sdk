@@ -133,6 +133,84 @@ def _until(cond, seconds: float = 15.0) -> bool:
     return True
 
 
+def test_an_explicit_flush_keeps_the_halt_while_it_runs(recorder, service, monkeypatch):
+    """The background sender never sends alongside an explicit flush of a halted recorder: the halt
+    ends only once an explicit flush succeeds (it used to end at the flush's start)."""
+    import threading
+
+    service.quota = 0
+    recorder.flush_interval = 0.02
+    for i in range(3):
+        signafaide.note(f"n{i}", {})
+    recorder._wake.set()
+    assert _until(lambda: recorder._halted is not None), service.calls
+    assert record_calls(service) == 1
+    real = recorder._ship_chain
+    me = threading.current_thread()
+
+    def held(*a, **k):
+        if threading.current_thread() is me:
+            # The explicit flush is in the middle of its shipment: 5 rounds of the sender pass.
+            rounds = recorder._ticks
+            assert _until(lambda: recorder._ticks >= rounds + 5), recorder._ticks
+        return real(*a, **k)
+
+    monkeypatch.setattr(recorder, "_ship_chain", held)
+    assert recorder.flush()["errors"]
+    rounds = recorder._ticks
+    assert _until(lambda: recorder._ticks >= rounds + 5), recorder._ticks
+    assert record_calls(service) == 2, service.calls  # the explicit one only
+
+
+@pytest.mark.parametrize("where", ["resolving the project", "shipping"])
+def test_an_explicit_flush_that_fails_with_a_network_error_keeps_the_halt(recorder, service, where):
+    from signafaide.http import SignafaideError
+
+    service.quota = 0
+    recorder.flush_interval = 0.02
+    for i in range(3):
+        signafaide.note(f"n{i}", {})
+    recorder._wake.set()
+    assert _until(lambda: recorder._halted is not None), service.calls
+    assert record_calls(service) == 1
+
+    def down(*a, **k):
+        raise SignafaideError("Cannot reach the service.", code="network")
+
+    name = "resolve_project" if where == "resolving the project" else "_ship_chain"
+    real = getattr(recorder, name)
+    setattr(recorder, name, down)
+    try:
+        errors = recorder.flush()["errors"]
+    finally:
+        setattr(recorder, name, real)
+    assert [e.code for e in errors.values()] == ["network"]
+    assert recorder._halted is not None
+    rounds = recorder._ticks
+    assert _until(lambda: recorder._ticks >= rounds + 5), recorder._ticks
+    assert record_calls(service) == 1, service.calls  # the halt held: the sender sent nothing
+
+
+def test_an_explicit_flush_with_nothing_to_ship_asks_once_and_ends_the_halt(recorder, service):
+    service.quota = 0
+    recorder.flush_interval = 0.02
+    for i in range(3):
+        signafaide.note(f"n{i}", {})
+    recorder._wake.set()
+    assert _until(lambda: recorder._halted is not None), service.calls
+    service.quota = None
+    cli = runtime.Recorder(url=service.url, quiet=True)  # `signafaide flush` in another process
+    try:
+        assert cli.flush()["left"] == 0
+    finally:
+        cli.close()
+    before = len(service.calls)
+    r = recorder.flush()
+    assert (r["shipped"], r["left"], r["errors"]) == (0, 0, {})
+    assert service.calls[before:] == [("GET", "/v1/project")]
+    assert recorder._halted is None
+
+
 def test_quota_exceeded_stops_sending_until_the_configuration_changes(recorder, service):
     service.quota = 0
     recorder.flush_interval = 0.02
@@ -141,10 +219,15 @@ def test_quota_exceeded_stops_sending_until_the_configuration_changes(recorder, 
     recorder._wake.set()
     # The sender's first attempt is refused and it stops: wait for that, however long it takes.
     assert _until(lambda: recorder._halted is not None), service.calls
-    time.sleep(0.6)  # then 30 intervals: a storm would send 30 requests
+    # Then 30 rounds of the sender's loop (counted, not slept): a storm would send 30 requests.
+    rounds = recorder._ticks
+    assert _until(lambda: recorder._ticks >= rounds + 30), recorder._ticks
     assert record_calls(service) == 1, service.calls
-    assert recorder.flush()["errors"]  # an explicit flush still tries
-    assert record_calls(service) == 2
+    assert recorder.flush()["errors"]  # an explicit flush still tries, and the halt stays
+    assert recorder._halted is not None
+    rounds = recorder._ticks
+    assert _until(lambda: recorder._ticks >= rounds + 5), recorder._ticks
+    assert record_calls(service) == 2, service.calls
     service.quota = None
     os.utime(recorder.state.key_dir(""), (time.time(), time.time() + 5))  # the configuration changed
     assert _until(lambda: recorder.state.outbox_size() == 0), service.calls

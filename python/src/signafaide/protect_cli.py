@@ -1344,7 +1344,7 @@ def publish_rules(rec: Any, client: Client, add: List[dict]) -> dict:
     pe = rec.checks.project_env()
     if pe is None:
         raise SignafaideError("the API key's project is not known yet", code="network")
-    rec.checks.pull_rules()
+    rec.checks.pull_rules(force=True)
     held = rec.checks.held_rules()
     try:
         item = client.publish_rules(
@@ -1361,7 +1361,7 @@ def publish_rules(rec: Any, client: Client, add: List[dict]) -> dict:
     if not isinstance(item, dict) or not isinstance(item.get("rules"), dict):
         raise SignafaideError("the witness answered without the published version", code="bad_response")
     if not rec.checks.keep_rules(item):
-        rec.checks.pull_rules()
+        rec.checks.pull_rules(force=True)
     return item
 
 
@@ -1412,7 +1412,7 @@ def run_rules_publish(rec: Any, file: str, prompt: "Prompter", out: Callable[[st
     if pe is None:
         out("Not published: the API key's project is not known yet (the witness could not be reached)")
         return 1
-    rec.checks.pull_rules()
+    rec.checks.pull_rules(force=True)
     held = rec.checks.held_rules()
     if how == "session":
         try:
@@ -1479,7 +1479,7 @@ def run_rules_publish(rec: Any, file: str, prompt: "Prompter", out: Callable[[st
         out("Not published: the witness answered without the published version")
         return 1
     if not rec.checks.keep_rules(item):
-        rec.checks.pull_rules()
+        rec.checks.pull_rules(force=True)
     out(
         f"Rules      saved {'in your sandbox' if how == 'sandbox_key' else f'by {who}'} as version {item['rules']['version']}, signed by signafAIde"
     )
