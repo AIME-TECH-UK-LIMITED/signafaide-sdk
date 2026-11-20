@@ -21,7 +21,7 @@ jobs:
       - run: npm ci
 
       - name: Start recording
-        uses: AIME-TECH-UK-LIMITED/signafaide-sdk/action@6cad840f9ef85a62bbd535dad70dea7dc63154ce # v0.5.0
+        uses: AIME-TECH-UK-LIMITED/signafaide-sdk/action@f1978456b60e985b6c46e0e259eb549a71047135 # 0.5.2
         with:
           check: false
           record-runs: start
@@ -33,7 +33,7 @@ jobs:
 
       - name: Verify the job's records
         if: always()
-        uses: AIME-TECH-UK-LIMITED/signafaide-sdk/action@6cad840f9ef85a62bbd535dad70dea7dc63154ce # v0.5.0
+        uses: AIME-TECH-UK-LIMITED/signafaide-sdk/action@f1978456b60e985b6c46e0e259eb549a71047135 # 0.5.2
         with:
           check: false
           record-runs: finish

@@ -72,7 +72,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: AIME-TECH-UK-LIMITED/signafaide-sdk/action@6cad840f9ef85a62bbd535dad70dea7dc63154ce # v0.5.0
+      - uses: AIME-TECH-UK-LIMITED/signafaide-sdk/action@f1978456b60e985b6c46e0e259eb549a71047135 # 0.5.2
 ```
 
 On a pull request the action checks the tools the pull request adds or changes; on a push, every tool. It adds an error note on the line of each unprotected tool, writes a table with the fix to the job summary, and fails the job when there is one. Pin it by its full commit SHA.
