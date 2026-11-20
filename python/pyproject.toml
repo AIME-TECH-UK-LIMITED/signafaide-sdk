@@ -7,7 +7,7 @@ name = "signafaide"
 version = "0.5.3"
 description = "Checks risky AI agent tool calls before they run: an independent witness allows or blocks them under your rules, and every call is signed and verifiable offline."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 dependencies = ["cryptography>=41"]
 keywords = ["ai-agents", "audit-trail", "tamper-evident", "verifiable", "eu-ai-act", "provenance", "opentelemetry"]
@@ -39,11 +39,11 @@ dev = [
   "pytest>=7", "langchain-core>=0.3", "openai-agents>=0.2", "py_ecc>=7",
   # The OpenTelemetry span processor, and real instrumentation for its framework tests.
   "opentelemetry-sdk>=1.20",
-  "langchain>=1.0; python_version >= '3.10'",
-  "openinference-instrumentation-langchain>=0.1.80; python_version >= '3.10'",
-  "opentelemetry-instrumentation-langchain>=0.60; python_version >= '3.10'",
-  "pydantic-ai-slim>=2; python_version >= '3.10'",
-  "langsmith>=0.14; python_version >= '3.10'",
+  "langchain>=1.0",
+  "openinference-instrumentation-langchain>=0.1.80",
+  "opentelemetry-instrumentation-langchain>=0.60",
+  "pydantic-ai-slim>=2",
+  "langsmith>=0.14",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -54,7 +54,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 # Named lambdas are used for small local helpers.

@@ -2,7 +2,7 @@
 name = "payout-bot"
 version = "1.0.0"
 description = "The quickstart's payout agent: four tools, approve_payout protected."
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = ["signafaide"]
 
 [tool.uv]

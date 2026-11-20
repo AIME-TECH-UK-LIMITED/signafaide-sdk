@@ -1,0 +1,9 @@
+{
+  "name": "signafaide-node20-smoke",
+  "private": true,
+  "description": "Installs the packed signafaide and signafaide-mcp packages (unpacked into pkg/) on Node 20.",
+  "dependencies": {
+    "signafaide": "file:pkg/signafaide",
+    "signafaide-mcp": "file:pkg/signafaide-mcp"
+  }
+}
