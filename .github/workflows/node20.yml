@@ -39,13 +39,17 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
-      - name: Install the tarballs on Node 20 and smoke test
-        working-directory: ${{ runner.temp }}
+      - name: Install the packed packages on Node 20 (npm ci against .github/smoke-node20) and smoke test
+        working-directory: .github/smoke-node20
+        # The smoke project's lockfile pins every registry dependency by hash; the two packages
+        # come from the tarballs packed above, unpacked into pkg/. When a package gains a
+        # dependency, refresh the lockfile with `npm install --install-links --package-lock-only`.
         run: |
           node --version
-          mkdir smoke && cd smoke
-          npm init -y > /dev/null
-          npm install --no-audit --no-fund "$RUNNER_TEMP"/packs/signafaide-[0-9]*.tgz "$RUNNER_TEMP"/packs/signafaide-mcp-*.tgz
+          mkdir -p pkg/signafaide pkg/signafaide-mcp
+          tar -xzf "$RUNNER_TEMP"/packs/signafaide-[0-9]*.tgz -C pkg/signafaide --strip-components=1
+          tar -xzf "$RUNNER_TEMP"/packs/signafaide-mcp-*.tgz -C pkg/signafaide-mcp --strip-components=1
+          npm ci --install-links --no-audit --no-fund
           node -e "const s = require('signafaide'); if (typeof s.record !== 'function') throw new Error('CommonJS entry has no record()')"
           node --input-type=module -e "const s = await import('signafaide'); if (typeof s.record !== 'function') throw new Error('ES module entry has no record()'); const c = await import('signafaide/core'); if (typeof c.verifyPack !== 'function') throw new Error('signafaide/core has no verifyPack()')"
           node --input-type=module -e "const m = await import('signafaide-mcp'); if (typeof m.createServer !== 'function') throw new Error('signafaide-mcp has no createServer()')"
