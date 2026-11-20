@@ -1,6 +1,6 @@
 # signafAIde SDK
 
-[![CI](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/signafaide)](https://www.npmjs.com/package/signafaide) [![PyPI](https://img.shields.io/pypi/v/signafaide)](https://pypi.org/project/signafaide/) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![CI](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/signafaide)](https://www.npmjs.com/package/signafaide) [![PyPI](https://img.shields.io/pypi/v/signafaide)](https://pypi.org/project/signafaide/) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![signafAIde MCP server – quality and maintenance score on Glama](https://glama.ai/mcp/servers/AIME-TECH-UK-LIMITED/signafaide-sdk/badges/score.svg)](https://glama.ai/mcp/servers/AIME-TECH-UK-LIMITED/signafaide-sdk)
 
 signafAIde checks each risky AI agent tool call before it runs, and proves what your agents did.
 
