@@ -38,7 +38,7 @@ uvx ruff@0.15.7 format --check python python-langchain
 (cd python && uv sync && uv run pytest -q)
 (cd python-langchain && uv sync && uv run pytest -q)
 
-# TypeScript (Node 18+). The cross-check tests also use the Rust verifier and the
+# TypeScript (Node 20+). The cross-check tests also use the Rust verifier and the
 # Python environment, so build those first.
 cargo build --manifest-path verifier/Cargo.toml
 (cd js && npm ci \
