@@ -7,7 +7,7 @@ export default defineConfig({
   outDir: "mcp/dist",
   format: ["esm"],
   dts: { entry: { index: "src/mcp.ts" } },
-  target: "node18",
+  target: "node20",
   external: ["@modelcontextprotocol/server", "zod", "@noble/curves", "@noble/ed25519", "@noble/hashes"],
   clean: true,
 });
