@@ -140,7 +140,7 @@ Neither framework is a dependency: `wrap_tools` recognises the objects by their 
 
 Wrapping records the tools you wrap. Two things cover the rest: the gateway records every MCP tool call with no wrapper at all, and a tool declaration says in the chain which tools the agent has and which of them are recorded.
 
-MCP tools: the gateway. It is part of the `signafaide` npm package (Node.js 18 or later) and works with an agent written in any language. In the agent's MCP configuration, start the gateway in place of the server:
+MCP tools: the gateway. It is part of the `signafaide` npm package (Node.js 20 or later) and works with an agent written in any language. In the agent's MCP configuration, start the gateway in place of the server:
 
 ```json
 {"command": "npx", "args": ["-y", "signafaide", "gateway", "--agent", "support-bot", "--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "/data"]}
@@ -361,4 +361,4 @@ Each project and env has its own chain per agent. A new key, for example a live 
 
 The project root is the nearest folder with `.signafaide/`, `.git`, `pyproject.toml` or `package.json`. `signafaide init` adds `.signafaide/` to `.gitignore` (never a running program). Agent keys live in `.signafaide/agents/<agent>.key` (sandbox) and `.signafaide/agents/live/<agent>.key` (live), mode 0600, and never leave the machine. Back them up.
 
-Python 3.9+. Dependency: `cryptography`. The `bls` extra adds `py_ecc` (the drand check of `verify`). The `otel` extra adds `opentelemetry-sdk`.
+Python 3.10+. Dependency: `cryptography`. The `bls` extra adds `py_ecc` (the drand check of `verify`). The `otel` extra adds `opentelemetry-sdk`.

@@ -7,7 +7,7 @@ name = "signafaide"
 version = "0.5.3"
 description = "Checks risky AI agent tool calls before they run: an independent witness allows or blocks them under your rules, and every call is signed and verifiable offline."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 dependencies = ["cryptography>=41"]
 keywords = ["ai-agents", "audit-trail", "tamper-evident", "verifiable", "eu-ai-act", "provenance", "opentelemetry"]
@@ -54,7 +54,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 # Named lambdas are used for small local helpers.

@@ -12,9 +12,8 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: npm
-    directories:
-      - "/js"
-      - "/js/mcp"
+    # js/mcp has no lockfile of its own: its dependencies are installed and locked through js.
+    directory: "/js"
     schedule:
       interval: weekly
     groups:
