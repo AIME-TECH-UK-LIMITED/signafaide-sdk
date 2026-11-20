@@ -1,6 +1,6 @@
 # signafAIde SDK
 
-[![CI](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/signafaide)](https://www.npmjs.com/package/signafaide) [![PyPI](https://img.shields.io/pypi/v/signafaide)](https://pypi.org/project/signafaide/) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![signafAIde MCP server – quality and maintenance score on Glama](https://glama.ai/mcp/servers/AIME-TECH-UK-LIMITED/signafaide-sdk/badges/score.svg)](https://glama.ai/mcp/servers/AIME-TECH-UK-LIMITED/signafaide-sdk)
+[![CI](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/signafaide)](https://www.npmjs.com/package/signafaide) [![PyPI](https://img.shields.io/pypi/v/signafaide)](https://pypi.org/project/signafaide/) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/badge)](https://scorecard.dev/viewer/?uri=github.com/AIME-TECH-UK-LIMITED/signafaide-sdk) [![signafAIde MCP server – quality and maintenance score on Glama](https://glama.ai/mcp/servers/AIME-TECH-UK-LIMITED/signafaide-sdk/badges/score.svg)](https://glama.ai/mcp/servers/AIME-TECH-UK-LIMITED/signafaide-sdk)
 
 signafAIde checks each risky AI agent tool call before it runs, and proves what your agents did.
 
@@ -87,6 +87,8 @@ cargo run --manifest-path verifier/Cargo.toml -- pack.json --keys keys.json --ag
 ```
 
 The service keys come from the witness's `/.well-known/signafaide-keys.json` (or a file). The agent keys, `agent-keys.json`, come from the customer, who runs `signafaide keys export` and hands the file over with the pack. `--head` is optional: the customer's newest signed head (`.signafaide/head.json`), which proves no record was dropped from the end. `--offline` skips the public timestamp lookup, so that check is reported as not checked, never as passed. The result line says how many of the 12 checks passed, are pending (a public timestamp that has not confirmed yet) and were not checked, for example `PASS: 11 of 12 checks passed, 1 pending (public timestamp)`. The Python and TypeScript SDKs run the same checks (`signafaide verify pack.json`). Every verifier gives the same check ids, statuses and result for the same inputs (spec §7).
+
+A pack that passes shows what the agent's program recorded and that it was not changed later; it does not show that the content was true, or a call that was never recorded. The full list: [Limits of a signafAIde record](https://signafaide.co.uk/docs/limits).
 
 ## Privacy and support
 
