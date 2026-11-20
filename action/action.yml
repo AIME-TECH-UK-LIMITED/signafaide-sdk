@@ -1,0 +1,102 @@
+name: signafAIde check
+description: Fails a pull request that adds an agent tool that pays, deletes, sends, runs commands, pushes code or edits secrets or config without signafAIde protect. No account, no key.
+author: AIME TECH UK LIMITED
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  version:
+    description: The signafaide version to run (npm and PyPI).
+    required: false
+    default: "0.5.2"
+  working-directory:
+    description: The folder to check, relative to the repository (where signafaide.checks.json is).
+    required: false
+    default: "."
+  base:
+    description: The git base to compare with. On a pull request, the base commit, so only tools added or changed in the pull request are checked; empty (a push) checks every tool.
+    required: false
+    default: ${{ github.event.pull_request.base.sha }}
+  allow:
+    description: Reviewed exceptions, tool names separated by commas or new lines. The checks file's ci.allow, with a reason for each, is the place to keep them.
+    required: false
+    default: ""
+  python:
+    description: Check Python too. auto runs the Python CLI when the repository has Python files; true or false to choose.
+    required: false
+    default: auto
+  check:
+    description: Run the check (true or false). Set false on a later step that only finishes recording agent runs.
+    required: false
+    default: "true"
+  record-runs:
+    description: "Optional, off by default. start: before the agent step, record into the project of api-key (or a new sandbox when there is none). finish: after it, export a verification pack of the job's records, verify it and upload it as an artifact."
+    required: false
+    default: "false"
+  api-key:
+    description: With record-runs, the signafAIde API key (from a secret). Without one, start makes a sandbox (test records, kept 30 days).
+    required: false
+    default: ""
+  agent:
+    description: With record-runs finish, export only this agent's records.
+    required: false
+    default: ""
+  fail-on-verification-failure:
+    description: With record-runs finish, fail the job when the pack does not verify.
+    required: false
+    default: "true"
+  upload-pack:
+    description: With record-runs finish, upload the pack folder as the artifact signafaide-pack.
+    required: false
+    default: "true"
+
+outputs:
+  result:
+    description: "With record-runs finish: verified or not-verified."
+    value: ${{ steps.finish.outputs.result }}
+  records:
+    description: With record-runs finish, the number of records in the pack.
+    value: ${{ steps.finish.outputs.records }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check that risky tools are protected
+      if: inputs.check == 'true'
+      shell: bash
+      env:
+        SFA_VERSION: ${{ inputs.version }}
+        SFA_BASE: ${{ inputs.base }}
+        SFA_ALLOW: ${{ inputs.allow }}
+        SFA_PYTHON: ${{ inputs.python }}
+        SFA_DIR: ${{ inputs.working-directory }}
+      run: node "$GITHUB_ACTION_PATH/check.mjs"
+
+    - name: Start recording agent runs
+      if: inputs.record-runs == 'start'
+      shell: bash
+      env:
+        SFA_VERSION: ${{ inputs.version }}
+        SFA_DIR: ${{ inputs.working-directory }}
+        SFA_API_KEY: ${{ inputs.api-key }}
+      run: node "$GITHUB_ACTION_PATH/runs.mjs" start
+
+    - name: Verify the job's agent runs
+      id: finish
+      if: inputs.record-runs == 'finish'
+      shell: bash
+      env:
+        SFA_VERSION: ${{ inputs.version }}
+        SFA_DIR: ${{ inputs.working-directory }}
+        SFA_AGENT: ${{ inputs.agent }}
+        SFA_FAIL: ${{ inputs.fail-on-verification-failure }}
+      run: node "$GITHUB_ACTION_PATH/runs.mjs" finish
+
+    - name: Upload the verification pack
+      if: always() && inputs.record-runs == 'finish' && inputs.upload-pack == 'true' && steps.finish.outputs.pack-dir != ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: signafaide-pack
+        path: ${{ steps.finish.outputs.pack-dir }}
+        if-no-files-found: ignore

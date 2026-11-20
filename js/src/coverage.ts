@@ -1,0 +1,236 @@
+/**
+ * Tool declarations (SPEC §2.6) and the coverage they give (§7): which of an agent's tools are
+ * recorded, read from envelopes alone (kind, name, seq), so it holds for hash-only records.
+ * Pure: no I/O. The same names, rules and wording as the Rust core and the Python SDK.
+ *
+ * Coverage is a note, never a failure, and never a claim of completeness: a declaration is the
+ * client's own signed statement of the tools the agent has.
+ */
+
+import { sha256Hex } from "./crypto.js";
+import { plural } from "./plural.js";
+
+/** The name of the note that starts a new tool declaration for the agent's chain. */
+export const TOOLS = "signafaide.tools";
+/** `signafaide.tool/<tool name>`: the agent has this tool and calls to it are recorded. */
+export const TOOL_PREFIX = "signafaide.tool/";
+/** `signafaide.tool_unrecorded/<tool name>`: the agent has this tool and calls to it are not recorded. */
+export const TOOL_UNRECORDED_PREFIX = "signafaide.tool_unrecorded/";
+/** The names the SDK reserves: a record named so is never a tool. */
+export const RESERVED_PREFIX = "signafaide.";
+/** The longest tool name a declaration holds as it is, in characters (Unicode code points): an
+ * envelope name is at most 128 and the longer prefix takes 27. */
+export const MAX_DECLARED_NAME = 101;
+const KEPT = MAX_DECLARED_NAME - 9;
+
+/** A tool's name as a declaration holds it: the name itself when it has at most 101 characters,
+ * else its first 92 characters, `~`, and the first 8 hex characters of sha256(UTF-8 tool name).
+ * A name that is already short maps to itself. */
+export function declaredName(tool: string): string {
+  const chars = [...tool];
+  if (chars.length <= MAX_DECLARED_NAME) return tool;
+  return `${chars.slice(0, KEPT).join("")}~${sha256Hex(new TextEncoder().encode(tool)).slice(0, 8)}`;
+}
+
+/** The envelope name of the note that declares `tool`. */
+export function toolNoteName(tool: string, recorded: boolean): string {
+  return (recorded ? TOOL_PREFIX : TOOL_UNRECORDED_PREFIX) + declaredName(tool);
+}
+
+/** What a record says about the agent's tool list, from its kind and name alone: `"header"`,
+ * a tool, or null when it is not a tool-declaration note. */
+export function toolNote(kind: unknown, name: unknown): "header" | { name: string; recorded: boolean } | null {
+  if (kind !== "note" || typeof name !== "string") return null;
+  if (name === TOOLS) return "header";
+  const recorded = name.startsWith(TOOL_PREFIX);
+  if (!recorded && !name.startsWith(TOOL_UNRECORDED_PREFIX)) return null;
+  const rest = name.slice((recorded ? TOOL_PREFIX : TOOL_UNRECORDED_PREFIX).length);
+  return rest ? { name: rest, recorded } : null;
+}
+
+export interface DeclaredTool {
+  name: string;
+  recorded: boolean;
+}
+
+/** What one agent's records show about its tools (§7 tool coverage). */
+export interface Coverage {
+  /** The tools of the agent's current declaration, in name order; empty when there is none. */
+  declared: DeclaredTool[];
+  /** The names of decision records that are not in the current declaration, in name order. */
+  undeclared_recorded: string[];
+  /** The seq of the `signafaide.tools` note that starts the current declaration, or null. */
+  declared_at_seq: number | null;
+}
+
+/** Name order: by Unicode code point, as Rust and Python sort strings (JavaScript's own order is
+ * by UTF-16 unit, which differs for characters outside the basic plane). */
+export function byCodePoint(a: string, b: string): number {
+  const [x, y] = [[...a], [...b]];
+  for (let i = 0; i < x.length && i < y.length; i++) {
+    const d = x[i].codePointAt(0)! - y[i].codePointAt(0)!;
+    if (d) return d;
+  }
+  return x.length - y.length;
+}
+
+/** The coverage of one agent's records, given in seq order. The current declaration is the one
+ * started by the last `signafaide.tools` note; tool notes before the first such note belong to a
+ * declaration the records do not hold and are ignored. Inside a declaration a later note for the
+ * same tool replaces an earlier one. A `decision` counts as a recorded tool unless its name
+ * starts with `signafaide.`; it is compared by its declared name. */
+export function coverage(records: Iterable<{ seq: number; kind: unknown; name: unknown }>): Coverage {
+  let at: number | null = null;
+  let tools = new Map<string, boolean>();
+  const called = new Set<string>();
+  for (const { seq, kind, name } of records) {
+    const t = toolNote(kind, name);
+    if (t === "header") {
+      at = seq;
+      tools = new Map();
+    } else if (t) {
+      if (at !== null) tools.set(t.name, t.recorded);
+    } else if (kind === "decision" && typeof name === "string" && !name.startsWith(RESERVED_PREFIX))
+      called.add(declaredName(name));
+  }
+  if (at === null) return { declared: [], undeclared_recorded: [], declared_at_seq: null };
+  return {
+    declared: [...tools.keys()].sort(byCodePoint).map((name) => ({ name, recorded: tools.get(name)! })),
+    undeclared_recorded: [...called].filter((n) => !tools.has(n)).sort(byCodePoint),
+    declared_at_seq: at,
+  };
+}
+
+/** `1 declared tool is`, `2 declared tools are`. */
+const countIs = (n: number, one: string): string => `${plural(n, one)} ${n === 1 ? "is" : "are"}`;
+
+/** The coverage of `agent` in words (§7), one line each: what was declared, then the recorded
+ * tools the declaration does not list. */
+export function coverageLines(agent: string, c: Coverage): string[] {
+  if (c.declared_at_seq === null)
+    return [`${agent}: no tool list was declared, so the pack cannot show which of the agent's tools are recorded`];
+  const unrecorded = c.declared.filter((t) => !t.recorded).map((t) => t.name);
+  const out: string[] = [];
+  if (!c.declared.length) out.push(`${agent}: the declared tool list is empty`);
+  else if (!unrecorded.length)
+    out.push(
+      `${agent}: ${c.declared.length === 1 ? "the" : "all"} ${countIs(c.declared.length, "declared tool")} recorded`,
+    );
+  // "the 1 declared tool is recorded"
+  else out.push(`${agent}: ${countIs(unrecorded.length, "declared tool")} not recorded: ${unrecorded.join(", ")}`);
+  if (c.undeclared_recorded.length)
+    out.push(
+      `${agent}: ${countIs(c.undeclared_recorded.length, "recorded tool")} not in the declared tool list: ${c.undeclared_recorded.join(", ")}`,
+    );
+  return out;
+}
+
+// --- telemetry notes (SPEC §2.7) ------------------------------------------------------
+
+/** `signafaide.telemetry/start/<tool name>`: the decisions of this tool that follow were derived
+ * from telemetry spans and written when the span started, before the tool ran. */
+export const TELEMETRY_START_PREFIX = "signafaide.telemetry/start/";
+/** `signafaide.telemetry/end/<tool name>`: the decisions of this tool that follow were derived
+ * from telemetry spans and written when the span ended, after the tool ran. */
+export const TELEMETRY_END_PREFIX = "signafaide.telemetry/end/";
+/** The records of this agent come from sampled telemetry: some tool calls may not be recorded. */
+export const TELEMETRY_SAMPLED = "signafaide.telemetry_sampled";
+/** The telemetry sampler follows the caller's decision and keeps every trace this program
+ * starts: only a tool call inside a trace that arrives marked as not sampled is not recorded. */
+export const TELEMETRY_PARENT_SAMPLED = "signafaide.telemetry_parent_sampled";
+/** What a verifier says for an agent whose chain holds a `signafaide.telemetry_sampled` note. */
+export const SAMPLED_LINE = "records come from sampled telemetry: some tool calls may not be recorded";
+/** What a verifier says for an agent whose chain holds a `signafaide.telemetry_parent_sampled` note. */
+export const PARENT_SAMPLED_LINE =
+  "telemetry sampling follows the caller: a tool call inside a trace that arrives marked as not sampled is not recorded";
+
+/** The note a sampler calls for, from its own description (`toString()` in TypeScript,
+ * `get_description()` in Python): null for plain always-on, `signafaide.telemetry_parent_sampled`
+ * for a parent-based sampler whose root is always-on and that keeps the spans of sampled parents
+ * (OpenTelemetry's default), and `signafaide.telemetry_sampled` for every other one, which can
+ * drop traces this program starts. */
+export function samplingNote(sampler: string): string | null {
+  if (sampler === "AlwaysOnSampler") return null;
+  if (sampler.startsWith("ParentBased{")) {
+    const parts = new Map(
+      sampler
+        .slice("ParentBased{".length)
+        .replace(/\}$/, "")
+        .split(",")
+        .map((p) => p.trim().split(/[:=]/, 2) as [string, string]),
+    );
+    if (["root", "remoteParentSampled", "localParentSampled"].every((k) => parts.get(k) === "AlwaysOnSampler"))
+      return TELEMETRY_PARENT_SAMPLED;
+  }
+  return TELEMETRY_SAMPLED;
+}
+
+export type DecisionWritten = "before" | "after" | "both";
+const DECISION_WORDS: Record<DecisionWritten, string> = {
+  before: "decision written before the tool ran",
+  after: "decision written after the tool ran",
+  both: "decisions written before and after the tool ran",
+};
+
+/** What one agent's records say about telemetry (§7). */
+export interface Telemetry {
+  /** The tools recorded from telemetry spans, in name order, and when their decisions were written. */
+  tools: { name: string; decision: DecisionWritten }[];
+  /** The chain holds a `signafaide.telemetry_sampled` note. */
+  sampled: boolean;
+  /** The chain holds a `signafaide.telemetry_parent_sampled` note. */
+  parent_sampled: boolean;
+}
+
+/** The envelope name of the note that says how `tool` is recorded from telemetry. */
+export function telemetryNoteName(tool: string, atStart: boolean): string {
+  return (atStart ? TELEMETRY_START_PREFIX : TELEMETRY_END_PREFIX) + declaredName(tool);
+}
+
+/** What a record says about telemetry, from its kind and name alone: `"sampled"`,
+ * `"parent_sampled"`, a tool and when its decisions are written, or null when it is not a
+ * telemetry note. */
+export function telemetryNote(
+  kind: unknown,
+  name: unknown,
+): "sampled" | "parent_sampled" | { name: string; decision: "before" | "after" } | null {
+  if (kind !== "note" || typeof name !== "string") return null;
+  if (name === TELEMETRY_SAMPLED) return "sampled";
+  if (name === TELEMETRY_PARENT_SAMPLED) return "parent_sampled";
+  const start = name.startsWith(TELEMETRY_START_PREFIX);
+  if (!start && !name.startsWith(TELEMETRY_END_PREFIX)) return null;
+  const rest = name.slice((start ? TELEMETRY_START_PREFIX : TELEMETRY_END_PREFIX).length);
+  return rest ? { name: rest, decision: start ? "before" : "after" } : null;
+}
+
+/** What one agent's records say about telemetry, or null when they hold no telemetry note. */
+export function telemetry(records: Iterable<{ kind: unknown; name: unknown }>): Telemetry | null {
+  const tools = new Map<string, DecisionWritten>();
+  let sampled = false;
+  let parentSampled = false;
+  for (const { kind, name } of records) {
+    const t = telemetryNote(kind, name);
+    if (t === "sampled") sampled = true;
+    else if (t === "parent_sampled") parentSampled = true;
+    else if (t) tools.set(t.name, (tools.get(t.name) ?? t.decision) === t.decision ? t.decision : "both");
+  }
+  if (!tools.size && !sampled && !parentSampled) return null;
+  return {
+    tools: [...tools.keys()].sort(byCodePoint).map((name) => ({ name, decision: tools.get(name)! })),
+    sampled,
+    parent_sampled: parentSampled,
+  };
+}
+
+/** The telemetry notes of `agent` in words (§7): the tools recorded from telemetry spans and
+ * when their decisions were written, then what the telemetry's sampling leaves out. */
+export function telemetryLines(agent: string, t: Telemetry): string[] {
+  const out: string[] = [];
+  if (t.tools.length)
+    out.push(
+      `${agent}: ${countIs(t.tools.length, "tool")} recorded from telemetry spans: ${t.tools.map((x) => `${x.name} (${DECISION_WORDS[x.decision]})`).join(", ")}`,
+    );
+  if (t.sampled) out.push(`${agent}: ${SAMPLED_LINE}`);
+  if (t.parent_sampled) out.push(`${agent}: ${PARENT_SAMPLED_LINE}`);
+  return out;
+}

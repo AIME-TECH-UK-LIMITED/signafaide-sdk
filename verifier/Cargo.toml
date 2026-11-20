@@ -1,0 +1,31 @@
+[package]
+name = "signafaide-verify"
+version = "0.5.2"
+edition = "2021"
+license = "Apache-2.0"
+description = "Verify a signafAIde verification pack (spec §7), offline"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = ["cli"]
+# The command-line tool (adds an HTTP client for --keys <url>).
+cli = ["dep:ureq"]
+# A wasm-bindgen export for browsers: build with
+#   cargo build --lib --target wasm32-unknown-unknown --no-default-features --features wasm
+wasm = ["dep:wasm-bindgen"]
+
+[dependencies]
+signafaide-core = { path = "../core" }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+ureq = { version = "3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+
+[[bin]]
+name = "signafaide-verify"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[profile.dev]
+debug = 0

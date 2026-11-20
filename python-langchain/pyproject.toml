@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langchain-signafaide"
+version = "0.1.2"
+description = "Checks risky AI agent tool calls before they run: an independent witness allows or blocks them under your rules, and every call is signed and verifiable offline."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "AIME TECH UK LIMITED" }]
+dependencies = ["signafaide>=0.4,<1", "langchain>=1.0,<2"]
+keywords = ["langchain", "middleware", "ai-agents", "audit-trail", "tamper-evident", "eu-ai-act"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Topic :: Security :: Cryptography",
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://signafaide.co.uk"
+Documentation = "https://signafaide.co.uk/docs/frameworks/langchain"
+Repository = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk"
+Issues = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues"
+
+[dependency-groups]
+dev = ["pytest>=7"]
+
+# Tests run against the SDK in this repository (../python), not the release on PyPI, so a change
+# to both packages is tested together. Only uv reads this; the published metadata keeps the range.
+[tool.uv.sources]
+signafaide = { path = "../python", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/langchain_signafaide"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# Named lambdas are used for small local helpers.
+ignore = ["E731"]

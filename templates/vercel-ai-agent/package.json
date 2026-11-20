@@ -1,0 +1,22 @@
+{
+  "name": "payout-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A Vercel AI SDK agent with signafAIde: approve_payout runs only when the rule in signafaide.checks.json allows it.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "tsx src/smoke.ts && signafaide check --ci",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ai": "^7.0.176",
+    "signafaide": "^0.5.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "signafaide"
+version = "0.5.2"
+description = "Checks risky AI agent tool calls before they run: an independent witness allows or blocks them under your rules, and every call is signed and verifiable offline."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+dependencies = ["cryptography>=41"]
+keywords = ["ai-agents", "audit-trail", "tamper-evident", "verifiable", "eu-ai-act", "provenance", "opentelemetry"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Topic :: Security :: Cryptography",
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://signafaide.co.uk"
+Documentation = "https://signafaide.co.uk/docs"
+Repository = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk"
+Changelog = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues"
+
+[project.optional-dependencies]
+# drand's BLS signature (verify check 9). Without it that one check says NOT CHECKED, never pass.
+bls = ["py_ecc>=7"]
+# The OpenTelemetry span processor (`signafaide.otel`).
+otel = ["opentelemetry-sdk>=1.20"]
+
+[project.scripts]
+signafaide = "signafaide.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=7", "langchain-core>=0.3", "openai-agents>=0.2", "py_ecc>=7",
+  # The OpenTelemetry span processor, and real instrumentation for its framework tests.
+  "opentelemetry-sdk>=1.20",
+  "langchain>=1.0; python_version >= '3.10'",
+  "openinference-instrumentation-langchain>=0.1.80; python_version >= '3.10'",
+  "opentelemetry-instrumentation-langchain>=0.60; python_version >= '3.10'",
+  "pydantic-ai-slim>=2; python_version >= '3.10'",
+  "langsmith>=0.14; python_version >= '3.10'",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/signafaide"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+# Named lambdas are used for small local helpers.
+ignore = ["E731"]

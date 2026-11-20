@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "signafaide": {
+      "type": "http",
+      "url": "https://api.signafaide.co.uk/mcp"
+    }
+  }
+}

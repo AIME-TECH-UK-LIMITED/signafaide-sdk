@@ -1,0 +1,17 @@
+{
+  "prj_01M7K2SEPW7CRSSA1YKH81RBWE": {
+    "live": {
+      "claims-bot": {
+        "head": {
+          "agent": "claims-bot",
+          "env": "live",
+          "project": "prj_01M7K2SEPW7CRSSA1YKH81RBWE",
+          "record_hash": "78aab62910e2af8762f7b60dcce405b790afc8c8b476f8630729f176b35eb1b3",
+          "seq": 23,
+          "server_time": "2026-11-16T21:05:13.244Z"
+        },
+        "head_sig": "Ycg6v48YdS5MYybrJBBmY3OhBCMI0TRJ5JW55DDtig1xoB1V125C-44NSl-h6BfUbG3zYnwuU0b34RM3YrwXCQ"
+      }
+    }
+  }
+}

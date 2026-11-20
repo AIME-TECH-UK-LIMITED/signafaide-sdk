@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust core and verifier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            core
+            verifier
+      - name: Format
+        run: |
+          cargo fmt --manifest-path core/Cargo.toml --check
+          cargo fmt --manifest-path verifier/Cargo.toml --check
+      - name: Lint
+        run: |
+          cargo clippy --manifest-path core/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path verifier/Cargo.toml --all-targets --locked -- -D warnings
+      - name: Test (includes the spec test vectors)
+        run: |
+          cargo test --manifest-path core/Cargo.toml --locked
+          cargo test --manifest-path verifier/Cargo.toml --locked
+
+  python:
+    name: Python SDK (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Lint and format
+        run: |
+          uvx ruff@0.15.7 check python python-langchain
+          uvx ruff@0.15.7 format --check python python-langchain
+      - name: Test
+        working-directory: python
+        run: |
+          uv sync --locked --python ${{ matrix.python }}
+          uv run pytest -q
+      - name: Test langchain-signafaide
+        working-directory: python-langchain
+        run: |
+          uv sync --locked --python ${{ matrix.python }}
+          uv run pytest -q
+
+  js:
+    name: TypeScript SDK and cross-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: verifier
+      - uses: astral-sh/setup-uv@v6
+      - name: Build the Rust verifier and the Python SDK for the cross-checks
+        run: |
+          cargo build --manifest-path verifier/Cargo.toml --locked
+          (cd python && uv sync --locked)
+      - name: Install
+        working-directory: js
+        run: npm ci
+      - name: Format and typecheck
+        working-directory: js
+        run: |
+          npx prettier --check "src/**/*.ts" "test/**/*.{ts,mjs}" ../action/*.mjs ../scripts/*.mjs
+          npx tsc --noEmit -p .
+      - name: Test
+        working-directory: js
+        run: npm test
+      # Versions agree, default witness URL, verifier build. The shallow checkout has no tags, so
+      # the version-bump check is left to the release itself.
+      - name: Release checks (offline)
+        run: node scripts/release-check.mjs --offline

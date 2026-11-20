@@ -1,0 +1,21 @@
+{
+  "format": "signafaide-agent-keys/1",
+  "keys": [
+    {
+      "agent": "claims-bot",
+      "key_id": "3f6e298b4a07ab76",
+      "public_key": "xsNfFcCjj4m4xhXOWyneJ3vzwq4sUnl3-l1qH-1ZFes",
+      "valid_from": "2026-11-16T21:05:12.594Z",
+      "valid_to": null,
+      "sig": "uhzqb6A92ngWjdTUCwtamf2Cfjl7zIn9KBb_zWeLEIopiHTFq_SeVgkTt7R8fXkSIYj5Do-zN73DBBWLGYksAg"
+    },
+    {
+      "agent": "claims-bot",
+      "key_id": "fe9abc23134ef1a2",
+      "public_key": "CqK1IbkjBFDjKvBgtWK7N7MdhOUgtxQZGUyAr5IADCE",
+      "valid_from": "2026-11-16T21:05:12.595Z",
+      "valid_to": null,
+      "sig": "-Z3yFeUBx6Am2Yo-nMj7NxCV9iW-w4PDKeouc1YjF3qbr5rGFpxbqExkNXAF8GFEvxFTefSaJmdr3Nb5bPCBDQ"
+    }
+  ]
+}
