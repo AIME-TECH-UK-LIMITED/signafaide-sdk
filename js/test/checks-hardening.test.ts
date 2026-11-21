@@ -387,6 +387,10 @@ describe("hardening: the witness's keys", () => {
     const e = await caught(payFn({ amount: 5 }));
     expect(e.code).toBe("rules_unavailable");
     expect(e.message).toContain("no verified replacement arrived within 7 days");
+    // The dry run of the same call gives exactly the reason the call gave.
+    expect(ctx.rec.checks.dryRun("pay", { amount: 5 }, "support-bot").lines).toContain(
+      `would refuse ${e.message} (rules_unavailable)`,
+    );
     expect(ran).toEqual([]);
     const mine = records().filter((r) => r.envelope.name === "pay");
     expect(mine.map((r) => r.envelope.kind)).toEqual(["decision", "outcome"]);
@@ -895,21 +899,61 @@ describe("hardening: the witness's keys", () => {
     expect((await refused("refund")).code).toBe("rules_unavailable");
   });
 
-  it("a ruling naming another version than the refused one forces a fetch at most once per retry interval", async () => {
+  /** The witness keeps answering the refused version 2 while its rulings name newer ones. */
+  async function refusedV2() {
     writeChecks({ mode: "enforce", tools: { pay: { strict: true } } });
     ctx.service.publishRules(ctx.rec.apiKey!, [], { mode: "enforce" });
     await ctx.rec.checks.pullRules();
     publishByStranger(); // version 2, refused
     await ctx.rec.checks.pullRules();
-    publishByStranger(); // version 3: the witness rules with it; never fetched here
-    ctx.rec.checks.start();
+    ctx.service.servedVersion = 2;
+    ctx.rec.checks.start(); // the background fetcher's own first wake, before counting
     await ctx.rec.checks.settled();
-    ctx.rec.checks.refresh = async () => undefined; // the forced fetch changes nothing here
-    const woke = vi.spyOn(ctx.rec.checks, "wake");
+    const woke = vi.spyOn(ctx.rec.checks, "wake"); // counted, the fetch itself is real
     const payFn = record(async (_a: { amount: number }) => undefined, { name: "pay", strict: true });
-    for (let i = 0; i < 3; i++) await payFn({ amount: 1 }).catch(() => undefined);
+    return { woke, payFn, fetches: ctx.service.rulesFetches.length };
+  }
+
+  it("rulings naming version 3 while the witness answers the refused version 2: at most one forced fetch per interval", async () => {
+    const { woke, payFn, fetches } = await refusedV2();
+    publishByStranger(); // version 3: the rulings name it
+    for (let i = 0; i < 5; i++) {
+      await payFn({ amount: 1 }).catch(() => undefined);
+      await ctx.rec.checks.settled();
+    }
     expect(woke).toHaveBeenCalledTimes(1);
+    expect(ctx.service.rulesFetches.length - fetches).toBe(1);
     woke.mockRestore();
+    ctx.service.servedVersion = null;
+  });
+
+  it("rulings naming a different version on every call: forced fetches stay bounded", async () => {
+    const { woke, payFn, fetches } = await refusedV2();
+    for (let i = 0; i < 8; i++) {
+      publishByStranger(); // versions 3, 4, ...: each ruling names a new one
+      await payFn({ amount: 1 }).catch(() => undefined);
+      await ctx.rec.checks.settled();
+    }
+    expect(woke.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(ctx.service.rulesFetches.length - fetches).toBe(woke.mock.calls.length);
+    const forced = JSON.parse(fs.readFileSync(statePath("rules"), "utf8")).forced;
+    expect(Object.keys(forced).length).toBeLessThanOrEqual(8);
+    woke.mockRestore();
+    ctx.service.servedVersion = null;
+  });
+
+  it("a protect record without a version never counts: the protection list is unknown", async () => {
+    await noFileProtecting({ pay: { fail: "closed" } });
+    const f = rulesFiles();
+    fs.writeFileSync(f.record, JSON.stringify({ witness: ctx.rec.url, protect: { pay: { fail: "closed" } } }));
+    breakHeldCopy();
+    const e = await refused("lookup");
+    expect(e.code).toBe("rules_unavailable");
+    expect(e.message).toContain("protection list unknown");
+    // The dry run gives exactly the reason the call gave.
+    expect(ctx.rec.checks.dryRun("lookup", { amount: 5 }, "support-bot").lines).toContain(
+      `would refuse ${e.message} (rules_unavailable)`,
+    );
   });
 
   it("a copy from before 0.5.4 read while still valid gets its protect record, at status too", async () => {

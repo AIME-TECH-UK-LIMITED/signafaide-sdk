@@ -873,6 +873,7 @@ export class Recorder {
    * wait for that key. An explicit flush always tries, even after a refusal. */
   flush(timeoutMs = 10_000, mode: IoMode = "fg"): Promise<FlushResult> {
     if (mode !== "fg") return this.flushNow(timeoutMs, mode);
+    const started = monotonicMs();
     this.blocked.clear();
     // An explicit flush that the refusal no longer stops ends the halt of the background sender.
     // Never at its start: a tick would send alongside it while it runs.
@@ -885,7 +886,10 @@ export class Recorder {
         // Nothing to ship (another process drained the outbox): one cheap authenticated request
         // tells whether the witness accepts this configuration now.
         try {
-          await this.client(10_000, this.apiKey).project();
+          // Within the caller's timeout: what is left of it, at most 10 s.
+          const left = Math.min(10_000, timeoutMs - (monotonicMs() - started));
+          if (left <= 0) return r;
+          await this.client(left, this.apiKey).project();
           this.halted = undefined;
         } catch {
           /* still refused, or unreachable: the halt stays */

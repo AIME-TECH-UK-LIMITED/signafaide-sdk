@@ -211,6 +211,25 @@ def test_an_explicit_flush_with_nothing_to_ship_asks_once_and_ends_the_halt(reco
     assert recorder._halted is None
 
 
+def test_the_halt_probe_honours_the_flush_timeout(recorder, service):
+    service.quota = 0
+    recorder.flush_interval = 0.02
+    for i in range(3):
+        signafaide.note(f"n{i}", {})
+    recorder._wake.set()
+    assert _until(lambda: recorder._halted is not None), service.calls
+    service.quota = None
+    cli = runtime.Recorder(url=service.url, quiet=True)
+    try:
+        cli.flush()
+    finally:
+        cli.close()
+    before = len(service.calls)
+    recorder.flush(timeout=0.0)  # no time left for the probe
+    assert service.calls[before:] == []
+    assert recorder._halted is not None
+
+
 def test_quota_exceeded_stops_sending_until_the_configuration_changes(recorder, service):
     service.quota = 0
     recorder.flush_interval = 0.02
