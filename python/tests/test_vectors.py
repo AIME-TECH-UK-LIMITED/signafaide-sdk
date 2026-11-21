@@ -40,6 +40,7 @@ from signafaide.verifier import (
     export_statement,
     load_agent_keys,
     load_heads,
+    load_service_key_set,
     load_service_keys,
     records_hash,
     service_keys_hash,
@@ -244,6 +245,78 @@ def options(case, v, **kw):
     return load_service_keys(case.get("keys") or v["keys_document"]), o
 
 
+def test_revoked_service_keys_one_loader(v):
+    """§5: a revoked entry needs only its key_id (other fields ignored); the key stays in the list
+    keys_hash is computed from, and no signature by it verifies. A malformed `revoked` is refused."""
+    kid = v["keys_document"]["keys"][0]["key_id"]
+    doc = {**v["keys_document"], "revoked": [{"key_id": kid, "scope": "later field"}]}
+    keys, revoked = load_service_key_set(doc)
+    assert [k["key_id"] for k in keys] == [k["key_id"] for k in v["keys_document"]["keys"]] and revoked == [kid]
+    _, o = options({}, v)
+    r = verify_pack(v["pack"]["pack"], keys, **o, revoked_service_keys=revoked)
+    assert r.check("batch_sig").status == "fail" and "keys_hash does not match" not in str(r), str(r)
+    assert load_service_key_set(v["keys_document"])[1] == []
+    nulls = {**v["keys_document"], "revoked": [{"key_id": kid, "revoked_at": None, "reason": None}]}
+    assert load_service_key_set(nulls)[1] == [kid]
+    for bad in ({"key_id": kid}, None, [{"reason": "x"}], [{"key_id": kid, "reason": 1}]):
+        with pytest.raises(ValueError, match="revoked must be a list"):
+            load_service_key_set({**v["keys_document"], "revoked": bad})
+
+
+def test_key_lifecycle_stale_transitions(v):
+    """Spec §8: the one transition of a held rule set's or list's stale state, as every SDK does it."""
+    from signafaide.checks_runtime import stale_transition
+
+    cases = v["key_lifecycle"]["stale_transitions"]
+    assert len(cases) > 10
+    for c in cases:
+        assert stale_transition(c["state"], c["event"], c["now"], c["held"]) == c["expect"], c["name"]
+
+
+def test_key_lifecycle_packs(v, bls):
+    """Spec §5, §7: key revocation and rotation through the SDK verify path, with the same answers
+    as every other implementation (the vectors' key_lifecycle.packs)."""
+    for c in v["key_lifecycle"]["packs"]:
+        pack = (
+            v["pack"]["pack"]
+            if c["base"] == "pack"
+            else next(x for x in v["variants"] if x["name"] == c["base"])["pack"]
+        )
+        keys, revoked = load_service_key_set(c.get("keys") or v["keys_document"])
+        _, o = options(c, v, drand=bls)
+        r = verify_pack(
+            pack,
+            None if c.get("trust_embedded_keys") else keys,
+            **o,
+            trust_embedded_keys=bool(c.get("trust_embedded_keys")),
+            revoked_service_keys=revoked + [x for x in c.get("revoked", []) if x not in revoked],
+        )
+        assert r.result_line == c["expect"]["result_line"], c["name"]
+        assert {x.id: x.value or x.status for x in r.checks} == c["expect"]["checks"], c["name"]
+        failed = {x.id: [f["item"] for f in x.failures] for x in r.checks if x.failures}
+        assert failed == c["expect"]["failed_items"], c["name"]
+
+
+def test_key_lifecycle_tool_call_checks(v):
+    """The tool-call checks' acceptance of rule sets, rulings and the shared list (§5)."""
+    from signafaide import checks as C
+
+    kl = v["key_lifecycle"]
+    for c in kl["rule_sets"]:
+        assert C.accept_rules(None, c["item"], c["keys"], c["project"], c["env"], c["revoked"]) == c["expect"], c[
+            "name"
+        ]
+    for c in kl["rulings"]:
+        assert C.ruling_key_problem(c["receipt"], c["keys"], c["revoked"]) == c["expect"], c["name"]
+    for c in kl["fingerprint_lists"]:
+        held, err = C.empty_list(), None
+        for it in c["apply"]:
+            held, err = C.apply_list(held, it, c["keys"], c["revoked"])
+            if err:
+                break
+        assert {"error": err, "seq": held["seq"]} == c["expect"], c["name"]
+
+
 def test_drand_bls(v, bls):
     for case in v["drand"]:
         assert bls(case["beacon"]) is case["valid"]
@@ -366,3 +439,6 @@ def test_the_published_service_keys_ship_with_the_package():
     shipped = resources.files("signafaide").joinpath("service-keys.json").read_text()
     assert shipped == spec
     assert json.loads(spec)["keys"] == list(DEFAULT_SERVICE_KEYS)
+    from signafaide.checks_runtime import DEFAULT_REVOKED
+
+    assert [r["key_id"] for r in json.loads(spec).get("revoked", [])] == list(DEFAULT_REVOKED)

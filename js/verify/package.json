@@ -1,0 +1,39 @@
+{
+  "name": "signafaide-verify",
+  "version": "0.5.4",
+  "description": "Verify a signafAIde verification pack offline: the same checks and result line as every signafAIde verifier. Nothing else, no dependencies.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "signafaide-verify": "dist/cli.js"
+  },
+  "files": [
+    "dist/cli.js",
+    "README.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md"
+  ],
+  "scripts": {
+    "prepack": "node prepack.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk.git",
+    "directory": "js/verify"
+  },
+  "homepage": "https://signafaide.co.uk",
+  "bugs": {
+    "url": "https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/issues"
+  },
+  "author": "AIME TECH UK LIMITED (https://signafaide.co.uk)",
+  "keywords": [
+    "signafaide",
+    "verifier",
+    "audit",
+    "verification-pack",
+    "offline"
+  ]
+}

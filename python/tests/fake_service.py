@@ -47,6 +47,8 @@ class FakeService:
             "valid_to": None,
         }
         self.extra_keys = []  # more keys served after key_doc (a rotation in progress)
+        self.revoked = None  # the served `revoked` list (§5), when set
+        self.list_reset_seq = 0  # a client behind this seq gets the snapshot with `reset` (§11.2)
         self.projects = {}  # api_key -> project
         self.calls = []
         self.fail = None  # (status, code, message) returned once for the next /v1/records
@@ -64,6 +66,7 @@ class FakeService:
         self.rule_items = {}  # project -> [{rules, sig, service_key_id}], oldest first
         self.list_updates = []  # [{list, sig, service_key_id}]
         self.list_entries = []
+        self.served_version = None  # GET /v1/rules answers this version, when set (rulings use the newest)
         self.rules_fetches = []  # (version query, If-None-Match) of every GET /v1/rules
         self.no_ruling = False  # a witness that does not rule: receipts without a ruling
         self.ruling_error = None  # e.g. "rules_unavailable": the receipt says why there is no ruling
@@ -127,7 +130,10 @@ class FakeService:
         if method == "GET" and path == "/healthz":
             return 200, "ok"
         if method == "GET" and path == "/.well-known/signafaide-keys.json":
-            return 200, {"keys": [self.key_doc, *self.extra_keys]}
+            return 200, {
+                "keys": [self.key_doc, *self.extra_keys],
+                **({} if self.revoked is None else {"revoked": self.revoked}),
+            }
         if method == "POST" and path == "/v1/sandbox":
             self.sandbox_n += 1
             key = "sfa_test_" + f"{self.sandbox_n:032d}"
@@ -365,10 +371,11 @@ class FakeService:
             self.rules_fetches.append((query.get("version"), self.req_headers.get("If-None-Match")))
             if not items:
                 return 200, {"rules": None}
+            wanted = query.get("version")
+            if wanted is None and self.served_version is not None:
+                wanted = str(self.served_version)  # a witness that keeps answering an older version
             item = (
-                items[-1]
-                if query.get("version") is None
-                else next((i for i in items if str(i["rules"]["version"]) == query["version"]), None)
+                items[-1] if wanted is None else next((i for i in items if str(i["rules"]["version"]) == wanted), None)
             )
             if item is None:
                 return err(404, "not_found", "No such version.")
@@ -379,6 +386,8 @@ class FakeService:
             since = query.get("since")
             if since is None:
                 return 200, {"snapshot": self.list_snapshot(), "updates": []}
+            if int(since) < self.list_reset_seq:
+                return 200, {"reset": True, "snapshot": self.list_snapshot(), "updates": []}
             return 200, {
                 "snapshot": None,
                 "updates": [u for u in self.list_updates if u["list"]["seq"] > int(since)][:1000],

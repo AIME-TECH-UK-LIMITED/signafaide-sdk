@@ -22,15 +22,43 @@ export interface BlockHeader {
 /** height -> [fetched, the block header | why it could not be fetched] */
 export type BlockRoots = Map<number, [true, BlockHeader] | [false, string]>;
 
+/** Set to true by the standalone verifier's bundle (tsup.verify.config.ts), which names no SDK. */
+declare const __SIGNAFAIDE_VERIFY_BUNDLE__: boolean | undefined;
+
 async function get(url: string, timeoutMs: number): Promise<string> {
-  const headers: Record<string, string> =
-    typeof process !== "undefined" && process.versions?.node ? { "User-Agent": `signafaide-js/${VERSION}` } : {};
+  const headers: Record<string, string> = {};
+  if (typeof __SIGNAFAIDE_VERIFY_BUNDLE__ === "undefined" && typeof process !== "undefined" && process.versions?.node)
+    headers["User-Agent"] = `signafaide-js/${VERSION}`;
   const r = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(timeoutMs), headers });
   if (r.status >= 300 && r.status < 400)
     throw new Error(`${url}: an explorer answer is never a redirect (HTTP ${r.status})`);
   if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
-  return r.text();
+  // At most 64 KiB, as the Rust verifier reads: an explorer answer is a hash or an 80-byte header.
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  if (r.body) {
+    const reader = r.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > EXPLORER_LIMIT) {
+        await reader.cancel();
+        throw new Error(`${url}: the answer is larger than 64 KiB`);
+      }
+      chunks.push(value);
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    bytes.set(c, at);
+    at += c.length;
+  }
+  return new TextDecoder().decode(bytes);
 }
+
+const EXPLORER_LIMIT = 1 << 16;
 
 /** The target of a compact `nBits`; null when it is negative, zero or overflows. */
 export function target(bits: number): bigint | null {

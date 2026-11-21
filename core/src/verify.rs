@@ -126,28 +126,39 @@ impl Report {
     }
 
     /// Human-readable output: one line per check group, then `PASS` or `FAIL`.
+    /// The text output (§7): one line per check and the result line last. Every line passes
+    /// through `clean_line`, so no value taken from the pack (a project name, a field name in an
+    /// error) can start a line of its own and pass for a result line.
     pub fn to_text(&self) -> String {
-        let mut out = String::new();
+        let mut text: String = self
+            .lines()
+            .iter()
+            .map(|l| clean_line(l))
+            .collect::<Vec<_>>()
+            .join("\n");
+        text.push('\n');
+        text
+    }
+
+    /// The text output's lines, before `clean_line`.
+    pub fn lines(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
         if let (Some(p), Some(e)) = (&self.project, self.env) {
             match &self.project_name {
-                Some(n) => {
-                    out += &format!(
-                        "signafAIde pack of project {n} ({p}, {}), {}\n",
-                        e.as_str(),
-                        plural(self.records as u64, "record", "records")
-                    )
-                }
-                None => {
-                    out += &format!(
-                        "signafAIde pack {p} ({}), {}\n",
-                        e.as_str(),
-                        plural(self.records as u64, "record", "records")
-                    )
-                }
+                Some(n) => out.push(format!(
+                    "signafAIde pack of project {n} ({p}, {}), {}",
+                    e.as_str(),
+                    plural(self.records as u64, "record", "records")
+                )),
+                None => out.push(format!(
+                    "signafAIde pack {p} ({}), {}",
+                    e.as_str(),
+                    plural(self.records as u64, "record", "records")
+                )),
             }
         }
         for w in &self.warnings {
-            out += &format!("WARNING: {w}\n");
+            out.push(format!("WARNING: {w}"));
         }
         for c in &self.checks {
             let status = match (c.status, &c.value) {
@@ -158,32 +169,30 @@ impl Report {
                 (Status::Pass, Some(v)) => v.to_uppercase(),
                 (Status::Pass, None) => "PASS".to_string(),
             };
-            out += &format!("{:>2}. {:<28} {:<12} {}\n", c.n, c.title, status, c.detail);
+            out.push(format!("{:>2}. {:<28} {:<12} {}", c.n, c.title, status, c.detail));
             for f in c.failures.iter().take(20) {
-                out += &format!("      - {}: {}\n", f.item, f.message);
+                out.push(format!("      - {}: {}", f.item, f.message));
             }
             if c.failures.len() > 20 {
-                out += &format!("      ... and {} more\n", c.failures.len() - 20);
+                out.push(format!("      ... and {} more", c.failures.len() - 20));
             }
         }
         if self.checks.iter().any(|c| c.status == Status::Pending) {
-            out += PENDING_MEANS;
-            out.push('\n');
+            out.push(PENDING_MEANS.to_string());
         }
         for line in self.coverage_lines() {
-            out += &format!("coverage: {line}\n");
+            out.push(format!("coverage: {line}"));
         }
         for line in self.telemetry_lines() {
-            out += &format!("telemetry: {line}\n");
+            out.push(format!("telemetry: {line}"));
         }
         for line in self.tool_checks_lines() {
-            out += &format!("tool-call checks: {line}\n");
+            out.push(format!("tool-call checks: {line}"));
         }
         for line in self.rules_lines() {
-            out += &format!("rules: {line}\n");
+            out.push(format!("rules: {line}"));
         }
-        out += &self.result_line();
-        out.push('\n');
+        out.push(self.result_line());
         out
     }
 
@@ -222,6 +231,37 @@ impl Report {
     pub fn result_line(&self) -> String {
         self.result_line.clone()
     }
+
+    /// Add a note to the result line's bracket: `PASS: ...` becomes `PASS (<note>): ...`, and
+    /// `PASS (<reason>): ...` becomes `PASS (<reason>; <note>): ...`. For a caller's own fact about
+    /// its inputs (the standalone verifier: keys given with --keys that differ from its pinned set).
+    /// The part before the first `: ` is only ever `result_line`'s own words (the result and the
+    /// reasons it writes, §7), never a value from the pack, so the note goes into that part.
+    pub fn qualify(&mut self, note: &str) {
+        let (head, rest) = self
+            .result_line
+            .split_once(": ")
+            .expect("a result line has `: ` after its result");
+        debug_assert!(head == "PASS" || head == "FAIL" || head.starts_with("PASS (") || head.starts_with("FAIL ("));
+        self.result_line = match head.strip_suffix(')') {
+            Some(open) => format!("{open}; {note}): {rest}"),
+            None => format!("{head} ({note}): {rest}"),
+        };
+    }
+}
+
+/// One line of text output with every control character (and the Unicode line and paragraph
+/// separators) written as `\uXXXX`, so a value from the pack can never break a line (§7).
+pub fn clean_line(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    for c in line.chars() {
+        if c.is_control() || c == '\u{2028}' || c == '\u{2029}' {
+            out += &format!("\\u{:04x}", c as u32);
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Where a set of keys came from, when not from an independent source (§7 result line).
@@ -382,8 +422,12 @@ pub enum Bitcoin {
 /// Verifier inputs besides the pack.
 #[derive(Default, Clone)]
 pub struct Options {
-    /// Service keys from a source independent of the pack (`--keys`).
+    /// Service keys from a source independent of the pack (`--keys`): the whole published list,
+    /// revoked keys included, since the anchors' `keys_hash` covers them (§4, §5).
     pub service_keys: Option<Vec<KeyEntry>>,
+    /// Ids of revoked service keys (§5 `revoked`): they stay in `service_keys` and in the hash, but
+    /// no signature by one of them verifies.
+    pub revoked_service_keys: Vec<String>,
     /// Use the keys embedded in the pack when `service_keys` is `None` (warned about).
     pub trust_embedded_keys: bool,
     /// The customer's agent keys, independent of the pack (`--agent-keys`, §2.5).
@@ -429,29 +473,24 @@ struct Rec {
     hash: Hash,
 }
 
-/// The service keys a verification uses.
-struct Keys<'a>(&'a [KeyEntry]);
+/// The service keys a verification uses, and the revoked ones among them (never used to verify).
+struct Keys<'a>(&'a [KeyEntry], &'a [String]);
 
 impl Keys<'_> {
     fn active(&self, key_id: &str, at: &str) -> Result<&KeyEntry> {
-        let k = self
-            .0
-            .iter()
-            .find(|k| k.key_id == key_id)
-            .ok_or_else(|| Error::new(format!("unknown service key {key_id}")))?;
-        if !key_active(&k.valid_from, k.valid_to.as_deref(), time::parse(at)?) {
-            return Err(Error::new(format!("service key {key_id} was not active at {at}")));
-        }
-        Ok(k)
+        // The one key judgement (§5), with the verifier's words for each refusal.
+        crate::keyset::key_status(self.0, self.1, key_id, at).map_err(|why| {
+            Error::new(match why {
+                "unknown_key" => format!("unknown service key {key_id}"),
+                "revoked" => format!("service key {key_id} is revoked"),
+                _ => format!("service key {key_id} was not active at {at}"),
+            })
+        })
     }
 
     /// Any key active at `at` verifies `sig`.
     fn any(&self, domain: Domain, hash: &Hash, sig: &str, at: &str) -> bool {
-        let Ok(at) = time::parse(at) else { return false };
-        self.0.iter().any(|k| {
-            key_active(&k.valid_from, k.valid_to.as_deref(), at)
-                && sign::verify(&k.public_key, domain, hash, sig).is_ok()
-        })
+        crate::keyset::any_key_verifies(self.0, self.1, at, domain, hash, sig)
     }
 }
 
@@ -522,7 +561,7 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
                 .into(),
         );
     }
-    let keys = Keys(&service_keys);
+    let keys = Keys(&service_keys, &opts.revoked_service_keys);
     let agent_keys: Vec<AgentKey> = match (&opts.agent_keys, opts.trust_embedded_agent_keys || opts.by_service) {
         (Some(list), _) if !opts.by_service => list
             .iter()
@@ -1147,7 +1186,7 @@ pub fn verify_pack(pack_json: &Value, opts: &Options) -> Result<Report> {
             );
         }
         if service_keys_hash(&service_keys, created).ok() != Some(a.keys_hash) {
-            acc[9].fail(&item, "keys_hash does not match the service keys supplied: the key list was changed after this anchor was signed");
+            acc[9].fail(&item, "keys_hash does not match the service keys supplied: this anchor counts a key they do not have (a newer verifier release is needed) or the key list was changed after it was signed");
         }
         for (bh, p) in &pa.paths {
             if verify_path(bh, p.index, a.size, &p.path, &a.root) {
@@ -1748,11 +1787,19 @@ pub fn contents_from_text(text: &str) -> Result<HashMap<Hash, LocalContent>> {
     };
     let mut out = HashMap::new();
     for item in items {
+        // A draft (§8) never reaches a witness, so no pack holds it: its line is skipped. Content is
+        // an object (§2.1); a line with anything else, or an envelope that is not one, matches no
+        // record of a pack and is skipped, as the Python and TypeScript verifiers do.
+        if item.get("draft").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
         if let (Some(env), Some(content)) = (item.get("envelope"), item.get("content")) {
-            if content.is_null() {
+            if !content.is_object() {
                 continue;
             }
-            let e: Envelope = from_value(env)?;
+            let Ok(e) = from_value::<Envelope>(env) else {
+                continue;
+            };
             let salt = item.get("salt").and_then(Value::as_str).map(String::from);
             out.insert(
                 e.record_hash()?,

@@ -244,6 +244,15 @@ def result_line(
     return out
 
 
+_CONTROL = re.compile("[\u0000-\u001f\u007f-\u009f\u2028\u2029]")
+
+
+def clean_line(line: str) -> str:
+    """One line of text output with every control character (and the Unicode line and paragraph
+    separators) written as ``\\uXXXX``, so a value from the pack can never break a line (§7)."""
+    return _CONTROL.sub(lambda m: "\\u%04x" % ord(m.group()), line)
+
+
 @dataclass
 class Report:
     checks: List[Check]
@@ -359,7 +368,8 @@ class Report:
         return line
 
     def __str__(self) -> str:
-        return "\n".join(self.lines())
+        # Each line through clean_line: no value from the pack can start a line of its own (§7).
+        return "\n".join(clean_line(line) for line in self.lines())
 
     def to_dict(self) -> dict:
         checks = []
@@ -458,8 +468,39 @@ def _read(src: Any, flag: str) -> Any:
     return src
 
 
+def load_service_key_set(src: Any) -> Tuple[List[dict], List[str]]:
+    """The one service-key loader (§5), from a dict/list, a file path or an http(s) URL: the whole
+    key list (every key, revoked ones too, as the anchors' ``keys_hash`` covers them) and the ids of
+    the revoked keys (no signature by one of them verifies). A revoked entry needs only its
+    ``key_id``; ``revoked_at`` and ``reason`` are absent, null or strings; other fields are ignored."""
+    src = _read(src, "--keys")
+    keys = load_service_keys(src)
+    revoked = src.get("revoked") if isinstance(src, dict) else None
+    if revoked is None and not (isinstance(src, dict) and "revoked" in src):
+        return keys, []
+
+    def entry(x: Any) -> bool:
+        return (
+            isinstance(x, dict)
+            and isinstance(x.get("key_id"), str)
+            and all(x.get(f) is None or isinstance(x[f], str) for f in ("revoked_at", "reason"))
+        )
+
+    if not isinstance(revoked, list) or not all(entry(x) for x in revoked):
+        raise ValueError("keys: revoked must be a list of entries with a key_id")
+    return keys, [x["key_id"] for x in revoked]
+
+
+def pinned_revoked() -> list:
+    """The revoked ids pinned in this release (the package's service-keys.json, §5): every verifier of
+    this SDK applies them, whatever the keys' source (§7). Read when used (tests replace it)."""
+    from . import checks_runtime
+
+    return list(checks_runtime.DEFAULT_REVOKED)
+
+
 def load_service_keys(src: Any) -> List[dict]:
-    """Service keys from a dict/list, a file path or an http(s) URL."""
+    """Service keys (the whole list) from a dict/list, a file path or an http(s) URL."""
     src = _read(src, "--keys")
     keys = src.get("keys") if isinstance(src, dict) else src
     if not isinstance(keys, list):
@@ -553,6 +594,7 @@ def verify_pack(
     service_keys_plain_http: bool = False,
     agent_keys_plain_http: bool = False,
     by_service: bool = False,
+    revoked_service_keys: Optional[List[str]] = None,
 ) -> Report:
     """Verify a pack (dict or path). Raises :class:`KeysRequired` when no service
     keys are given and ``trust_embedded_keys`` is False. ``agent_keys`` is the customer's
@@ -623,6 +665,7 @@ def verify_pack(
         service_keys,
         keys,
         contents or {},
+        revoked=revoked_service_keys,
         project=pack["project"],
         env=pack["env"],
         local=False,
@@ -705,6 +748,7 @@ def verify_local(
     drand: Optional[Callable[[dict], bool]] = None,
     chains: Optional[List[str]] = None,
     service_keys_plain_http: bool = False,
+    revoked_service_keys: Optional[List[str]] = None,
 ) -> Report:
     """Verify everything in a ``.signafaide`` folder (a :class:`~signafaide.state.State`),
     chain by chain (``<project>/<env>/<agent>``), or only ``chains``. Unshipped records are
@@ -737,6 +781,7 @@ def verify_local(
         service_keys,
         agent_keys,
         {},
+        revoked=revoked_service_keys,
         project=None,
         env=None,
         local=True,
@@ -951,6 +996,7 @@ class _Verifier:
         project,
         env,
         local,
+        revoked=None,
         local_heads=None,
         drand=None,
         filter=None,
@@ -963,6 +1009,8 @@ class _Verifier:
         local_bases=None,
     ):
         self.service_keys = service_keys
+        # Revoked service keys (§5): in the key list and the hash, never used to verify.
+        self.revoked: List[str] = list(revoked or [])
         self.agent_keys = agent_keys
         self.contents = contents
         self.project, self.env, self.local = project, env, local
@@ -999,6 +1047,8 @@ class _Verifier:
         k = next((k for k in self.service_keys or [] if k.get("key_id") == key_id), None)
         if k is None:
             raise ValueError(f"unknown service key {key_id}")
+        if key_id in self.revoked:
+            raise ValueError(f"service key {key_id} is revoked")
         if not _active(k, _ms(at)):
             raise ValueError(f"service key {key_id} was not active at {at}")
         return k
@@ -1016,7 +1066,10 @@ class _Verifier:
     def any_key(self, domain: str, h: str, sig: Any, at: Any) -> bool:
         t = _ms(at)
         return any(
-            _active(k, t) and verify_sig(k.get("public_key", ""), domain, h, sig) for k in self.service_keys or []
+            k.get("key_id") not in self.revoked
+            and _active(k, t)
+            and verify_sig(k.get("public_key", ""), domain, h, sig)
+            for k in self.service_keys or []
         )
 
     def run(self, raw_records: list, anchors: list, chain_ids: Optional[List[str]] = None) -> List[Check]:
@@ -1630,7 +1683,7 @@ class _Verifier:
             if service_keys_hash(self.service_keys or [], created) != a["keys_hash"]:
                 a10.fail(
                     item,
-                    "keys_hash does not match the service keys supplied: the key list was changed after this anchor was signed",
+                    "keys_hash does not match the service keys supplied: this anchor counts a key they do not have (a newer verifier release is needed) or the key list was changed after it was signed",
                 )
             for bh, p in entry["paths"].items():
                 if verify_inclusion(bh, p.get("index"), a["size"], p.get("path"), a["root"]):
@@ -1727,7 +1780,7 @@ class _Verifier:
             if not isinstance(e, dict) or set(e) != {"rules", "sig", "service_key_id"}:
                 acc.fail(item, "a rule_sets entry is {rules, sig, service_key_id}")
                 continue
-            step = accept_rules(None, e, self.service_keys or [], self.project, self.env)
+            step = accept_rules(None, e, self.service_keys or [], self.project, self.env, self.revoked)
             if step is not None:
                 acc.fail(
                     item,

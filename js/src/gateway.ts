@@ -672,7 +672,13 @@ class Gateway {
           definition: toJsonable(t),
         };
         if (name) this.toolInfo.set(name, info);
-        if (review || (name !== null && this.rec.checks.consoleProtects(declaredName(this.prefix + name)))) {
+        // While the held rule set's protected tools are unknown (broken, no record) every call is
+        // refused, but the tools are still listed: only the checks file's review can withhold one.
+        const fromConsole =
+          name !== null &&
+          !this.rec.checks.protectionUnknown() &&
+          this.rec.checks.consoleProtects(declaredName(this.prefix + name));
+        if (review || fromConsole) {
           const r = this.rec.checks.reviewTool(
             {
               name: name ?? "",

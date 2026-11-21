@@ -624,7 +624,7 @@ export async function publishRules(rec: Recorder, pub: Publisher, add: Json[]): 
   await rec.resolveProject(key);
   const pe = rec.checks.projectEnv();
   if (!pe) throw new SignafaideError("the API key's project is not known yet", { code: "network" });
-  await rec.checks.pullRules();
+  await rec.checks.pullRules(true, true);
   const held = rec.checks.heldRules();
   const draft = nextDraft(held, add);
   let item: Json;
@@ -652,7 +652,7 @@ export async function publishRules(rec: Recorder, pub: Publisher, add: Json[]): 
   if (!item || typeof item !== "object" || !item.rules)
     throw new SignafaideError("the witness answered without the published version", { code: "bad_response" });
   // Keep it as the held version when it verifies (§10.2), so the next call uses it at once.
-  if (!rec.checks.keepRules(item)) await rec.checks.pullRules();
+  if (!(await rec.checks.keepRules(item))) await rec.checks.pullRules(true, true);
   return item;
 }
 
@@ -715,7 +715,7 @@ export async function runRulesPublish(
     out("Not published: the API key's project is not known yet (the witness could not be reached)");
     return 1;
   }
-  await rec.checks.pullRules();
+  await rec.checks.pullRules(true, true);
   const held = rec.checks.heldRules();
   let who = pub.who;
   if (pub.how === "session") {
@@ -783,7 +783,7 @@ export async function runRulesPublish(
     out("Not published: the witness answered without the published version");
     return 1;
   }
-  if (!rec.checks.keepRules(item)) await rec.checks.pullRules();
+  if (!(await rec.checks.keepRules(item))) await rec.checks.pullRules(true, true);
   out(
     `Rules      saved ${pub.how === "sandbox_key" ? "in your sandbox" : `by ${who}`} as version ${item.rules.version}, signed by signafAIde`,
   );

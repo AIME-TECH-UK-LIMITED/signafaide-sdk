@@ -439,11 +439,13 @@ def cmd_keys(a: argparse.Namespace) -> int:
         if not doc["keys"]:
             print("signafaide: no agent keys here yet; they are made with the first record", file=sys.stderr)
             return 1
+        from .tool_commands import auditor_commands
+
         out = Path(a.output or "agent-keys.json")
         out.write_text(json.dumps(doc, indent=2) + "\n")
         print(
             f"wrote {out} ({plural(len(doc['keys']), 'key')}); give it to your auditors with pack.json and head.json: "
-            f"signafaide verify pack.json --keys <witness>/.well-known/signafaide-keys.json --agent-keys {out} --head head.json"
+            + auditor_commands(rec.url, str(out))[0]
         )
         return 0
     agent = a.agent or rec.default_agent
@@ -737,7 +739,7 @@ def cmd_rules(a: argparse.Namespace) -> int:
 
         return run_rules_publish(rec, a.tool, _prompter(False))
     if a.action == "pull":
-        print(rec.checks.pull_rules())
+        print(rec.checks.forced_pull())
         return 1 if "rules" in rec.checks.problems else 0
     if a.action == "show":
         item = rec.checks.held_rules_item()

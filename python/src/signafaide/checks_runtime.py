@@ -17,29 +17,126 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from . import checks as C
 from . import scan
 from .coverage import declared_name
-from .crypto import hash_json, new_salt, verify_sig
+from .crypto import hash_json, new_salt
 from .http import DEFAULT_URL, SignafaideError
 from .jcs import canonicalize, dumps
 from .state import atomic_write
 from .records import now, parse_time
 from .notes import development
+from .verifier import _epoch_ms, _fmt as _fmt_ms, load_service_key_set
+from ._version import __version__
 from .words import fail_word, mode_word, rule_words
 
 log = logging.getLogger("signafaide")
 
 CHECKS_FILE = "signafaide.checks.json"
 
-#: The public keys of the default witness (``DEFAULT_URL``), shipped with the SDK and pinned: with
-#: the default URL, rule sets, the shared list and rulings verify with these keys only, and a key
-#: set fetched from the network is never used (§8). A new key reaches clients with an SDK release.
-DEFAULT_SERVICE_KEYS: Tuple[dict, ...] = (
-    {
-        "key_id": "7eb0111937aeef44",
-        "public_key": "Z0rlIr0TTqeoJM36r51U3qMO_5fsp2Jk8sMfkeNQAl8",
-        "valid_from": "2026-11-14T17:36:24.017Z",
-        "valid_to": None,
-    },
+
+def _pinned_document() -> dict:
+    """The package's own service-keys.json (spec/service-keys.json): the default witness's keys."""
+    from importlib import resources
+
+    return json.loads(resources.files("signafaide").joinpath("service-keys.json").read_text())
+
+
+#: The public keys of the default witness (``DEFAULT_URL``), shipped with the SDK and pinned: read
+#: from the package's service-keys.json. With the default URL, rule sets, the shared list and
+#: rulings verify with these keys only; a key set fetched from the network never adds a key (§8).
+DEFAULT_SERVICE_KEYS: Tuple[dict, ...] = tuple(load_service_key_set(_pinned_document())[0])
+
+#: The revoked ids pinned with them (§5): never used. Online, the published list's revoked ids are
+#: added (the union), as every verifier does.
+DEFAULT_REVOKED: Tuple[str, ...] = tuple(load_service_key_set(_pinned_document())[1])
+
+#: The pinned keys and revoked ids of this release, as a hash: a keys.json entry read with other
+#: ones counts as never fetched.
+_PINNED_HASH = hash_json({"keys": list(DEFAULT_SERVICE_KEYS), "revoked": list(DEFAULT_REVOKED)})
+
+#: How long a fetched key list (its revoked ids) is used before it is fetched again: 10 minutes.
+KEYS_REFRESH_MS = 10 * 60_000
+
+#: Forced fetches of the rule set a ruling may cause (§8): per ``RULES_REFRESH_MS`` in all, and how
+#: many versions' last forced fetch the state file keeps.
+MAX_FORCED_PER_INTERVAL = 3
+MAX_FORCED_KEPT = 8
+
+#: What a broken held rule set with no protect record means (§8): never fail open.
+PROTECTION_UNKNOWN = (
+    "protection list unknown: every checked call is refused until the rule set verifies; run `signafaide pull`"
 )
+
+#: How long a held rule set or shared list that is stale (§8: signed by a key now revoked or no
+#: longer held, or its replacement refused) is still enforced as it is: 7 days from when the client
+#: first learned it. After that every protected call is refused until a verified copy arrives.
+REVOKED_GRACE_MS = 7 * 86_400_000
+
+#: The first wait after a refused signed rule set or list item, doubling up to the longest (§8).
+STALE_RETRY_FIRST_MS = 60_000
+STALE_RETRY_MAX_MS = 3_600_000
+
+#: How long after a failed key list read the next one waits (after a good one: KEYS_REFRESH_MS).
+KEYS_RETRY_MS = 60_000
+
+#: The most keys held for a self-hosted witness, and the most revoked ids kept for the default
+#: witness that name keys this release does not pin yet (so a release that pins one applies it).
+MAX_WITNESS_KEYS = 64
+MAX_UNPINNED_REVOKED = 64
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _iso(ms: int) -> str:
+    return _fmt_ms(int(ms))
+
+
+def stale_transition(s: dict, ev: dict, now_: str, held: bool) -> dict:
+    """The one transition of the stale state of a held rule set or list (§8, ``vectors.json``
+    ``key_lifecycle.stale_transitions``): ``{since, refused, retry, confirmed when true}``. *held*: an
+    object is held (nothing held never starts the clock: a code-protected call still needs a verified
+    ruling). A ``since`` in the future counts as now; a retry wait is never longer than the longest
+    from now. Only ``verified`` clears."""
+    t = _epoch_ms(now_)
+
+    def clamp(x: Any) -> Optional[str]:
+        m = _epoch_ms(x) if isinstance(x, str) else None
+        return None if m is None else (now_ if m > t else x)
+
+    since = clamp(s.get("since"))
+    retry = s.get("retry")
+    if retry and (_epoch_ms(retry.get("until")) or 0) > t + STALE_RETRY_MAX_MS:
+        retry = {**retry, "until": _iso(t + STALE_RETRY_MAX_MS)}
+    out: dict = {"since": since, "refused": s.get("refused"), "retry": retry or None}
+    if s.get("confirmed") and since:
+        out["confirmed"] = True
+    kind = ev.get("type")
+    if kind == "verified":
+        return {"since": None, "refused": None, "retry": None}
+    if kind == "signer_bad":
+        if held and not since:
+            out["since"] = now_
+    elif kind == "refused":
+        if held and not since:
+            out["since"] = now_
+        out["refused"] = ev.get("refused")
+        n = ((retry or {}).get("failures") or 0) + 1
+        out["retry"] = {
+            "failures": n,
+            "until": _iso(t + min(STALE_RETRY_FIRST_MS * 2 ** min(n - 1, 30), STALE_RETRY_MAX_MS)),
+        }
+    elif kind == "pull_done":
+        if ev.get("stale_before") and since:
+            out["confirmed"] = True
+    elif kind == "merge":
+        other = clamp(ev.get("since"))
+        if held and other:
+            out["since"] = since if since and _epoch_ms(since) <= _epoch_ms(other) else other
+    # unsigned answers, network errors, key list changes, re-saves: nothing changes
+    if not out["since"]:
+        out.pop("confirmed", None)
+    return out
+
 
 #: Why a protected tool stops with no key or sandbox, and the one command that fixes it (one sentence).
 NO_KEY_WHY = (
@@ -229,6 +326,9 @@ class Plan:
     held_block: Optional[CheckError] = None
     #: Notes for the caller (§8 notes): a possible hidden instruction in the call's arguments.
     notes: List[dict] = dataclasses.field(default_factory=list)
+    #: The stale rules or list's grace period is over (§8): the call is refused (``rules_unavailable``)
+    #: after its decision is written, as a strict call without a ruling.
+    stale_blocked: Optional[str] = None
     #: What protects a strict call (``meta.protected_by``, §8, SDK 0.5.2): ``code``,
     #: ``checks_file``, ``console``, in that order; empty when the call is not strict.
     protected_by: List[str] = dataclasses.field(default_factory=list)
@@ -392,14 +492,18 @@ class ChecksState:
         0.5.2). Never while checks are off."""
         if self.path() is None:
             return False
-        return C.console_protects(self.held_rules(), tool)
+        # A held copy that is broken still protects what it protected when last verified (§8).
+        rs = self.held_rules()
+        return self._protects(rs if rs is not None else self._broken_protect(), tool)
 
     def console_protects_any(self) -> bool:
         """Whether the held rule set protects any tool from the console."""
         if self.path() is None:
             return False
         rs = self.held_rules()
-        return bool(rs) and isinstance(rs.get("protect"), dict) and bool(rs["protect"])
+        if rs is None:
+            rs = self._broken_protect()
+        return bool(rs) and ((isinstance(rs.get("protect"), dict) and bool(rs["protect"])) or rs.get("unknown") is True)
 
     def observe_console(
         self, tool: str, protected_now: bool, version: Optional[int], others: Optional[List[str]] = None
@@ -515,51 +619,120 @@ class ChecksState:
         """Whether the witness is the default one, whose keys are pinned (``DEFAULT_SERVICE_KEYS``)."""
         return self.rec.url == DEFAULT_URL
 
-    def service_keys(self) -> List[dict]:
-        """The witness's service keys (§5): the pinned ones for the default witness, else the ones
-        held in ``checks/keys.json`` for the witness's URL (none when they were fetched from another)."""
-        if self._pinned():
-            return [dict(k) for k in DEFAULT_SERVICE_KEYS]
+    def _keys_file(self) -> Dict[str, dict]:
+        """``checks/keys.json``: per witness URL, the keys, the revoked ids, when the key list was last
+        tried (``tried``, ``failed`` when that try failed) and the hash of the pinned keys it was read
+        with (``pinned``: another release's entry counts as never fetched). A file from before it held
+        one witness (``{keys, revoked?, fetched, url?}``) is read as that witness's entry."""
+        doc = _read(self.home / "keys.json")
+        if not isinstance(doc, dict):
+            return {}
+
+        def entry(e: dict) -> dict:
+            out: dict = {
+                "keys": e["keys"] if isinstance(e.get("keys"), list) else [],
+                "revoked": [x for x in e.get("revoked") or [] if isinstance(x, str)]
+                if isinstance(e.get("revoked"), list)
+                else [],
+            }
+            if isinstance(e.get("tried"), str):
+                out["tried"] = e["tried"]
+            if e.get("failed") is True:
+                out["failed"] = True
+            if isinstance(e.get("pinned"), str):
+                out["pinned"] = e["pinned"]
+            return out
+
+        if isinstance(doc.get("witnesses"), dict):
+            return {u: entry(e) for u, e in doc["witnesses"].items() if isinstance(e, dict)}
+        if not isinstance(doc.get("keys"), list):
+            return {}
+        return {doc["url"] if isinstance(doc.get("url"), str) else self.rec.url: entry(doc)}
+
+    def _edit_keys_entry(self, fn: Callable[[dict], dict]) -> None:
+        """Change this witness's entry under the keys file's lock, keeping every other witness's."""
+        path = self.home / "keys.json"
+        with self._lock, self.rec.state._lock_at(path.with_suffix(".lock")):
+            all_ = self._keys_file()
+            all_[self.rec.url] = fn(all_.get(self.rec.url) or {"keys": [], "revoked": []})
+            _write_pretty(path, {"witnesses": all_})
+
+    def _held_keys(self) -> dict:
+        """This witness's entry in ``checks/keys.json``: the keys and the revoked ids last fetched."""
         url = self.rec.url
 
-        def load() -> Optional[List[dict]]:
-            doc = _read(self.home / "keys.json")
-            if not (isinstance(doc, dict) and isinstance(doc.get("keys"), list)):
-                return None
-            # A file from before the URL was kept holds the keys of the witness in use then.
-            return doc["keys"] if doc.get("url") in (None, url) else []
+        def load() -> Optional[dict]:
+            e = self._keys_file().get(url)
+            return {"keys": e["keys"], "revoked": e["revoked"]} if e else None
 
-        return self._stamped(self.home / "keys.json", load, (url,)) or []
+        return self._stamped(self.home / "keys.json", load, (url,)) or {"keys": [], "revoked": []}
+
+    def revoked_keys(self) -> List[str]:
+        """The revoked service key ids held for the witness (§5): the pinned ones for the default
+        witness, and those its published list named when it was last fetched."""
+        out = list(DEFAULT_REVOKED) if self._pinned() else []
+        return out + [x for x in self._held_keys()["revoked"] if x not in out]
+
+    def all_service_keys(self) -> List[dict]:
+        """Every service key held for the witness, revoked ones too (key_problem names them revoked):
+        the pinned ones for the default witness (a fetched list never adds a key to them)."""
+        if self._pinned():
+            return [dict(k) for k in DEFAULT_SERVICE_KEYS]
+        return [dict(k) for k in self._held_keys()["keys"]]
+
+    def service_keys(self) -> List[dict]:
+        """The witness's service keys (§5) that may verify: ``all_service_keys`` without the revoked ones."""
+        revoked = self.revoked_keys()
+        return [k for k in self.all_service_keys() if k.get("key_id") not in revoked]
 
     def _rules_path(self, pe: Tuple[str, str]) -> Path:
         return self.home / "rules" / pe[0] / f"{pe[1]}.json"
 
-    def held_rules_item(self) -> Optional[dict]:
-        """The held rule set version ``{rules, sig, service_key_id}`` (§8), checked again by §10.2
-        steps 1 to 3; None when none is held or it fails (it is then fetched again)."""
-        pe = self.project_env()
-        if pe is None:
-            return None
+    def _rules_held(self, pe: Tuple[str, str]) -> Optional[Tuple[Optional[dict], str]]:
+        """The held rule set file of *pe* judged with the keys held now (cached until it or the keys
+        change): ``ok``; ``revoked`` or ``not_held`` (its signer is revoked or no longer among the keys
+        held: enforced as it is during the grace period, §8); ``broken`` (unreadable or failing its
+        own signature: never enforced, never dropped, protected calls are refused until a pull
+        verifies). None when none is held."""
         path = self._rules_path(pe)
+        if not path.exists():
+            return None
         try:
             ks = os.stat(self.home / "keys.json")
             extra: tuple = (ks.st_ino, ks.st_size, ks.st_mtime_ns)
         except OSError:
             extra = ()
 
-        # The signature check runs again only when the rule set file or the service keys change.
-        def load() -> Optional[dict]:
+        def load() -> Tuple[Optional[dict], str]:
             doc = _read(path)
-            return (
-                doc
-                if doc is not None and C.accept_rules(None, doc, self.service_keys(), pe[0], pe[1]) is None
-                else None
-            )
+            if not isinstance(doc, dict):
+                return None, "broken"
+            if C.accept_rules(None, doc, self.service_keys(), pe[0], pe[1]) is None:
+                return doc, "ok"
+            kid = str(doc.get("service_key_id"))
+            if (
+                kid in self.revoked_keys()
+                and C.accept_rules(None, doc, self.all_service_keys(), pe[0], pe[1], ()) is None
+            ):
+                return doc, "revoked"
+            if not any(k.get("key_id") == kid for k in self.all_service_keys()) and (
+                C.accept_rules(None, doc, [], pe[0], pe[1]) == "signature"
+            ):
+                return doc, "not_held"
+            return None, "broken"
 
-        item = self._stamped(path, load, extra)
-        if item is None and _read(path) is not None:
-            self._wake.set()
-        return item
+        h = self._stamped(path, load, extra + (self.rec.url, ",".join(self.revoked_keys())))
+        # The protect record follows every verified copy read (a revoked signer's too), §8.
+        if h and h[1] in ("ok", "revoked"):
+            self._sync_protect(pe, h[0])
+        return h
+
+    def held_rules_item(self) -> Optional[dict]:
+        """The held rule set version ``{rules, sig, service_key_id}`` (§8): verified, or stale and in
+        its grace period's keeping; None when none is held or it is broken."""
+        pe = self.project_env()
+        h = self._rules_held(pe) if pe else None
+        return h[0] if h else None
 
     def _listed_pairs(self, held: dict) -> set:
         """The pairs of a held list as a set, made once for each version of the list read."""
@@ -571,23 +744,23 @@ class ChecksState:
         item = self.held_rules_item()
         return item["rules"] if item else None
 
-    def held_list(self) -> Optional[dict]:
-        """The held shared list ``{seq, last, entries}``; None when none is held (or it was dropped)."""
+    def _list_held(self) -> Optional[Tuple[Optional[dict]]]:
+        """The held shared list file: ``(list,)``, or ``(None,)`` when broken (unreadable or invalid:
+        never used, never dropped; protected calls are refused until a pull verifies one, §8)."""
         path = self.home / "fingerprints.json"
+        if not path.exists():
+            return None
 
-        def load() -> Optional[dict]:
+        def load() -> Tuple[Optional[dict]]:
             doc = _read(path)
-            if doc is None:
-                return None
-            if C.held_list_errors(doc):
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-                return None
-            return doc
+            return (doc,) if doc is not None and not C.held_list_errors(doc) else (None,)
 
         return self._stamped(path, load)
+
+    def held_list(self) -> Optional[dict]:
+        """The held shared list ``{seq, last, entries}``; None when none is held or it is broken."""
+        h = self._list_held()
+        return h[0] if h else None
 
     def _approved_path(self, agent: str) -> Path:
         return self.home / "approved" / f"{agent}.json"
@@ -674,13 +847,21 @@ class ChecksState:
 
     # --- fetching (§8, §10.2, §11.2) ----------------------------------------------------
 
+    def stop(self) -> None:
+        """Stop the background fetcher: it ends at once (a fetch in flight finishes first)."""
+        self._stop.set()
+        self._wake.set()
+
     def start(self) -> None:
         """Fetch the rule set and the list now and every 60 s in the background (with an API key)."""
         if self.rec.test or not self.rec.api_key or self.path() is None:
             return
         with self._lock:
-            if self._thread is not None and self._thread.is_alive():
+            if self._thread is not None and self._thread.is_alive() and not self._stop.is_set():
                 return
+            if self._thread is not None and self._thread.is_alive():
+                return  # a stopped fetcher still finishing: never two
+            self._stop.clear()
             self._thread = threading.Thread(target=self._loop, name="signafaide-checks", daemon=True)
             self._thread.start()
 
@@ -703,7 +884,13 @@ class ChecksState:
     def refresh(self) -> None:
         if not self.rec.api_key:
             return
-        for name, fn in (("rules", self.pull_rules), ("fingerprints", self.pull_list)):
+        self.fresh_keys()
+        force_rules, self._force_rules = self._force_rules, False
+
+        def rules() -> str:
+            return self.pull_rules(force=force_rules)
+
+        for name, fn in (("rules", rules), ("fingerprints", self.pull_list)):
             # Without a checks file the rule set is fetched for `protect` (§8); the shared list
             # only once a call is checked (a checks file, a tool protected in code or from the console).
             if name == "fingerprints" and not self._planned and not self.enabled() and not self.console_protects_any():
@@ -716,33 +903,136 @@ class ChecksState:
                         f"could not fetch the {'rule set' if name == 'rules' else 'shared fingerprint list'}: {e.message}"
                     )
 
-    def pull_keys(self) -> List[dict]:
-        """Fetch the witness's service keys (§5). Never for the default witness: its keys are
-        pinned. A fetched set that drops every key held before for the same witness is refused (a
-        witness rotates by adding a key first), and the keys held stay in force."""
-        if self._pinned():
-            return [dict(k) for k in DEFAULT_SERVICE_KEYS]
-        doc = self.rec.client(timeout=10.0).service_keys()
-        keys = doc.get("keys") if isinstance(doc, dict) else None
-        if not isinstance(keys, list) or not all(
-            isinstance(k, dict) and isinstance(k.get("key_id"), str) and isinstance(k.get("public_key"), str)
-            for k in keys
-        ):
-            return self.service_keys()
-        before = self.service_keys()
-        if before and not any(
-            k["key_id"] == b.get("key_id") and k["public_key"] == b.get("public_key") for b in before for k in keys
-        ):
-            self.problems["keys"] = (
-                f"bad_response: refused the service keys of {self.rec.url}: they drop every key held before (spec §8); kept the keys held"
-            )
-            return before
-        self.problems.pop("keys", None)
-        _write_pretty(self.home / "keys.json", {"keys": keys, "fetched": now(), "url": self.rec.url})
-        return keys
+    def forced_pull(self) -> str:
+        """``signafaide pull`` and ``signafaide rules pull``: the key list, the rule set and the shared
+        list, all fetched now whatever any wait says (§8). Returns the rule set's words."""
+        self.fresh_keys("force")
+        said = self.pull_rules(force=True)
+        try:
+            self.pull_list(force=True)
+        except SignafaideError as e:
+            if e.code not in ("network", "rate_limited") and e.status < 500:
+                self.problems["fingerprints"] = f"could not fetch the shared fingerprint list: {e.message}"
+        return said
 
-    def pull_rules(self) -> str:
-        """Fetch the rule set now (§10.2). Returns what happened, in words."""
+    def fresh_keys(self, mode: str = "normal") -> None:
+        """The published key list (its revoked ids above all), for every witness, the default one
+        too: read again ``KEYS_REFRESH_MS`` after a good read and ``KEYS_RETRY_MS`` after a failed one
+        (one on-disk ``tried``, shared by every process; an entry read with other pinned keys counts as
+        never read). ``soon``: a signature that does not verify reads it again after ``KEYS_RETRY_MS``;
+        ``force``: now. One read at a time in a process."""
+        with self._keys_fetch:
+            if mode != "force":
+                e = self._keys_file().get(self.rec.url) or {}
+                at = _epoch_ms(e.get("tried")) if e.get("pinned") == _PINNED_HASH else None
+                now_ms = _now_ms()
+                if at is not None and at > now_ms:
+                    # A time in the future counts as now (written back), never as a wait without end.
+                    at = now_ms
+                    self._edit_keys_entry(lambda x: {**x, "tried": _iso(now_ms)})
+                wait = KEYS_RETRY_MS if mode == "soon" or e.get("failed") else KEYS_REFRESH_MS
+                if at is not None and now_ms - at < wait:
+                    return
+            try:
+                self.pull_keys()
+            except (SignafaideError, ValueError, OSError):
+                pass  # the keys and revoked ids held stay
+
+    _keys_fetch = threading.Lock()
+
+    def pull_keys(self) -> List[dict]:
+        """Read the witness's key list (§5) once. Revocations are never refused: from any valid keys
+        document the client keeps exactly the revoked ids that name a key it holds for that witness
+        (for the default witness also up to ``MAX_UNPINNED_REVOKED`` naming keys not pinned yet), never
+        drops one, and ignores the rest. Keys: the default witness's stay the pinned ones; a
+        self-hosted witness's are merged, never dropped, up to ``MAX_WITNESS_KEYS``; a document that
+        drops or changes a key held, or would pass the limit, has its key changes refused (its
+        revocations still apply)."""
+        failed = lambda x: {**x, "tried": _iso(_now_ms()), "failed": True, "pinned": _PINNED_HASH}  # noqa: E731
+        try:
+            doc = self.rec.client(timeout=10.0).service_keys()
+        except SignafaideError:
+            self._edit_keys_entry(failed)
+            if self._pinned():
+                return self.service_keys()
+            raise
+        try:
+            if not (isinstance(doc, dict) and isinstance(doc.get("keys"), list)):
+                raise ValueError("not a keys document")
+            new_keys, new_revoked = load_service_key_set(doc)
+        except ValueError:
+            self.problems["keys"] = (
+                f"bad_response: the service keys of {self.rec.url} are not a valid keys document (spec §5); kept the keys held"
+            )
+            self._edit_keys_entry(failed)
+            return self.service_keys()
+        refused: List[str] = []
+
+        def edit(x: dict) -> dict:
+            keys = [dict(k) for k in DEFAULT_SERVICE_KEYS] if self._pinned() else list(x["keys"])
+            if not self._pinned():
+                ids = {k["key_id"]: k for k in new_keys}
+                merged = [
+                    ids[k["key_id"]]
+                    if k.get("key_id") in ids and ids[k["key_id"]]["public_key"] == k.get("public_key")
+                    else k
+                    for k in keys
+                ]
+                merged += [n for n in new_keys if not any(k.get("key_id") == n["key_id"] for k in merged)]
+                if any(k.get("key_id") not in ids for k in keys):
+                    refused.append("drop a key held")
+                elif any(
+                    k.get("key_id") in ids and ids[k["key_id"]]["public_key"] != k.get("public_key") for k in keys
+                ):
+                    refused.append("change a key held")
+                elif len(merged) > MAX_WITNESS_KEYS:
+                    refused.append(f"name more than {MAX_WITNESS_KEYS} keys")
+                if not refused:
+                    keys = merged
+            held = {k.get("key_id") for k in keys}
+            revoked = list(x["revoked"])
+            unpinned = sum(1 for r in revoked if r not in held)
+            for r in new_revoked:
+                if r in revoked:
+                    continue
+                if r in held:
+                    revoked.append(r)
+                elif self._pinned() and unpinned < MAX_UNPINNED_REVOKED:
+                    revoked.append(r)
+                    unpinned += 1
+            return {"keys": keys, "revoked": revoked, "tried": _iso(_now_ms()), "pinned": _PINNED_HASH}
+
+        self._edit_keys_entry(edit)
+        if refused:
+            self.problems["keys"] = (
+                f"bad_response: refused the key changes of {self.rec.url}: they {refused[0]} (spec §8); kept the keys held, applied its revocations"
+            )
+        else:
+            self.problems.pop("keys", None)
+        return self.service_keys()
+
+    def _refused_item(self, kind: str, pe: Optional[Tuple[str, str]], step: str, item: Any, offered: Any) -> str:
+        """A refused signed item (§8): the clock starts if something is held, the refusal is kept for
+        the words, the next fetch waits."""
+        kid = str(item["service_key_id"]) if isinstance(item, dict) and item.get("service_key_id") is not None else None
+        unknown = (
+            step == "signature" and kid is not None and not any(k.get("key_id") == kid for k in self.all_service_keys())
+        )
+        refused = {"cause": "unknown_key" if unknown else "step", "step": step, "key_id": kid, "offered": offered}
+        self._edit_state(kind, {"type": "refused", "refused": refused}, pe)
+        info = self.stale_info(kind, pe)
+        held = f": {info['words']}" if info else ""
+        if kind == "rules":
+            msg = f"bad_response: refused rule set version {offered if offered is not None else '?'} at step {step} (spec §10.2); kept the version held{held}"
+            self.problems["rules"] = msg
+        else:
+            msg = f"bad_response: refused a shared list item at step {step} (spec §11.2); kept the list held{held}"
+            self.problems["fingerprints"] = msg
+        return msg
+
+    def pull_rules(self, force: bool = False) -> str:
+        """Fetch the rule set now (§10.2). *force*: a person asked (no retry wait). Returns what
+        happened, in words."""
         api_key = self.rec.api_key
         if not api_key:
             return "no API key: rule sets need one"
@@ -750,47 +1040,55 @@ class ChecksState:
         pe = self.project_env()
         if pe is None:
             return "the API key's project is not known yet"
+        if not force and self._retrying("rules"):
+            return self.problems.get("rules") or "the rule set is not fetched again yet"
+        stale_before = self.stale_info("rules", pe) is not None
         held = self.held_rules_item()
-        client = self.rec.client(timeout=10.0)
-        item = client.rules(etag=hash_json(held["rules"]) if held else None)
-        if item is None:
+        # While stale, fetched whole: a refused copy of the version held (a glitch) clears when its verified copy comes again.
+        item = self.rec.client(timeout=10.0).rules(etag=hash_json(held["rules"]) if held and not stale_before else None)
+
+        def done(said: str) -> str:
+            if stale_before:
+                self._edit_state("rules", {"type": "pull_done", "stale_before": True}, pe)
+            return said
+
+        if item is None or not isinstance(item, dict) or item.get("rules") is None:
+            # An unsigned answer (current, or no rule set): nothing starts or clears a clock.
             self.problems.pop("rules", None)
             self._no_rule_set = held is None
-            return f"rule set version {held['rules']['version']} is current" if held else "no rule set"
-        if not isinstance(item, dict) or item.get("rules") is None:
-            self.problems.pop("rules", None)
-            self._no_rule_set = held is None
-            return "the project has no rule set" if not held else f"kept rule set version {held['rules']['version']}"
+            if item is None:
+                return done(f"rule set version {held['rules']['version']} is current" if held else "no rule set")
+            return done(f"kept rule set version {held['rules']['version']}" if held else "the project has no rule set")
         self._no_rule_set = False
-        keys = self.service_keys()
-        err = C.accept_rules(held["rules"] if held else None, item, keys, pe[0], pe[1])
+        self.fresh_keys()
+
+        def verdict() -> Optional[str]:
+            h = self._rules_held(pe)
+            base = None if h is None or h[1] == "broken" or held is None else held["rules"]
+            return C.accept_rules(base, item, self.service_keys(), pe[0], pe[1])
+
+        err = verdict()
         if err == "signature":
-            keys = self.pull_keys()
-            err = C.accept_rules(held["rules"] if held else None, item, keys, pe[0], pe[1])
+            self.fresh_keys("soon")
+            err = verdict()
         if err is not None:
             v = item["rules"].get("version") if isinstance(item.get("rules"), dict) else "?"
-            self.problems["rules"] = (
-                f"bad_response: refused rule set version {v} at step {err} (spec §10.2); kept the version held"
-            )
-            return self.problems["rules"]
-        with self._lock:
-            _write_jcs(self._rules_path(pe), {k: item[k] for k in ("rules", "sig", "service_key_id")})
-            _write_pretty(self.home / "rules" / pe[0] / f"{pe[1]}.at.json", {"fetched": now()})
+            return done(self._refused_item("rules", pe, err, item, v))
+        self._commit_verified("rules", pe, item, [str(item.get("service_key_id"))])
         self.problems.pop("rules", None)
         return f"rule set version {item['rules']['version']}"
 
     def keep_rules(self, item: dict) -> bool:
-        """Keep a version the client was handed (a publish's answer) as the held version, when
-        §10.2 accepts it over the version held. Returns whether it was kept."""
+        """Keep a version the client was handed (a publish's answer) as the held version, when §10.2
+        accepts it over the version held, through the one function that clears (§8)."""
+        self.fresh_keys()
         pe = self.project_env()
         if pe is None or not isinstance(item, dict):
             return False
         held = self.held_rules()
         if C.accept_rules(held, item, self.service_keys(), pe[0], pe[1]) is not None:
             return False
-        with self._lock:
-            _write_jcs(self._rules_path(pe), {k: item[k] for k in ("rules", "sig", "service_key_id")})
-            _write_pretty(self.home / "rules" / pe[0] / f"{pe[1]}.at.json", {"fetched": now()})
+        self._commit_verified("rules", pe, item, [str(item.get("service_key_id"))])
         self._no_rule_set = False
         self.problems.pop("rules", None)
         return True
@@ -799,52 +1097,560 @@ class ChecksState:
         """Look at the checks file again at the next call."""
         self._looked = float("-inf")
 
-    def pull_list(self) -> str:
-        """Fetch the shared fingerprint list now (§11.2)."""
+    def pull_list(self, force: bool = False) -> str:
+        """Fetch the shared fingerprint list now (§11.2). The list is written once, at the end of a
+        clean pull whose signers are not revoked; a held list that is stale, broken or of unknown
+        signers (an older release's) is fetched again from a snapshot and stays until one verifies."""
         if not self.rec.api_key:
             return "no API key: the shared list needs one"
-        held = self.held_list()
-        cur = held or C.empty_list()
+        if not force and self._retrying("list"):
+            return self.problems.get("fingerprints") or "the shared list is not fetched again yet"
         client = self.rec.client(timeout=10.0)
-        keys = self.service_keys() or self.pull_keys()
-        since = held["seq"] if held else None
-        for _ in range(100):
+        self.fresh_keys()
+        if not self.service_keys():
+            self.fresh_keys("soon")
+        keys = self.service_keys()
+        stale_before = self.stale_info("list", None) is not None
+        held = self.held_list()
+        live = self._live_state("list", None)
+        known = live["held"].get("key_ids") if live and isinstance(live["held"].get("key_ids"), list) else None
+        base = held if held and known is not None and not stale_before else None
+
+        def done(said: str) -> str:
+            if stale_before:
+                self._edit_state("list", {"type": "pull_done", "stale_before": True}, None)
+            return said
+
+        cur = base or C.empty_list()
+        since = base["seq"] if base else None
+        signers = set(known or []) if base else set()
+        fresh, snapshot_ok, keys_again, complete = base is None, False, False, False
+        rounds = 0
+        while rounds < 100 and not complete:
+            rounds += 1
             resp = client.fingerprints(since=since)
-            items = ([resp["snapshot"]] if isinstance(resp, dict) and resp.get("snapshot") else []) + list(
-                (resp or {}).get("updates") or []
-            )
+            if isinstance(resp, dict) and resp.get("reset") is True:
+                if not resp.get("snapshot"):
+                    return done(self._refused_item("list", None, "reset", None, None))  # a reset without its snapshot
+                cur, fresh, snapshot_ok = {**C.empty_list(), "seq": base["seq"] if base else 0}, True, False
+                signers.clear()
+            updates = list((resp or {}).get("updates") or []) if isinstance(resp, dict) else []
+            items = ([resp["snapshot"]] if isinstance(resp, dict) and resp.get("snapshot") else []) + updates
             gap = False
             for it in items:
                 nxt, err = C.apply_list(cur, it, keys)
-                if err == "signature" and keys is not None:
-                    keys = self.pull_keys()
+                if err == "signature" and not keys_again:
+                    keys_again = True
+                    self.fresh_keys("soon")
+                    keys = self.service_keys()
                     nxt, err = C.apply_list(cur, it, keys)
                 if err == "gap":
                     gap = True
                     break
                 if err is not None:
-                    self.problems["fingerprints"] = (
-                        f"bad_response: refused a shared list item at step {err} (spec §11.2); kept the list held"
-                    )
-                    self._save_list(cur)
-                    return self.problems["fingerprints"]
+                    seq = it["list"].get("seq") if isinstance(it, dict) and isinstance(it.get("list"), dict) else None
+                    return done(self._refused_item("list", None, err, it, seq))
+                if (
+                    fresh
+                    and isinstance(it, dict)
+                    and isinstance(it.get("list"), dict)
+                    and it["list"].get("type") == "snapshot"
+                ):
+                    snapshot_ok = True
+                if isinstance(it, dict) and it.get("service_key_id") is not None:
+                    signers.add(str(it["service_key_id"]))
                 cur = nxt
-            self._save_list(cur)
-            if gap or len((resp or {}).get("updates") or []) >= 1000:
+            if gap or len(updates) >= 1000:
                 since = cur["seq"]
-                continue
-            break
+            else:
+                complete = True
+        if not complete:
+            return done(self._refused_item("list", None, "rounds", None, cur["seq"]))  # never a success
+        if fresh and not snapshot_ok:
+            self.problems.pop("fingerprints", None)
+            return done(f"kept shared list seq {held['seq']}" if held else "no shared list")
+        if base is not None and cur is base:
+            self.problems.pop("fingerprints", None)
+            return done(f"shared list seq {cur['seq']} is current")
+        revoked = self.revoked_keys()
+        bad = next((k for k in sorted(signers) if k in revoked), None)
+        if bad:
+            return done(self._refused_item("list", None, "revoked", {"service_key_id": bad}, cur["seq"]))
+        self._commit_verified("list", None, cur, sorted(signers))
         self.problems.pop("fingerprints", None)
         return f"shared list seq {cur['seq']}"
 
-    def _save_list(self, cur: dict) -> None:
-        with self._lock:
-            _write_pretty(
-                self.home / "fingerprints.json", {"seq": cur["seq"], "last": cur["last"], "entries": cur["entries"]}
-            )
-            _write_pretty(self.home / "fingerprints.at.json", {"fetched": now()})
+    # --- stale rules and list (§8): one state file per held object ------------------------------
 
-    # --- a call (§8) --------------------------------------------------------------------
+    def _state_path(self, kind: str, pe: Optional[Tuple[str, str]]) -> Optional[Path]:
+        """``checks/rules/<project>/<env>.state.json`` or ``checks/fingerprints.state.json``."""
+        if kind == "list":
+            return self.home / "fingerprints.state.json"
+        return self.home / "rules" / pe[0] / f"{pe[1]}.state.json" if pe else None
+
+    def _held_id(self, kind: str, pe: Optional[Tuple[str, str]]) -> Optional[dict]:
+        """What identifies the held object on disk: a rule set's version and signer, a list's seq and
+        last; None when none is held or it is broken."""
+        if kind == "rules":
+            h = self._rules_held(pe) if pe else None
+            if not h or h[0] is None:
+                return None
+            return {"version": h[0]["rules"]["version"], "key_ids": [str(h[0].get("service_key_id"))]}
+        lst = self.held_list()
+        return {"seq": lst["seq"], "last": lst["last"]} if lst else None
+
+    def _live_state(self, kind: str, pe: Optional[Tuple[str, str]]) -> Optional[dict]:
+        """The state file, when it belongs to this witness and the object held now (a state file left
+        by a crash before it was rewritten, or another witness's, counts as none)."""
+        p = self._state_path(kind, pe)
+        doc = _read(p) if p else None
+        hid = self._held_id(kind, pe)
+        if (
+            not isinstance(doc, dict)
+            or doc.get("witness") != self.rec.url
+            or not isinstance(doc.get("held"), dict)
+            or not hid
+        ):
+            return None
+        h = doc["held"]
+        if kind == "rules":
+            same = h.get("version") == hid["version"] and h.get("key_ids") == hid["key_ids"]
+        else:
+            same = h.get("seq") == hid["seq"] and h.get("last") == hid["last"]
+        return doc if same else None
+
+    def _edit_state(
+        self, kind: str, ev: dict, pe: Optional[Tuple[str, str]], extra: Optional[Callable[[dict], None]] = None
+    ) -> None:
+        """Apply one event to the state file under its lock (a state file that is not live starts
+        fresh, naming the object held now)."""
+        p = self._state_path(kind, pe)
+        if p is None:
+            return
+        with self._lock, self.rec.state._lock_at(p.with_suffix(".lock")):
+            hid = self._held_id(kind, pe)
+            raw = _read(p)
+            live = self._live_state(kind, pe)
+            if (
+                live is None
+                and hid is None
+                and isinstance(raw, dict)
+                and raw.get("witness") == self.rec.url
+                and raw.get("held") is None
+            ):
+                live = raw  # nothing held: the retry wait still counts on
+            list_keys = (
+                live["held"].get("key_ids") if kind == "list" and live and isinstance(live.get("held"), dict) else None
+            )
+            d = live or {"witness": self.rec.url, "held": hid, "sdk": __version__, "stale": None, "retry": None}
+            if kind == "list" and hid:
+                d["held"] = {**hid, "key_ids": list_keys if isinstance(list_keys, list) else None}
+            st = d.get("stale") if isinstance(d.get("stale"), dict) else {}
+            nxt = stale_transition(
+                {
+                    "since": st.get("since"),
+                    "refused": st.get("refused"),
+                    "retry": d.get("retry"),
+                    "confirmed": st.get("confirmed") is True,
+                },
+                ev,
+                _iso(_now_ms()),
+                hid is not None,
+            )
+            same = nxt["since"] == st.get("since")
+            if nxt["since"]:
+                d["stale"] = {
+                    "since": nxt["since"],
+                    "refused": nxt["refused"],
+                    "noted": st.get("noted") if same and isinstance(st.get("noted"), list) else [],
+                    "said": st.get("said") if same else None,
+                }
+                if nxt.get("confirmed"):
+                    d["stale"]["confirmed"] = True
+            elif nxt["refused"]:
+                d["stale"] = {"since": None, "refused": nxt["refused"], "noted": [], "said": None}
+            else:
+                d["stale"] = None
+            d["retry"] = nxt["retry"]
+            if ev.get("type") == "refused":
+                d["sdk"] = __version__
+            if extra:
+                extra(d)
+            _write_pretty(p, d)
+
+    def _commit_verified(self, kind: str, pe: Optional[Tuple[str, str]], obj: dict, key_ids: List[str]) -> None:
+        """The one function that clears: write a verified object, then a fresh state file naming it."""
+        p = self._state_path(kind, pe)
+        if p is None:
+            return
+        with self._lock, self.rec.state._lock_at(p.with_suffix(".lock")):
+            if kind == "rules":
+                assert pe is not None
+                # The copy first, then its protect record: a crash between leaves the record behind
+                # the copy (refreshed from it at the next read), never ahead.
+                _write_jcs(self._rules_path(pe), {k: obj[k] for k in ("rules", "sig", "service_key_id")})
+                with self.rec.state._lock_at(self._protect_path(pe).with_suffix(".lock")):
+                    self._save_protect(pe, obj)
+                _write_pretty(self.home / "rules" / pe[0] / f"{pe[1]}.at.json", {"fetched": now()})
+                held: dict = {"version": obj["rules"]["version"], "key_ids": key_ids}
+            else:
+                _write_pretty(
+                    self.home / "fingerprints.json", {"seq": obj["seq"], "last": obj["last"], "entries": obj["entries"]}
+                )
+                _write_pretty(self.home / "fingerprints.at.json", {"fetched": now()})
+                held = {"seq": obj["seq"], "last": obj["last"], "key_ids": sorted(set(key_ids))}
+            _write_pretty(p, {"witness": self.rec.url, "held": held, "sdk": __version__, "stale": None, "retry": None})
+
+    _force_rules = False
+
+    def _may_force(self, version: Any) -> bool:
+        """Whether a ruling naming *version* may force a fetch now (§8): at most one per version per
+        ``RULES_REFRESH_MS``, and at most ``MAX_FORCED_PER_INTERVAL`` in all in that time, counted in
+        the rule set's state file (``forced``: the last forced fetch per version, the latest few
+        kept)."""
+        ok = [False]
+
+        def edit(d: dict) -> None:
+            now_ms = _now_ms()
+            f: Dict[str, str] = {}
+            for k, v in (d.get("forced") or {}).items() if isinstance(d.get("forced"), dict) else ():
+                t = _epoch_ms(v) if isinstance(v, str) else None
+                if t is not None:
+                    f[k] = _iso(min(t, now_ms))  # a time in the future counts as now
+
+            def within(t: str) -> bool:
+                return now_ms - (_epoch_ms(t) or 0) < C.RULES_REFRESH_MS
+
+            key = str(version)
+            if not (key in f and within(f[key])) and sum(1 for t in f.values() if within(t)) < MAX_FORCED_PER_INTERVAL:
+                f[key] = _iso(now_ms)
+                ok[0] = True
+            d["forced"] = dict(sorted(f.items(), key=lambda kv: -(_epoch_ms(kv[1]) or 0))[:MAX_FORCED_KEPT])
+
+        self._edit_state("rules", {"type": "resaved"}, self.project_env(), edit)
+        return ok[0]
+
+    def protection_unknown(self, pe: Any = "current") -> bool:
+        """Whether the held rule set is broken and nobody knows which tools it protected (§8):
+        every checked call is refused."""
+        b = self._broken_protect(pe)
+        return bool(b and b.get("unknown"))
+
+    def _protection_rs(self, tool: str) -> Optional[dict]:
+        """The rule set ``C.protection`` judges a tool with: the held one, or while it is broken the
+        protect set it leaves (every tool when that is unknown), so mode and result agree with
+        ``plan``."""
+        rs = self.held_rules()
+        prs = rs if rs is not None else self._broken_protect()
+        if prs and prs.get("unknown"):
+            return {**prs, "protect": {**prs["protect"], tool: {"fail": "closed"}}}
+        return prs
+
+    def _refused_offered(self) -> Any:
+        """The version the last refused rule set offered (kept in its state file), if any."""
+        p = self._state_path("rules", self.project_env())
+        d = _read(p) if p else None
+        st = d.get("stale") if isinstance(d, dict) and d.get("witness") == self.rec.url else None
+        return st["refused"].get("offered") if isinstance(st, dict) and isinstance(st.get("refused"), dict) else None
+
+    def _retrying(self, kind: str) -> bool:
+        """Whether a refused rule set or list waits before the next fetch: never after a forced pull
+        or under another SDK version; an ``until`` more than the longest wait ahead counts as the
+        longest wait from now (written back)."""
+        p = self._state_path(kind, self.project_env())
+        d = _read(p) if p else None
+        if not isinstance(d, dict) or d.get("witness") != self.rec.url or d.get("sdk") != __version__:
+            return False
+        until = _epoch_ms((d.get("retry") or {}).get("until")) if isinstance(d.get("retry"), dict) else None
+        if until is None:
+            return False
+        left = until - _now_ms()
+        if left <= 0:
+            return False
+        if left > STALE_RETRY_MAX_MS:
+            self._edit_state(kind, {"type": "resaved"}, self.project_env())
+        return True
+
+    def _protect_path(self, pe: Tuple[str, str]) -> Path:
+        """``rules/<project>/<env>.protect.json``: the tools the console protects in the held rule
+        set, as last verified, for this witness. Its own file: no state edit ever erases it. Written
+        with every verified version, and backfilled the first time a still-valid copy (one from
+        before 0.5.4 too) is read."""
+        return self.home / "rules" / pe[0] / f"{pe[1]}.protect.json"
+
+    def _save_protect(self, pe: Tuple[str, str], item: dict) -> None:
+        protect = item["rules"].get("protect")
+        _write_pretty(
+            self._protect_path(pe),
+            {
+                "witness": self.rec.url,
+                "version": item["rules"]["version"],
+                "protect": protect if isinstance(protect, dict) else {},
+            },
+        )
+
+    def _protect_record(self, pe: Tuple[str, str]) -> Optional[dict]:
+        path = self._protect_path(pe)
+
+        def load() -> Optional[dict]:
+            d = _read(path)
+            ok = isinstance(d, dict) and d.get("witness") == self.rec.url and isinstance(d.get("protect"), dict)
+            return d if ok else None
+
+        return self._stamped(path, load, (self.rec.url,))
+
+    def _sync_protect(self, pe: Tuple[str, str], doc: dict) -> None:
+        """Keep the protect record in step with the verified copy held (under its lock): written when
+        missing or of another version. A union-only safety net: a record of a newer version than the
+        copy (another process held one) keeps every tool it named, joined with the copy's, until a
+        verified newer copy replaces it. A copy that changed meanwhile is left to the next read."""
+        v = doc["rules"]["version"]
+        rec = self._protect_record(pe)
+        if rec is not None and rec.get("version") == v:
+            return
+        with self._lock, self.rec.state._lock_at(self._protect_path(pe).with_suffix(".lock")):
+            cur = _read(self._rules_path(pe))
+            if not isinstance(cur, dict) or not isinstance(cur.get("rules"), dict) or cur["rules"].get("version") != v:
+                return
+            r = self._protect_record(pe)
+            if r is not None and r.get("version") == v:
+                return
+            own = doc["rules"].get("protect") if isinstance(doc["rules"].get("protect"), dict) else {}
+            ahead = r is not None and isinstance(r.get("version"), int) and r["version"] > v
+            _write_pretty(
+                self._protect_path(pe),
+                {"witness": self.rec.url, "version": v, "protect": {**own, **r["protect"]} if ahead else own},
+            )
+
+    def _broken_protect(self, pe: Any = "current") -> Optional[dict]:
+        """What protects tools from the console while the held rule set is broken: the tools of its
+        last verified version (its protect record) joined with those the broken file still names.
+        With no protect record nobody knows which tools it protected: ``unknown``, and every tool
+        counts as protected, so every checked call is refused until a pull verifies (never fail
+        open). None when the held rule set is not broken."""
+        if pe == "current":
+            pe = self.project_env()
+        h = self._rules_held(pe) if pe else None
+        if not h or h[1] != "broken":
+            return None
+        raw = _read(self._rules_path(pe))
+        rules = raw.get("rules") if isinstance(raw, dict) else None
+        named = rules.get("protect") if isinstance(rules, dict) and isinstance(rules.get("protect"), dict) else {}
+        # The record counts only for the version the broken copy still says it is: a copy another
+        # process (an older release) wrote over it, or one that no longer parses, may protect others.
+        v = rules.get("version") if isinstance(rules, dict) else None
+        r = self._protect_record(pe)
+        rec = r if r is not None and isinstance(r.get("version"), int) and r.get("version") == v else None
+        return {
+            "protect": {**named, **(r["protect"] if r else {})},
+            "version": rec.get("version") if rec else None,
+            "unknown": rec is None,
+        }
+
+    @staticmethod
+    def _protects(rs: Optional[dict], tool: Optional[str]) -> bool:
+        """Whether *rs* (a held rule set, or ``_broken_protect``) protects *tool* from the console."""
+        return C.console_protects(rs, tool) or (isinstance(rs, dict) and rs.get("unknown") is True and tool is not None)
+
+    def _signer_problem(
+        self, kind: str, pe: Optional[Tuple[str, str]], live: Optional[dict]
+    ) -> Optional[Tuple[str, str]]:
+        """The held object's signer problem, from the keys held now: revoked, or no longer held."""
+        if kind == "rules":
+            h = self._rules_held(pe) if pe else None
+            if h and h[1] in ("revoked", "not_held"):
+                return h[1], str(h[0].get("service_key_id"))  # type: ignore[union-attr]
+            return None
+        ids = live["held"]["key_ids"] if live and isinstance(live["held"].get("key_ids"), list) else []
+        revoked = self.revoked_keys()
+        r = next((k for k in ids if k in revoked), None)
+        if r:
+            return "revoked", r
+        held = {k.get("key_id") for k in self.all_service_keys()}
+        gone = next((k for k in ids if k not in held), None)
+        return ("not_held", gone) if gone else None
+
+    def stale_info(self, kind: str, pe: Any = "current") -> Optional[dict]:
+        """What is stale about the held rule set of *pe* or the held list, from the disk (any
+        process): None when nothing is. Marks the clock when the held object's signer is revoked or
+        no longer held. A broken object counts as expired at once."""
+        if pe == "current":
+            pe = self.project_env()
+        what = (
+            f"rule set ({pe[0]}/{pe[1]})"
+            if kind == "rules" and pe
+            else "rule set"
+            if kind == "rules"
+            else "shared list"
+        )
+        h = (self._rules_held(pe) if pe else None) if kind == "rules" else self._list_held()
+        if not h:
+            return None
+        unknown = kind == "rules" and self.protection_unknown(pe)
+        if h[0] is None:
+            return {
+                "what": what,
+                "since": None,
+                "expired": True,
+                "broken": True,
+                "confirmed": True,
+                "unknown": unknown,
+                "words": f"the copy held is unreadable or fails its own signature; {PROTECTION_UNKNOWN}"
+                if unknown
+                else "the copy held is unreadable or fails its own signature",
+                "deadline": None,
+                "noted": [],
+                "said": None,
+            }
+        live = self._live_state(kind, pe)
+        signer = self._signer_problem(kind, pe, live)
+        if signer and not (live and isinstance(live.get("stale"), dict) and live["stale"].get("since")):
+            self._edit_state(kind, {"type": "signer_bad"}, pe)
+            live = self._live_state(kind, pe)
+        st = live.get("stale") if live and isinstance(live.get("stale"), dict) else None
+        since = _epoch_ms(st.get("since")) if st and isinstance(st.get("since"), str) else None
+        if since is None:
+            return None
+        if since > _now_ms():
+            self._edit_state(kind, {"type": "resaved"}, pe)  # the transition clamps it to now
+            since = _now_ms()
+        ref = st.get("refused") if isinstance(st.get("refused"), dict) else None
+        if ref and ref.get("cause") == "unknown_key":
+            words = (
+                "the witness now signs with a key this release does not know (update signafaide)"
+                if self._pinned()
+                else f"the witness signs with key {ref.get('key_id')}, which its published key list does not name (ask the witness's operator)"
+            )
+        elif signer and signer[0] == "revoked":
+            words = f"signed by service key {signer[1]}, which the witness has revoked; waiting for the witness's re-signed copy (run `signafaide pull`)"
+        elif signer:
+            words = "the key that signed it is no longer in the keys held (run `signafaide pull`)"
+        elif ref:
+            words = f"version {ref.get('offered')} from the witness failed check {ref.get('step')} (run `signafaide pull`; report it with the output of `signafaide checks status`)"
+        else:
+            words = "waiting for a verified copy from the witness (run `signafaide pull`)"
+        expired = _now_ms() - since >= REVOKED_GRACE_MS
+        return {
+            "what": what,
+            "since": since,
+            "expired": expired,
+            "broken": False,
+            "confirmed": st.get("confirmed") is True,
+            "words": f"{words}; no verified replacement arrived within 7 days" if expired else words,
+            "deadline": _iso(since + REVOKED_GRACE_MS),
+            "noted": st.get("noted") if isinstance(st.get("noted"), list) else [],
+            "said": st.get("said") if isinstance(st.get("said"), str) else None,
+        }
+
+    def _stale_lines(self) -> List[Tuple[str, bool]]:
+        """The status lines of every state file of this witness (every project's rule set, the list)."""
+        pes = []
+        try:
+            for prj in sorted((self.home / "rules").iterdir()):
+                for f in sorted(prj.iterdir()):
+                    n = f.name
+                    if n.endswith(".json") and not n.endswith((".state.json", ".at.json", ".protect.json")):
+                        pes.append((prj.name, n[:-5]))
+        except OSError:
+            pass
+        # Only this witness's: another project's rule set counts when its state file names this
+        # witness (the current project's always does); another witness's state is never read or written.
+        cur = self.project_env()
+
+        def mine(pe: Tuple[str, str]) -> bool:
+            if cur and tuple(pe) == tuple(cur):
+                return True
+            st = _read(self._state_path("rules", pe))
+            return isinstance(st, dict) and st.get("witness") == self.rec.url
+
+        out = []
+        for info in [self.stale_info("rules", pe) for pe in pes if mine(pe)] + [self.stale_info("list", None)]:
+            if not info:
+                continue
+            if info["broken"]:
+                tail = (
+                    "" if info.get("unknown") else "; protected calls are refused until `signafaide pull` verifies one"
+                )
+                out.append((f"PROBLEM {info['what']}: {info['words']}{tail}", True))
+            elif info["expired"]:
+                out.append((f"PROBLEM {info['what']}: {info['words']}; protected calls are refused", True))
+            else:
+                out.append((f"STALE {info['what']}: {info['words']}; enforced as held until {info['deadline']}", False))
+        return out
+
+    def _stale_gate(self, agent: str, strict: bool) -> Optional[str]:
+        """Before a call is checked (§8): a stale rule set or list is enforced as it is for
+        REVOKED_GRACE_MS. Once the mark has outlived a pull it is said once a day per object on stderr
+        and noted in a ``signafaide.checks_stale`` record once per agent (both kept in the state file).
+        After the grace period, or at once for a broken copy, a protected call is refused: its decision
+        is written, the tool does not run. Never in test mode."""
+        if self.rec.test:
+            return None
+        pe = self.project_env()
+        for kind in ("rules", "list"):
+            info = self.stale_info(kind, pe)
+            if not info:
+                continue
+            if info["broken"] or not info["confirmed"]:
+                continue
+            today = _iso(_now_ms())[:10]
+            say = info["said"] != today
+            note = agent not in info["noted"]
+            if not say and not note:
+                continue
+            if say:
+                print(f"signafaide: {info['what']}: {info['words']}", file=sys.stderr)
+            noted = False
+            if note:
+                try:
+                    rs = self.held_rules_item() if kind == "rules" else None
+                    self.rec.write(
+                        "note",
+                        "signafaide.checks_stale",
+                        {
+                            "stale": kind,
+                            "since": _iso(info["since"]),
+                            "words": info["words"],
+                            "rule_set": {
+                                "set": rs["rules"]["set"],
+                                "version": rs["rules"]["version"],
+                                "service_key_id": rs["service_key_id"],
+                            }
+                            if rs
+                            else None,
+                            "grace_days": REVOKED_GRACE_MS // 86_400_000,
+                        },
+                        agent=agent,
+                    )
+                    noted = True
+                except Exception:  # noqa: BLE001 - a record that cannot be written never stops the call here
+                    pass
+
+            def mark(d: dict, say: bool = say, noted: bool = noted) -> None:
+                if not isinstance(d.get("stale"), dict):
+                    return
+                if say:
+                    d["stale"]["said"] = today
+                if noted and agent not in d["stale"]["noted"]:
+                    d["stale"]["noted"] = d["stale"]["noted"] + [agent]
+
+            self._edit_state(kind, {"type": "resaved"}, pe, mark)
+        return self.stale_refusal(pe) if strict else None
+
+    def stale_refusal(self, pe: Any = "current") -> Optional[str]:
+        """Why a protected call is refused now (§8), or None: the one reason the call, ``check`` and
+        ``rules test`` all give (the stale grace period over, a broken copy)."""
+        if self.rec.test:
+            return None
+        if pe == "current":
+            pe = self.project_env()
+        blocks = []
+        for kind in ("rules", "list"):
+            info = self.stale_info(kind, pe)
+            if info and info["expired"]:
+                tail = "" if info.get("unknown") else "; protected calls are refused"
+                blocks.append(f"{info['what']}: {info['words']}{tail}")
+        return f"{'; '.join(blocks)} (spec §8)" if blocks else None
 
     def witness_host(self) -> Optional[str]:
         return C.url_host(self.rec.url)
@@ -870,7 +1676,9 @@ class ChecksState:
         rs = self.held_rules()
         # §8 (SDK 0.5.2): the held rule set's `protect` protects a tool the client wraps, as the
         # checks file's `protect: true` would; never a telemetry span (it never blocks).
-        from_console = not telemetry and self.path() is not None and C.console_protects(rs, decl)
+        # A held copy that is broken still protects what it protected when last verified (refused).
+        prs = rs if rs is not None else self._broken_protect()
+        from_console = not telemetry and self.path() is not None and self._protects(prs, decl)
         by_code = bool(strict_code or protect)
         f = self.file_for((by_code or from_console) and not telemetry)
         if not telemetry:
@@ -887,10 +1695,11 @@ class ChecksState:
         ts = C.tool_settings(f, decl)
         mode = "watch" if telemetry else ts["mode"]
         if from_console and not ts["strict"]:
-            mode = C.protection(rs, f, False, decl)["mode"]
+            mode = C.protection(self._protection_rs(decl), f, False, decl)["mode"]
         file_fail = (f["tools"].get(decl) or {}).get("fail") if C.checks_file_version(f) == 1 and not protect else None
         cfg = {"strict": ts["strict"], "disclose": ts["disclose"], "fail": file_fail}
         strict = False if telemetry else bool(strict_code or cfg.get("strict") or from_console)
+        stale_blocked = None if telemetry else self._stale_gate(agent, strict)
         protected_by = (
             []
             if not strict
@@ -993,6 +1802,7 @@ class ChecksState:
             cfg.get("fail"),
             notes=notes,
             protected_by=protected_by,
+            stale_blocked=stale_blocked,
         )
         if result == "block":
             plan.blocked = self._block_error(decl, next(e for e in results if e["result"] == "block"), rs, f["rules"])
@@ -1080,6 +1890,9 @@ class ChecksState:
         rec = self.rec
         if rec.test:
             return "none", None  # test mode sends nothing: strict calls run without a ruling
+        # The grace period of stale rules or a stale list is over (§8): refused, never asked or run.
+        if plan.stale_blocked:
+            return "none", CheckError(f"{tool} did not run: {plan.stale_blocked}", "rules_unavailable")
         closed = plan.fail != "open"
         if not rec.api_key:
             err = SignafaideBlocked(f"{tool} did not run: {NO_KEY_WHY}", "no_key", tool=tool, ruled_by="client")
@@ -1089,7 +1902,8 @@ class ChecksState:
         deadline = time.monotonic() + plan.timeout_ms / 1000
         # No rule set held (a cold start, or its file or the keys file was removed): fetch it now,
         # within the same ruling timeout, so its fail mode is known before the call may run.
-        fetching = self.held_rules() is None and not self._no_rule_set
+        # Never while a refused version's retry wait runs: a call does not wake a pull per call.
+        fetching = self.held_rules() is None and not self._no_rule_set and not self._retrying("rules")
         if fetching:
             with self._round_done:
                 rounds = self._rounds
@@ -1146,8 +1960,20 @@ class ChecksState:
                     why = bad
                 else:
                     held = self.held_rules()
+                    # A newer version than the one held: fetch it at once (§8). The version refused
+                    # while its retry wait runs wakes nothing (no pull per strict call); any other
+                    # version does, and its fetch does not wait.
                     if isinstance(g.get("rules"), dict) and (held is None or g["rules"]["version"] > held["version"]):
-                        self.wake()  # a newer version than the one held: fetch it at once (§8)
+                        waiting = self._retrying("rules")
+                        if not waiting:
+                            self.wake()
+                        elif g["rules"]["version"] != self._refused_offered() and self._may_force(
+                            g["rules"]["version"]
+                        ):
+                            # Bounded (``_may_force``): a witness naming other versions in its
+                            # rulings never makes a fetch per call.
+                            self._force_rules = True
+                            self.wake()
                     if g["ruling"] == "allow":
                         return "allow", None
                     return "block", self._ruling_error(tool, g)
@@ -1185,7 +2011,7 @@ class ChecksState:
         return True
 
     def _ruling_problem(self, receipt: dict, d: dict) -> Optional[str]:
-        g, sig = receipt.get("ruling"), receipt.get("ruling_sig")
+        g = receipt.get("ruling")
         err = C.ruling_errors(g)
         if err:
             return f"the ruling is malformed ({err})"
@@ -1195,19 +2021,20 @@ class ChecksState:
             or g["server_time"] != (receipt.get("batch") or {}).get("server_time")
         ):
             return "the ruling names another record than its receipt"
-        keys = self.service_keys()
-        k = next((k for k in keys if k.get("key_id") == receipt.get("service_key_id")), None)
-        if k is None:
-            try:
-                keys = self.pull_keys()
-            except SignafaideError:
-                keys = []
-            k = next((k for k in keys if k.get("key_id") == receipt.get("service_key_id")), None)
-        if k is None or not isinstance(sig, str) or not verify_sig(k["public_key"], "ruling", hash_json(g), sig):
-            return "the ruling's signature does not verify with the witness's keys"
+        # The same judgement as every verifier (key_problem): unknown key, revoked, not active, signature,
+        # with the published revoked ids read at most KEYS_REFRESH_MS ago.
+        self.fresh_keys()
+        kid = receipt.get("service_key_id")
+        if not any(k.get("key_id") == kid for k in self.all_service_keys()):
+            self.fresh_keys("soon")  # the keys held stay when it fails
+        bad = C.ruling_key_problem(receipt, self.all_service_keys(), self.revoked_keys())
+        if bad == "revoked":
+            return f"the ruling's service key {kid} is revoked"
         # The key must be active when the witness ruled: a retired key never signs a new ruling.
-        if not C.key_active(k, g["server_time"]):
-            return f"the ruling's service key {k['key_id']} was not active at {g['server_time']}"
+        if bad == "not_active":
+            return f"the ruling's service key {kid} was not active at {g['server_time']}"
+        if bad:
+            return "the ruling's signature does not verify with the witness's keys"
         return None
 
     def _ruling_error(self, tool: str, g: dict) -> SignafaideBlocked:
@@ -1268,7 +2095,7 @@ class ChecksState:
             mode = C.tool_settings(f, tool)["mode"]
             # A tool protected from the console (§8): its checks are On unless the file names its mode.
             if self.console_protects(tool) and not C.tool_settings(f, tool)["strict"]:
-                mode = C.protection(self.held_rules(), f, False, tool)["mode"]
+                mode = C.protection(self._protection_rs(tool), f, False, tool)["mode"]
         else:
             mode = f.get("mode", "watch")
         out: List[dict] = []
@@ -1331,6 +2158,16 @@ class ChecksState:
         return sorted(n for n in f["tools"] if C.tool_settings(f, n)["strict"])
 
     def status(self) -> Tuple[List[str], bool]:
+        """``signafaide checks status``: (lines, problem). Every state file of this witness is said on
+        every path (§8): ``STALE ...; enforced as held until <UTC>`` in the grace period (exit 0),
+        ``PROBLEM ...; protected calls are refused`` after it (exit 1)."""
+        lines, problem = self._status_lines()
+        for line, p in self._stale_lines():
+            lines.append(line)
+            problem = problem or p
+        return lines, problem
+
+    def _status_lines(self) -> Tuple[List[str], bool]:
         """The lines of ``signafaide checks status``, and whether there is a problem."""
         lines: List[str] = []
         path = self.path()
@@ -1434,6 +2271,7 @@ class ChecksState:
                 else 'protected tools: none (a tool is protected by code, the gateway\'s --strict, or `"strict": true` in the checks file)'
             )
         problem = False
+        # Stale rules or list (§8), from the disk: a new process sees it too.
         for name, msg in sorted(self.problems.items()):
             lines.append(f"PROBLEM {name}: {msg}")
             problem = True
@@ -1501,6 +2339,13 @@ class ChecksState:
                 out.append(
                     f"{'would note  ' if res['result'] == 'block' else 'allowed     '} {text} (the rules on this machine, {mode_word(ts['mode'])})"
                 )
+        # The stale gate (§8), as the real call meets it: a protected call is refused, with the same reason.
+        prs = rs if rs is not None else self._broken_protect()
+        if ts["strict"] or self._protects(prs, decl):
+            why = self.stale_refusal()
+            if why:
+                blocked = True
+                out.append(f"would refuse {decl} did not run: {why} (rules_unavailable)")
         out.append(f"             Dry run: nothing recorded, the tool did not run. Exit code {1 if blocked else 0}.")
         return out, blocked
 

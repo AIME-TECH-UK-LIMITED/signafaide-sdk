@@ -624,6 +624,10 @@ pub struct Inputs {
     pub by_service: bool,
     /// The service keys came over plain http from a local address.
     pub service_keys_plain_http: bool,
+    /// Service keys from the pack (`--trust-embedded-keys`): no `keys` is used.
+    pub trust_embedded_keys: bool,
+    /// Revoked ids applied besides the keys document's (a release's pinned revocations, §7).
+    pub revoked: Option<Vec<String>>,
 }
 
 impl Inputs {
@@ -633,6 +637,7 @@ impl Inputs {
             ("agent_keys", &self.agent_keys),
             ("head", &self.head),
             ("bitcoin", &self.bitcoin),
+            ("revoked", &self.revoked.as_ref().map(|r| json!(r))),
         ] {
             if let Some(v) = v {
                 into[k] = v.clone();
@@ -642,6 +647,7 @@ impl Inputs {
             ("trust_embedded_agent_keys", self.trust_embedded_agent_keys),
             ("by_service", self.by_service),
             ("service_keys_plain_http", self.service_keys_plain_http),
+            ("trust_embedded_keys", self.trust_embedded_keys),
         ] {
             if on {
                 into[k] = json!(true);
@@ -671,8 +677,19 @@ impl Inputs {
             ),
             _ => verify::Bitcoin::Offline,
         };
+        // Revoked ids: the keys document's, and any given besides (§5, §7).
+        let mut revoked: Vec<String> = keys.revoked.into_iter().map(|r| r.key_id).collect();
+        for id in entry.get("revoked").and_then(Value::as_array).into_iter().flatten() {
+            let id = id.as_str().unwrap().to_string();
+            if !revoked.contains(&id) {
+                revoked.push(id);
+            }
+        }
+        let trust_embedded_keys = flag("trust_embedded_keys");
         Options {
-            service_keys: Some(keys.keys),
+            service_keys: (!trust_embedded_keys).then_some(keys.keys),
+            revoked_service_keys: revoked,
+            trust_embedded_keys,
             agent_keys,
             trust_embedded_agent_keys: entry
                 .get("trust_embedded_agent_keys")
@@ -1666,6 +1683,256 @@ pub fn generate() -> Value {
     // Added here, not inside the macro above, which is at its expansion limit.
     out["tool_names"] = json!(tool_name_cases());
     out["checks"] = checks_vectors::generate();
+    out["key_lifecycle"] = key_lifecycle(&out);
     out["tool_names_note"] = json!("Tool declarations (spec 2.6). declared_name is the tool's name as a declaration holds it: the name itself up to 101 characters (Unicode code points), else its first 92 characters, a tilde and the first 8 hex characters of sha256(UTF-8 tool name). recorded_note and unrecorded_note are the envelope names of the two notes that declare the tool. A variant's expect.coverage is the report's coverage object and expect.coverage_lines its coverage lines, in order. Telemetry notes (spec 2.7): a variant's expect.telemetry is the report's telemetry object (agents with a telemetry note only) and expect.telemetry_lines its telemetry lines, in order.");
     out
+}
+
+/// `key_lifecycle` (spec §5, §7): revocation and rotation cases that every implementation runs
+/// (the Rust core and standalone verifier, the npm verifier, the SDKs' verify, "Verify in your
+/// browser", and the TypeScript and Python tool-call checks runtime) and must answer identically.
+fn key_lifecycle(v: &Value) -> Value {
+    let sk = service_key_entry();
+    let sid = sk.key_id.clone();
+    let doc = |keys: Value, revoked: Option<Value>| {
+        let mut d = json!({ "keys": keys });
+        if let Some(r) = revoked {
+            d["revoked"] = r;
+        }
+        d
+    };
+    let retired = json!([{"key_id": sid, "public_key": sk.public_key, "valid_from": sk.valid_from, "valid_to": "2026-11-01T00:00:00.001Z"}]);
+    let revoked_doc = doc(
+        json!([sk]),
+        Some(json!([{"key_id": sid, "revoked_at": null, "reason": "compromised", "later": 1}])),
+    );
+    let defaults = json!({"keys_document": {"keys": [sk.clone()]}, "agent_keys_document": agent_keys_document()});
+    let variant = |name: &str| {
+        v["variants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["name"] == name)
+            .unwrap()
+            .clone()
+    };
+    let v30 = "tool-call checks: a protected call ruled allow by the witness, its outcome, the rule set version and the disclosed values";
+    let v30_pack = variant(v30)["pack"].clone();
+    let mut packs = Vec::new();
+    for (name, base, inputs) in [
+        ("the service key revoked: batches, heads, the export and the anchors it signed fail; keys_hash still matches", "pack", json!({"keys": revoked_doc})),
+        ("variant 30 with its service key revoked: the rule set and the ruling fail too", v30, json!({"keys": revoked_doc})),
+        ("the service key retired before the batches: its signatures after valid_to fail", "pack", json!({"keys": doc(retired.clone(), None)})),
+        ("service keys from the pack (--trust-embedded-keys) with the release's pinned revoked ids", "pack", json!({"trust_embedded_keys": true, "revoked": [sid]})),
+        ("service keys from the pack (--trust-embedded-keys), nothing revoked", "pack", json!({"trust_embedded_keys": true})),
+        ("keys given (--keys) without the revocation, with the release's pinned revoked ids: they always apply", "pack", json!({"revoked": [sid]})),
+    ] {
+        let pack = if base == "pack" { v["pack"]["pack"].clone() } else { variant(base)["pack"].clone() };
+        let mut t = inputs;
+        t["name"] = json!(name);
+        t["base"] = json!(base);
+        let r = verify::verify_pack(&pack, &Inputs::options(&t, &defaults)).unwrap();
+        assert!(!r.to_text().contains("keys_hash does not match"), "{name}");
+        t["expect"] = expected(&r);
+        // Which items failed, per check: the same in every implementation.
+        t["expect"]["failed_items"] = r
+            .checks
+            .iter()
+            .filter(|c| !c.failures.is_empty())
+            .map(|c| (c.id.to_string(), json!(c.failures.iter().map(|f| f.item.clone()).collect::<Vec<_>>())))
+            .collect::<serde_json::Map<_, _>>()
+            .into();
+        packs.push(t);
+    }
+    // Rule set acceptance (§10.2 step 3 and §7 check 8): the variant 30 rule set version.
+    let item = v30_pack["rule_sets"][0].clone();
+    let rs_hash = crate::hash::hash_json(&item["rules"]).unwrap();
+    let issued = item["rules"]["issued"].as_str().unwrap().to_string();
+    let mut rule_sets = Vec::new();
+    for (name, keys, revoked) in [
+        ("accepted with the key active and not revoked", json!([sk]), json!([])),
+        ("refused: the signing key is revoked", json!([sk]), json!([sid])),
+        (
+            "refused: the signing key was retired before it was issued",
+            retired.clone(),
+            json!([]),
+        ),
+    ] {
+        let ks: Vec<KeyEntry> = serde_json::from_value(keys.clone()).unwrap();
+        let rv: Vec<String> = serde_json::from_value(revoked.clone()).unwrap();
+        let j = crate::keyset::key_problem(
+            &ks,
+            &rv,
+            item["service_key_id"].as_str().unwrap(),
+            &issued,
+            Domain::Rules,
+            &rs_hash,
+            item["sig"].as_str().unwrap(),
+        );
+        rule_sets.push(json!({"name": name, "item": item, "project": v30_pack["project"], "env": v30_pack["env"], "keys": keys, "revoked": revoked,
+                              "expect": j.map(|_| "signature")}));
+    }
+    // A ruling (§3.5) as the tool-call checks runtime takes it from a receipt.
+    let rec = v30_pack["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["receipt"].get("ruling").is_some())
+        .unwrap();
+    let receipt = rec["receipt"].clone();
+    let g_hash = crate::hash::hash_json(&receipt["ruling"]).unwrap();
+    let g_at = receipt["ruling"]["server_time"].as_str().unwrap().to_string();
+    let mut rulings = Vec::new();
+    for (name, keys, revoked) in [
+        ("accepted", json!([sk]), json!([])),
+        ("refused: the signing key is revoked", json!([sk]), json!([sid])),
+        (
+            "refused: the signing key was not active when it ruled",
+            retired.clone(),
+            json!([]),
+        ),
+        ("refused: a key the witness does not have", json!([]), json!([])),
+    ] {
+        let ks: Vec<KeyEntry> = serde_json::from_value(keys.clone()).unwrap();
+        let rv: Vec<String> = serde_json::from_value(revoked.clone()).unwrap();
+        let j = crate::keyset::key_problem(
+            &ks,
+            &rv,
+            receipt["service_key_id"].as_str().unwrap(),
+            &g_at,
+            Domain::Ruling,
+            &g_hash,
+            receipt["ruling_sig"].as_str().unwrap(),
+        );
+        rulings.push(json!({"name": name, "receipt": receipt, "keys": keys, "revoked": revoked, "expect": j}));
+    }
+    // The shared fingerprint list (§11.2): its first update, signed by the service key.
+    let first = v["checks"]["fingerprint_list"]["updates"][0].clone();
+    let mut lists = Vec::new();
+    for (name, keys, revoked) in [
+        ("accepted", json!([sk]), json!([])),
+        ("refused: the signing key is revoked", json!([sk]), json!([sid])),
+        (
+            "refused: the signing key was retired before it was issued",
+            retired.clone(),
+            json!([]),
+        ),
+    ] {
+        let ks: Vec<KeyEntry> = serde_json::from_value(keys.clone()).unwrap();
+        let rv: Vec<String> = serde_json::from_value(revoked.clone()).unwrap();
+        let h = crate::hash::hash_json(&first["list"]).unwrap();
+        let j = crate::keyset::key_problem(
+            &ks,
+            &rv,
+            first["service_key_id"].as_str().unwrap(),
+            first["list"]["issued"].as_str().unwrap(),
+            Domain::Fingerprints,
+            &h,
+            first["sig"].as_str().unwrap(),
+        );
+        let held = checks::fingerprints::accept(&checks::fingerprints::Held::default(), &first, &ks, &rv);
+        assert_eq!(held.is_ok(), j.is_none(), "{name}");
+        lists.push(json!({"name": name, "apply": [first], "keys": keys, "revoked": revoked,
+                          "expect": {"error": j.map(|_| "signature"), "seq": if j.is_none() { 1 } else { 0 }}}));
+    }
+    // The cross-check of a release's pinned keys against the published list (§7).
+    let p = |k: Value| json!({"keys": [k]});
+    let mut pk = serde_json::to_value(&sk).unwrap();
+    pk["valid_to"] = json!("2026-12-01T00:00:00.000Z");
+    let other = json!({"key_id": "03396219237f75a6", "public_key": "JUO5L_EJVRFHatyDadtt3JM2ZaEZeN2hQE7hBmypVZ0", "valid_from": "2026-12-01T00:00:00.000Z", "valid_to": null});
+    let with_to = |to: Value| {
+        let mut k = serde_json::to_value(&sk).unwrap();
+        k["valid_to"] = to;
+        k
+    };
+    let pinned_plain = p(serde_json::to_value(&sk).unwrap()).to_string();
+    let mut pinned_revoking = p(serde_json::to_value(&sk).unwrap());
+    pinned_revoking["revoked"] = json!([{"key_id": "1111111111111111"}]);
+    let pinned_revoking = pinned_revoking.to_string();
+    let cases: Vec<(&str, String, Value)> = vec![
+        (
+            "the same keys",
+            pinned_plain.clone(),
+            p(serde_json::to_value(&sk).unwrap()),
+        ),
+        ("a newer key there", pinned_plain.clone(), json!({"keys": [sk, other]})),
+        (
+            "retired there: the valid_to applies",
+            pinned_plain.clone(),
+            p(with_to(json!("2026-12-01T00:00:00.000Z"))),
+        ),
+        (
+            "a valid_to there later than the pinned one: the pinned (earlier) one stays",
+            p(pk.clone()).to_string(),
+            p(with_to(json!("2027-01-01T00:00:00.000Z"))),
+        ),
+        (
+            "a valid_to there earlier than the pinned one: it applies",
+            p(pk.clone()).to_string(),
+            p(with_to(json!("2026-11-20T00:00:00.000Z"))),
+        ),
+        (
+            "revoked there: applied and named",
+            pinned_plain.clone(),
+            json!({"keys": [sk], "revoked": [{"key_id": sid, "revoked_at": null, "reason": null, "later": 1}]}),
+        ),
+        (
+            "revoked in the pinned file: always applied, the published ones added",
+            pinned_revoking.clone(),
+            json!({"keys": [sk], "revoked": [{"key_id": sid}]}),
+        ),
+        (
+            "a pinned key missing there",
+            pinned_plain.clone(),
+            json!({"keys": [other]}),
+        ),
+        (
+            "a pinned key with other bytes there",
+            pinned_plain.clone(),
+            p(json!({"key_id": sid, "public_key": other["public_key"], "valid_from": sk.valid_from, "valid_to": null})),
+        ),
+        (
+            "a valid_to there that is a number",
+            pinned_plain.clone(),
+            p(with_to(json!(5))),
+        ),
+        (
+            "a valid_to there that is not a time",
+            pinned_plain.clone(),
+            p(with_to(json!("tomorrow"))),
+        ),
+        (
+            "a revoked that is not a list",
+            pinned_plain.clone(),
+            json!({"keys": [sk], "revoked": {"key_id": sid}}),
+        ),
+        (
+            "a revoked entry with a number for revoked_at",
+            pinned_plain.clone(),
+            json!({"keys": [sk], "revoked": [{"key_id": sid, "revoked_at": 5}]}),
+        ),
+        ("not a keys document", pinned_plain.clone(), json!({"key": []})),
+    ];
+    let cross: Vec<Value> = cases
+        .into_iter()
+        .map(|(name, pinned, published)| {
+            let expect = crate::keyset::cross_check_json(&pinned, &published.to_string());
+            json!({"name": name, "pinned": serde_json::from_str::<Value>(&pinned).unwrap(), "published": published, "expect": expect})
+        })
+        .collect();
+    json!({
+        "about": "Spec 5 and 7: service key revocation and rotation, the same in every implementation. packs: base is \"pack\" or a variant's name; keys and trust_embedded_keys as for variants; revoked: the release's pinned revoked ids, which every verifier applies whatever the keys' source (the keys document's ids are applied too); expect as for variants, plus failed_items: the items that failed, per check. rule_sets, rulings, fingerprint_lists: keys and revoked are the service keys and revoked ids the client holds; expect is null when accepted, else the refusal (rule sets and lists: signature; rulings: unknown_key, revoked, not_active or signature, judged in that order); a list's expect also holds the seq held after. cross_check: a release's pinned keys document against the published one; expect is {unreadable: true}, {differ: [problems]}, or the newer key ids, the retirements applied, the revoked ids named, and the keys and revoked ids verified with. stale_transitions (spec 8): a held rule set's or list's stale state {since, refused, retry, confirmed when true}, an event (signer_bad, refused, verified, pull_done, merge, unsigned, network, keys_changed, resaved), whether an object is held, and now; expect is the state after.",
+        "packs": packs,
+        "rule_sets": rule_sets,
+        "rulings": rulings,
+        "fingerprint_lists": lists,
+        "cross_check": cross,
+        "stale_transitions": stale_transitions(),
+    })
+}
+
+/// `key_lifecycle.stale_transitions` (spec §8): the one transition of a held rule set's or list's
+/// stale state, as both SDKs implement it (`staleTransition`, `stale_transition`).
+fn stale_transitions() -> Value {
+    serde_json::from_str(r#"[{"name": "the held object's signer revoked or no longer held: the clock starts", "state": {"since": null, "refused": null, "retry": null}, "event": {"type": "signer_bad"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-21T12:00:00.000Z", "refused": null, "retry": null}}, {"name": "the signer still bad: an earlier since stays", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": null, "retry": null}, "event": {"type": "signer_bad"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": null, "retry": null}}, {"name": "a refused signed item: the clock starts, the refusal kept for the words, a wait of 60 s", "state": {"since": null, "refused": null, "retry": null}, "event": {"type": "refused", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-21T12:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:01:00.000Z"}}}, {"name": "refused again: since stays, the refusal overwritten, the wait doubles", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 3, "until": "2026-11-21T11:59:00.000Z"}}, "event": {"type": "refused", "refused": {"cause": "unknown_key", "step": "signature", "key_id": "0f1e2d3c4b5a6978", "offered": 4}}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "unknown_key", "step": "signature", "key_id": "0f1e2d3c4b5a6978", "offered": 4}, "retry": {"failures": 4, "until": "2026-11-21T12:08:00.000Z"}}}, {"name": "the wait never passes an hour", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 10, "until": "2026-11-21T11:59:00.000Z"}}, "event": {"type": "refused", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 11, "until": "2026-11-21T13:00:00.000Z"}}}, {"name": "a wait ending more than an hour from now ends an hour from now", "state": {"since": null, "refused": null, "retry": {"failures": 2, "until": "2027-01-01T00:00:00.000Z"}}, "event": {"type": "network"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": null, "refused": null, "retry": {"failures": 2, "until": "2026-11-21T13:00:00.000Z"}}}, {"name": "an unsigned answer (304, null, empty) neither starts nor clears", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:05:00.000Z"}}, "event": {"type": "unsigned"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:05:00.000Z"}}}, {"name": "a network error neither starts nor clears", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:05:00.000Z"}}, "event": {"type": "network"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:05:00.000Z"}}}, {"name": "a key list change neither starts nor clears", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:05:00.000Z"}}, "event": {"type": "keys_changed"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:05:00.000Z"}}}, {"name": "a re-save neither starts nor clears", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:05:00.000Z"}}, "event": {"type": "resaved"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:05:00.000Z"}}}, {"name": "only a verified object written clears, the wait too", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:05:00.000Z"}, "confirmed": true}, "event": {"type": "verified"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": null, "refused": null, "retry": null}}, {"name": "a since in the future counts as now", "state": {"since": "2999-01-01T00:00:00.000Z", "refused": null, "retry": null}, "event": {"type": "unsigned"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-21T12:00:00.000Z", "refused": null, "retry": null}}, {"name": "nothing held: a refusal waits but starts no clock", "state": {"since": null, "refused": null, "retry": null}, "event": {"type": "refused", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}}, "held": false, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": null, "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:01:00.000Z"}}}, {"name": "nothing held: a second refusal doubles the wait, still no clock", "state": {"since": null, "refused": {"cause": "step", "step": "reset", "key_id": null, "offered": null}, "retry": {"failures": 1, "until": "2026-11-21T11:59:30.000Z"}}, "event": {"type": "refused", "refused": {"cause": "step", "step": "reset", "key_id": null, "offered": null}}, "held": false, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": null, "refused": {"cause": "step", "step": "reset", "key_id": null, "offered": null}, "retry": {"failures": 2, "until": "2026-11-21T12:02:00.000Z"}}}, {"name": "nothing held: no signer, no clock", "state": {"since": null, "refused": null, "retry": null}, "event": {"type": "signer_bad"}, "held": false, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": null, "refused": null, "retry": null}}, {"name": "two processes: the earlier since stays", "state": {"since": "2026-11-21T12:00:00.000Z", "refused": null, "retry": null}, "event": {"type": "merge", "since": "2026-11-20T00:00:00.000Z"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": null, "retry": null}}, {"name": "two processes: a since in the future from the other counts as now", "state": {"since": null, "refused": null, "retry": null}, "event": {"type": "merge", "since": "2999-01-01T00:00:00.000Z"}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-21T12:00:00.000Z", "refused": null, "retry": null}}, {"name": "a pull that began stale and did not clear: the mark is confirmed (noted from now on)", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": null, "retry": null}, "event": {"type": "pull_done", "stale_before": true}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": null, "retry": null, "confirmed": true}}, {"name": "a pull that began fresh: not confirmed (a one-off glitch is never noted)", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": null, "retry": null}, "event": {"type": "pull_done", "stale_before": false}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": null, "retry": null}}, {"name": "a refusal keeps the confirmation", "state": {"since": "2026-11-20T00:00:00.000Z", "refused": null, "retry": null, "confirmed": true}, "event": {"type": "refused", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}}, "held": true, "now": "2026-11-21T12:00:00.000Z", "expect": {"since": "2026-11-20T00:00:00.000Z", "refused": {"cause": "step", "step": "prev", "key_id": "a1b2c3d4e5f60718", "offered": 3}, "retry": {"failures": 1, "until": "2026-11-21T12:01:00.000Z"}, "confirmed": true}}]"#).unwrap()
 }

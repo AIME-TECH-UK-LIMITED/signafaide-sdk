@@ -37,6 +37,10 @@ export class FakeService {
   };
   /** More keys served after `keyDoc` (a rotation in progress). */
   extraKeys: { key_id: string; public_key: string; valid_from: string; valid_to: string | null }[] = [];
+  /** The served `revoked` list (§5), when set. */
+  revoked: unknown = undefined;
+  /** A client behind this seq gets the snapshot with `reset` (§11.2: a key switch or revocation). */
+  listResetSeq = 0;
   projects = new Map<string, any>();
   calls: string[] = [];
   registrations: any[] = [];
@@ -61,6 +65,9 @@ export class FakeService {
   listEntries: any[] = [];
   /** (version query, If-None-Match) of every GET /v1/rules. */
   rulesFetches: [string | undefined, string | undefined][] = [];
+  /** GET /v1/rules answers this version, when set (a witness that keeps answering an older one;
+   * rulings still name the newest). */
+  servedVersion: number | null = null;
   /** A witness that does not rule: receipts without a ruling. */
   noRuling = false;
   /** e.g. "rules_unavailable": the receipt says why there is no ruling. */
@@ -154,7 +161,10 @@ export class FakeService {
   private route(method: string, path: string, q: Record<string, string>, body: any, auth?: string): Reply {
     this.calls.push(`${method} ${path}`);
     if (method === "GET" && path === "/.well-known/signafaide-keys.json")
-      return [200, { keys: [this.keyDoc, ...this.extraKeys] }];
+      return [
+        200,
+        { keys: [this.keyDoc, ...this.extraKeys], ...(this.revoked === undefined ? {} : { revoked: this.revoked }) },
+      ];
     if (method === "POST" && path === "/v1/sandbox") {
       const key = "sfa_test_" + String(++this.n).padStart(32, "0");
       const prj = this.addProject(key, "test");
@@ -402,13 +412,16 @@ export class FakeService {
       const items = this.ruleItems.get(prj.project) ?? [];
       this.rulesFetches.push([q.version, this.ifNoneMatch]);
       if (!items.length) return [200, { rules: null }];
-      const item = q.version === undefined ? items.at(-1) : items.find((i) => String(i.rules.version) === q.version);
+      const wanted = q.version ?? (this.servedVersion !== null ? String(this.servedVersion) : undefined);
+      const item = wanted === undefined ? items.at(-1) : items.find((i) => String(i.rules.version) === wanted);
       if (!item) return err(404, "not_found", "No such version.");
       if (this.ifNoneMatch === `"${hashJson(item.rules)}"`) return [304, ""];
       return [200, item];
     }
     if (method === "GET" && path === "/v1/fingerprints") {
       if (q.since === undefined) return [200, { snapshot: this.listSnapshot(), updates: [] }];
+      if (Number(q.since) < this.listResetSeq)
+        return [200, { reset: true, snapshot: this.listSnapshot(), updates: [] }];
       return [
         200,
         { snapshot: null, updates: this.listUpdates.filter((u) => u.list.seq > Number(q.since)).slice(0, 1000) },

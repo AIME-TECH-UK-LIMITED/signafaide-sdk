@@ -30,6 +30,37 @@ def project(tmp_path, monkeypatch):
     return root
 
 
+@pytest.fixture(autouse=True)
+def _no_thread_outlives_its_test():
+    """Every background thread a test starts (shipper, checks fetcher, tool refresher) has ended
+    when the test ends: a thread left running would send to the next test's fake service once the
+    port is reused, a failure that shows only now and then. Joined, never slept on."""
+    import threading
+
+    before = set(threading.enumerate())
+    # Every recorder the test makes (fixtures, configure, init, a command it runs, or directly) is
+    # stopped at its end like the fixtures' recorders.
+    made = []
+    real_init = runtime.Recorder.__init__
+
+    def init(self, *a, **k):
+        real_init(self, *a, **k)
+        made.append(self)
+
+    runtime.Recorder.__init__ = init
+    try:
+        yield
+    finally:
+        runtime.Recorder.__init__ = real_init
+    for r in made:
+        _stop(r)
+    left = [t for t in threading.enumerate() if t not in before and t.name.startswith("signafaide-")]
+    for t in left:
+        t.join(15)
+    alive = [t.name for t in left if t.is_alive()]
+    assert not alive, f"background threads outlived the test: {alive}"
+
+
 @pytest.fixture
 def service():
     s = FakeService()
@@ -57,6 +88,7 @@ def _stop(r):
     r._stopped = True
     r._wake.set()
     r._tool_stop.set()
+    r.checks.stop()
     atexit.unregister(r.close)
     runtime._default = None
 

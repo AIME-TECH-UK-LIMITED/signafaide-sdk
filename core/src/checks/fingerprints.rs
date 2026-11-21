@@ -171,27 +171,29 @@ pub fn apply(held: &Held, doc: &Value) -> Result<Held, &'static str> {
 
 /// A client's acceptance of one item as `GET /v1/fingerprints` serves it (§11.2),
 /// `{list, sig, service_key_id}`: first the signature, by a service key active at the item's
-/// `issued` (`signature`), then [`apply`].
-pub fn accept(held: &Held, item: &Value, service_keys: &[crate::KeyEntry]) -> Result<Held, &'static str> {
+/// `issued` and not revoked (`signature`), then [`apply`].
+pub fn accept(
+    held: &Held,
+    item: &Value,
+    service_keys: &[crate::KeyEntry],
+    revoked: &[String],
+) -> Result<Held, &'static str> {
     let doc = &item["list"];
-    let issued = doc["issued"].as_str().and_then(|t| crate::time::parse(t).ok());
-    let key = service_keys
-        .iter()
-        .find(|k| Some(k.key_id.as_str()) == item["service_key_id"].as_str());
-    let signed = match (key, issued) {
-        (Some(k), Some(at)) => {
-            crate::key_active(&k.valid_from, k.valid_to.as_deref(), at)
-                && crate::hash::hash_json(doc).is_ok_and(|h| {
-                    crate::sign::verify(
-                        &k.public_key,
-                        crate::sign::Domain::Fingerprints,
-                        &h,
-                        item["sig"].as_str().unwrap_or(""),
-                    )
-                    .is_ok()
-                })
-        }
-        _ => false,
+    // The one key judgement (§5): unknown key, revoked, not active at issued, signature.
+    let signed = match doc["issued"].as_str() {
+        Some(at) => crate::hash::hash_json(doc).is_ok_and(|h| {
+            crate::keyset::key_problem(
+                service_keys,
+                revoked,
+                item["service_key_id"].as_str().unwrap_or(""),
+                at,
+                crate::sign::Domain::Fingerprints,
+                &h,
+                item["sig"].as_str().unwrap_or(""),
+            )
+            .is_none()
+        }),
+        None => false,
     };
     if !signed {
         return Err("signature");

@@ -5,7 +5,9 @@
  * The file is read with the SDK's literal-aware `parseJson`, so number literals are judged
  * as written, exactly as in Rust and Python.
  */
+import { staleTransition } from "../src/checks-runtime.js";
 import * as fs from "node:fs";
+import * as C from "../src/checks.js";
 import * as path from "node:path";
 import { sha256 } from "@noble/hashes/sha2";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils";
@@ -39,6 +41,8 @@ import {
   parseAgentKeys,
   parseHeadFile,
   parseServiceKeys,
+  serviceKeySet,
+  crossCheckKeys,
   serviceKeysHash,
   verifyPack,
   type DrandVerifier,
@@ -47,6 +51,15 @@ import {
 
 const file = path.resolve(__dirname, "../../spec/vectors.json");
 const v = fs.existsSync(file) ? parseJson(fs.readFileSync(file, "utf8")) : null;
+
+/** A cross-check's outcome as the vectors hold it (the Rust core's `keyset::cross_check_json`). */
+function crossCheckJson(pinned: unknown, published: string): unknown {
+  const r = crossCheckKeys(pinned, published);
+  if ("unreadable" in r) return { unreadable: true };
+  if ("differ" in r) return { differ: r.differ };
+  const set = serviceKeySet(r.document);
+  return { newer: r.newer, retired: r.retired, revoked: r.revoked, keys: set.keys, applied_revoked: set.revoked };
+}
 
 /** verifyPack inputs for a vector entry (keys, agent_keys, trust_embedded_agent_keys, head, bitcoin). */
 function inputs(c: any, extra: PackOptions = {}): [any[], PackOptions] {
@@ -229,6 +242,68 @@ describe.skipIf(!v)("spec/vectors.json", () => {
     expect(without.check("drand").status).toBe("not_checked");
   });
 
+  it("revoked service keys: one loader, key_id only, kept in keys_hash (§5)", () => {
+    const kid = v.keys_document.keys[0].key_id;
+    const set = serviceKeySet({ ...v.keys_document, revoked: [{ key_id: kid, scope: "later field" }] });
+    expect(set.keys.map((k) => k.key_id)).toEqual(v.keys_document.keys.map((k: any) => k.key_id));
+    expect(set.revoked).toEqual([kid]);
+    const [, o] = inputs({});
+    const r = verifyPack(v.pack.pack, set.keys, { ...o, revokedServiceKeys: set.revoked });
+    expect(r.check("batch_sig").status).toBe("fail");
+    expect(JSON.stringify(r.toJSON())).not.toContain("keys_hash does not match");
+    expect(serviceKeySet(v.keys_document).revoked).toEqual([]);
+    const nulls = { ...v.keys_document, revoked: [{ key_id: kid, revoked_at: null, reason: null }] };
+    expect(serviceKeySet(nulls).revoked).toEqual([kid]);
+    for (const bad of [{ key_id: kid }, null, [{ reason: "x" }], [{ key_id: kid, reason: 1 }]])
+      expect(() => serviceKeySet({ ...v.keys_document, revoked: bad })).toThrow(/revoked must be a list/);
+  });
+
+  // Spec §5, §7: key revocation and rotation, with the same answers as every other implementation.
+  describe("key_lifecycle", () => {
+    const kl = () => v.key_lifecycle;
+    it("stale_transitions: the one transition of a held rule set's or list's stale state (§8)", () => {
+      expect(kl().stale_transitions.length).toBeGreaterThan(10);
+      for (const c of kl().stale_transitions)
+        expect(staleTransition(c.state, c.event, c.now, c.held), c.name).toEqual(c.expect);
+    });
+    it("packs: the SDK verify path (serviceKeySet, revoked ids, keys from the pack)", () => {
+      for (const c of kl().packs) {
+        const pack = c.base === "pack" ? v.pack.pack : v.variants.find((x: any) => x.name === c.base).pack;
+        const set = serviceKeySet(c.keys ?? v.keys_document);
+        const [, o] = inputs(c, { drand });
+        const r = verifyPack(pack, c.trust_embedded_keys ? null : set.keys, {
+          ...o,
+          trustEmbeddedKeys: !!c.trust_embedded_keys,
+          revokedServiceKeys: [...new Set([...set.revoked, ...(c.revoked ?? [])])],
+        });
+        expect(r.resultLine, c.name).toBe(c.expect.result_line);
+        expect(Object.fromEntries(r.checks.map((x) => [x.id, x.value ?? x.status])), c.name).toEqual(c.expect.checks);
+        const failed = Object.fromEntries(
+          r.checks.filter((x) => x.failures.length).map((x) => [x.id, x.failures.map((f) => f.item)]),
+        );
+        expect(failed, c.name).toEqual(c.expect.failed_items);
+      }
+    });
+    it("rule sets, rulings and the fingerprint list: the tool-call checks' acceptance", () => {
+      for (const c of kl().rule_sets)
+        expect(C.acceptRules(null, c.item, c.keys, c.project, c.env, c.revoked), c.name).toBe(c.expect);
+      for (const c of kl().rulings) expect(C.rulingKeyProblem(c.receipt, c.keys, c.revoked), c.name).toBe(c.expect);
+      for (const c of kl().fingerprint_lists) {
+        let held = C.emptyList();
+        let err: string | null = null;
+        for (const it of c.apply) {
+          [held, err] = C.applyList(held, it, c.keys, c.revoked);
+          if (err) break;
+        }
+        expect({ error: err, seq: held.seq }, c.name).toEqual(c.expect);
+      }
+    });
+    it("the cross-check of pinned keys against the published list (npm verifier, browser)", () => {
+      for (const c of kl().cross_check)
+        expect(crossCheckJson(c.pinned, JSON.stringify(c.published)), c.name).toEqual(c.expect);
+    });
+  });
+
   it("variants pass with their values", () => {
     for (const c of v.variants) {
       const r = verifyPack(c.pack, ...inputs(c, { drand }));
@@ -324,5 +399,7 @@ describe("the published service keys (SPEC §5, spec 1.1)", () => {
     expect(pkg.exports["./service-keys.json"]).toBe("./service-keys.json");
     const { DEFAULT_SERVICE_KEYS } = await import("../src/checks-runtime.js");
     expect(JSON.parse(spec).keys).toEqual(DEFAULT_SERVICE_KEYS);
+    const { DEFAULT_REVOKED } = await import("../src/checks-runtime.js");
+    expect((JSON.parse(spec).revoked ?? []).map((r: { key_id: string }) => r.key_id)).toEqual(DEFAULT_REVOKED);
   });
 });

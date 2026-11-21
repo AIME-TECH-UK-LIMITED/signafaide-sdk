@@ -427,3 +427,31 @@ describe("key rotation", () => {
     expect(r.ok, String(r)).toBe(true);
   });
 });
+
+// Spec §5, §7: the vectors' key_lifecycle packs through the SDK's own `signafaide verify` entry
+// point (keys documents, --trust-embedded-keys, the release's pinned revoked ids), with the same
+// result line and checks as every other implementation.
+describe("key_lifecycle through signafaide verify", () => {
+  it("every pack case gives the vectors' result", async () => {
+    const { pinned } = await import("../src/pinned.js");
+    const v = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../spec/vectors.json"), "utf8"));
+    const saved = pinned.doc;
+    try {
+      for (const c of v.key_lifecycle.packs) {
+        const pack = c.base === "pack" ? v.pack.pack : v.variants.find((x: any) => x.name === c.base).pack;
+        // The case's pinned revoked ids stand in for the release's own.
+        pinned.doc = { keys: [], revoked: (c.revoked ?? []).map((key_id: string) => ({ key_id })) };
+        const r = await verify(pack, {
+          ...(c.trust_embedded_keys ? { trustEmbeddedKeys: true } : { keys: c.keys ?? v.keys_document }),
+          agentKeys: v.agent_keys_document,
+          head: c.head,
+          offline: true,
+        });
+        expect(r.resultLine, c.name).toBe(c.expect.result_line);
+        expect(Object.fromEntries(r.checks.map((x) => [x.id, x.value ?? x.status])), c.name).toEqual(c.expect.checks);
+      }
+    } finally {
+      pinned.doc = saved;
+    }
+  });
+});

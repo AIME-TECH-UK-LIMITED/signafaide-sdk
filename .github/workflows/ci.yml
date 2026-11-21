@@ -13,16 +13,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pinned-keys:
+    name: Pinned service keys only ever gain keys
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the release tags: the check compares with the last release's file
+      - name: Compare spec/service-keys.json with the last release tag (spec §5)
+        run: node scripts/pinned-keys-append-only.mjs
+
   rust:
     name: Rust core and verifier
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: "1.94.1"
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             core
@@ -48,8 +59,8 @@ jobs:
       matrix:
         python: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - name: Lint and format
         run: |
           uvx ruff@0.15.7 check python python-langchain
@@ -69,19 +80,19 @@ jobs:
     name: TypeScript SDK and cross-checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: js/package-lock.json
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: "1.94.1"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: verifier
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - name: Build the Rust verifier and the Python SDK for the cross-checks
         run: |
           cargo build --manifest-path verifier/Cargo.toml --locked
@@ -97,7 +108,17 @@ jobs:
       - name: Test
         working-directory: js
         run: npm test
-      # Versions agree, default witness URL, verifier build. The shallow checkout has no tags, so
-      # the version-bump check is left to the release itself.
+      # The PyPI package signafaide-verify, made from the release binary as the release workflow
+      # makes it, and installed, for the release checks below.
+      - name: Build and install the signafaide-verify wheel
+        run: |
+          cargo build --release --locked --manifest-path verifier/Cargo.toml
+          python3 scripts/binary-wheel.py verifier/target/release/signafaide-verify linux_x86_64 /tmp/wheels
+          python3 -m venv /tmp/verify-venv && /tmp/verify-venv/bin/pip install --no-index /tmp/wheels/*.whl
+      # Versions agree, default witness URL, verifier build, and the standalone verifiers (Rust
+      # binary, PyPI wheel, npm package) give the vectors' results and the same output. The shallow
+      # checkout has no tags, so the version-bump check is left to the release itself.
       - name: Release checks (offline)
+        env:
+          VERIFY_COMMANDS: /tmp/verify-venv/bin/signafaide-verify
         run: node scripts/release-check.mjs --offline
