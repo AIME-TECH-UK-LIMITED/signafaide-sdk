@@ -66,6 +66,7 @@ class FakeService:
         self.rule_items = {}  # project -> [{rules, sig, service_key_id}], oldest first
         self.list_updates = []  # [{list, sig, service_key_id}]
         self.list_entries = []
+        self.served_version = None  # GET /v1/rules answers this version, when set (rulings use the newest)
         self.rules_fetches = []  # (version query, If-None-Match) of every GET /v1/rules
         self.no_ruling = False  # a witness that does not rule: receipts without a ruling
         self.ruling_error = None  # e.g. "rules_unavailable": the receipt says why there is no ruling
@@ -370,10 +371,11 @@ class FakeService:
             self.rules_fetches.append((query.get("version"), self.req_headers.get("If-None-Match")))
             if not items:
                 return 200, {"rules": None}
+            wanted = query.get("version")
+            if wanted is None and self.served_version is not None:
+                wanted = str(self.served_version)  # a witness that keeps answering an older version
             item = (
-                items[-1]
-                if query.get("version") is None
-                else next((i for i in items if str(i["rules"]["version"]) == query["version"]), None)
+                items[-1] if wanted is None else next((i for i in items if str(i["rules"]["version"]) == wanted), None)
             )
             if item is None:
                 return err(404, "not_found", "No such version.")

@@ -815,6 +815,9 @@ class Recorder:
         ``errors`` maps chain id (or the API key, for errors about the key) to the one-sentence
         fix. Records of other projects (an earlier key) wait until that key is used again. An
         explicit flush always tries, even after a refusal."""
+        import time
+
+        started = time.monotonic()
         if not background:
             self._blocked.clear()
         shipped, errors = 0, {}
@@ -855,7 +858,11 @@ class Recorder:
             # Nothing to ship (another process drained the outbox): one cheap authenticated
             # request tells whether the witness accepts this configuration now.
             try:
-                self.client(api_key=api_key).project()
+                # Within the caller's timeout: what is left of it, at most 10 s.
+                left = min(10.0, timeout - (time.monotonic() - started))
+                if left <= 0:
+                    raise SignafaideError("the flush's time is up", code="network")
+                self.client(timeout=left, api_key=api_key).project()
                 self._halted = None
             except SignafaideError:
                 pass  # still refused, or unreachable: the halt stays

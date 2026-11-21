@@ -469,6 +469,8 @@ def test_a_revoked_rule_set_is_kept_noted_after_a_pull_refused_after_the_grace_a
     with pytest.raises(CheckError) as e:
         pay(5)
     assert e.value.code == "rules_unavailable" and "no verified replacement arrived within 7 days" in str(e.value)
+    lines, _ = online.checks.dry_run("pay", {"amount": 5}, "support-bot")
+    assert f"would refuse {e.value} (rules_unavailable)" in lines  # exactly the call's reason
     assert ran == []
     mine = [r for r in records(online) if r["envelope"]["name"] == "pay"]
     assert [r["envelope"]["kind"] for r in mine] == ["decision", "outcome"]
@@ -934,27 +936,64 @@ def test_protect_record_a_crash_between_the_copy_and_its_record(online, service,
     assert _refused("refund").code == "rules_unavailable"
 
 
-def test_a_ruling_naming_another_version_forces_a_fetch_at_most_once_per_retry_interval(online, service, project):
-    write_checks(online, project, mode="enforce", tools={"pay": {"strict": True}})
-    service.publish_rules(online.api_key, [], mode="enforce")
-    online.checks.pull_rules()
-    _publish_by_stranger(online, service)  # version 2, refused
-    online.checks.pull_rules()
-    _publish_by_stranger(online, service)  # version 3: the witness rules with it
-    online.checks.start = lambda: None
+def _refused_v2(rec, service, project, monkeypatch):
+    """The witness keeps answering the refused version 2 while its rulings name newer ones."""
+    write_checks(rec, project, mode="enforce", tools={"pay": {"strict": True}})
+    service.publish_rules(rec.api_key, [], mode="enforce")
+    rec.checks.pull_rules()
+    _publish_by_stranger(rec, service)  # version 2, refused
+    rec.checks.pull_rules()
+    service.served_version = 2
+    rec.checks.start()  # the background fetcher's own first round, before counting
+    assert _until(lambda: rec.checks._rounds >= 1)
     woke = []
-    online.checks.wake = lambda: woke.append(1)  # the forced fetch changes nothing here
+    real = rec.checks.wake
+    monkeypatch.setattr(rec.checks, "wake", lambda: woke.append(1) or real())  # counted; the fetch is real
 
     @signafaide.record(name="pay", strict=True)
     def pay(amount):
         return amount
 
-    for _ in range(3):
-        try:
-            pay(1)
-        except CheckError:
-            pass
+    return woke, pay, len(service.rules_fetches)
+
+
+def _call(fn):
+    try:
+        fn(1)
+    except CheckError:
+        pass
+
+
+def test_rulings_naming_v3_while_the_witness_answers_refused_v2_force_one_fetch(online, service, project, monkeypatch):
+    woke, pay, fetches = _refused_v2(online, service, project, monkeypatch)
+    _publish_by_stranger(online, service)  # version 3: the rulings name it
+    for _ in range(5):
+        _call(pay)
     assert woke == [1]
+    assert _until(lambda: len(service.rules_fetches) - fetches == 1)  # the one forced fetch, done
+    service.served_version = None
+
+
+def test_rulings_naming_a_different_version_each_call_stay_bounded(online, service, project, monkeypatch):
+    woke, pay, fetches = _refused_v2(online, service, project, monkeypatch)
+    for _ in range(8):
+        _publish_by_stranger(online, service)  # versions 3, 4, ...: each ruling names a new one
+        _call(pay)
+    assert len(woke) <= 3
+    assert _until(lambda: len(service.rules_fetches) - fetches == len(woke))
+    assert len(_state(online, "rules")["forced"]) <= 8
+    service.served_version = None
+
+
+def test_a_protect_record_without_a_version_never_counts(online, service, project):
+    _no_file_protecting(online, service, project, {"pay": {"fail": "closed"}})
+    _, record, _ = _rules_files(online, service)
+    record.write_text(json.dumps({"witness": online.url, "protect": {"pay": {"fail": "closed"}}}))
+    _break_held_copy(online)
+    e = _refused("lookup")
+    assert e.code == "rules_unavailable" and "protection list unknown" in str(e)
+    lines, _ = online.checks.dry_run("lookup", {"amount": 5}, "support-bot")
+    assert f"would refuse {e} (rules_unavailable)" in lines
 
 
 def test_a_copy_from_before_0_5_4_read_while_valid_gets_its_protect_record(online, service):

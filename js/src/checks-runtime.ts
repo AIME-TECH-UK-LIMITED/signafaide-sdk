@@ -68,6 +68,11 @@ export const KEYS_REFRESH_MS = 10 * 60_000;
  * first learned it. After that every protected call is refused until a verified copy arrives. */
 export const REVOKED_GRACE_MS = 7 * 86_400_000;
 
+/** Forced fetches of the rule set a ruling may cause (§8): per `RULES_REFRESH_MS` in all, and how
+ * many versions' last forced fetch the state file keeps. */
+const MAX_FORCED_PER_INTERVAL = 3;
+const MAX_FORCED_KEPT = 8;
+
 /** What a broken held rule set with no protect record means (§8): never fail open. */
 export const PROTECTION_UNKNOWN =
   "protection list unknown: every checked call is refused until the rule set verifies; run `signafaide pull`";
@@ -1182,13 +1187,32 @@ export class ChecksState {
     return f;
   }
 
-  private readonly forcedWakes = new Set<string>();
-
-  /** When the rule set's retry wait ends (its state file), if one runs. */
-  private retryUntil(): string | null {
-    const p = this.statePath("rules");
-    const d = p ? readJson(p) : null;
-    return isObj(d) && isObj(d.retry) && typeof d.retry.until === "string" ? d.retry.until : null;
+  /** Whether a ruling naming `version` may force a fetch now (§8): at most one per version per
+   * `RULES_REFRESH_MS`, and at most `MAX_FORCED_PER_INTERVAL` in all in that time, counted in the
+   * rule set's state file (`forced`: the last forced fetch per version, the latest few kept). */
+  private mayForce(version: unknown): boolean {
+    let ok = false;
+    this.editState("rules", { type: "resaved" }, this.projectEnv(), (d) => {
+      const now = Date.now();
+      const f: Record<string, string> = {};
+      if (isObj(d.forced))
+        for (const [k, v] of Object.entries(d.forced)) {
+          const t = typeof v === "string" ? Date.parse(v) : NaN;
+          if (Number.isFinite(t)) f[k] = isoAt(Math.min(t, now)); // a time in the future counts as now
+        }
+      const within = (t: string) => now - Date.parse(t) < C.RULES_REFRESH_MS;
+      const key = String(version);
+      if (!(f[key] && within(f[key])) && Object.values(f).filter(within).length < MAX_FORCED_PER_INTERVAL) {
+        f[key] = isoAt(now);
+        ok = true;
+      }
+      d.forced = Object.fromEntries(
+        Object.entries(f)
+          .sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]))
+          .slice(0, MAX_FORCED_KEPT),
+      );
+    });
+    return ok;
   }
 
   /** The version the last refused rule set offered (kept in its state file), if any. */
@@ -1536,7 +1560,7 @@ export class ChecksState {
     // process (an older release) wrote over it, or one that no longer parses, may protect others.
     const v = isObj(raw) && isObj(raw.rules) ? raw.rules.version : undefined;
     const r = this.protectRecord(pe);
-    const rec = r && r.version === v ? r : null;
+    const rec = r && typeof r.version === "number" && r.version === v ? r : null;
     return { protect: { ...named, ...(r ? r.protect : {}) }, version: rec ? rec.version : null, unknown: !rec };
   }
 
@@ -1699,12 +1723,9 @@ export class ChecksState {
   private staleGate(agent: string, strict: boolean): string | null {
     if (this.rec.test) return null;
     const pe = this.projectEnv();
-    const blocks: string[] = [];
     for (const kind of ["rules", "list"] as const) {
       const i = this.staleInfo(kind, pe);
       if (!i) continue;
-      if (i.expired)
-        blocks.push(i.unknown ? `${i.what}: ${i.words}` : `${i.what}: ${i.words}; protected calls are refused`);
       if (i.broken || !i.confirmed) continue;
       const today = isoAt(Date.now()).slice(0, 10);
       const say = i.said !== today;
@@ -1738,7 +1759,20 @@ export class ChecksState {
         if (noted && !d.stale.noted.includes(agent)) d.stale.noted = [...d.stale.noted, agent];
       });
     }
-    return strict && blocks.length ? `${blocks.join("; ")} (spec §8)` : null;
+    return strict ? this.staleRefusal(pe) : null;
+  }
+
+  /** Why a protected call is refused now (§8), or null: the one reason the call, `check` and
+   * `rules test` all give (the stale grace period over, a broken copy). */
+  staleRefusal(pe: [string, string] | null = this.projectEnv()): string | null {
+    if (this.rec.test) return null;
+    const blocks: string[] = [];
+    for (const kind of ["rules", "list"] as const) {
+      const i = this.staleInfo(kind, pe);
+      if (i?.expired)
+        blocks.push(i.unknown ? `${i.what}: ${i.words}` : `${i.what}: ${i.words}; protected calls are refused`);
+    }
+    return blocks.length ? `${blocks.join("; ")} (spec §8)` : null;
   }
 
   // --- a call (§8) --------------------------------------------------------------------
@@ -2073,15 +2107,11 @@ export class ChecksState {
           if (isObj(g.rules) && (!heldRs || g.rules.version > heldRs.version)) {
             const waiting = this.retrying("rules");
             if (!waiting) this.wake();
-            else if (g.rules.version !== this.refusedOffered()) {
-              // Forced at most once per retry interval per version: a witness naming ever other
-              // versions in its rulings never makes a fetch per call.
-              const key = `${g.rules.version}@${this.retryUntil()}`;
-              if (!this.forcedWakes.has(key)) {
-                this.forcedWakes.add(key);
-                this.forceRules = true;
-                this.wake();
-              }
+            else if (g.rules.version !== this.refusedOffered() && this.mayForce(g.rules.version)) {
+              // Bounded (`mayForce`): a witness naming other versions in its rulings never makes a
+              // fetch per call.
+              this.forceRules = true;
+              this.wake();
             }
           }
           if (g.ruling === "allow") return ["allow", null];
@@ -2540,15 +2570,11 @@ export class ChecksState {
     }
     // The stale gate (§8), as the real call meets it: a protected call is refused, with the same reason.
     const prs = rs ?? this.brokenProtect();
-    if (!this.rec.test && (ts.strict || this.protects(prs, decl))) {
-      const pe = this.projectEnv();
-      const reasons = (["rules", "list"] as const)
-        .map((k) => this.staleInfo(k, pe))
-        .filter((i): i is StaleInfo => !!i && i.expired)
-        .map((i) => `${i.what}: ${i.words}; protected calls are refused`);
-      if (reasons.length) {
+    if (ts.strict || this.protects(prs, decl)) {
+      const why = this.staleRefusal();
+      if (why) {
         blocked = true;
-        out.push(`would refuse ${decl} did not run: ${reasons.join("; ")} (spec §8) (rules_unavailable)`);
+        out.push(`would refuse ${decl} did not run: ${why} (rules_unavailable)`);
       }
     }
     out.push(`             Dry run: nothing recorded, the tool did not run. Exit code ${blocked ? 1 : 0}.`);

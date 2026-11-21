@@ -133,6 +133,24 @@ describe("background sender", () => {
     expect((r as any).halted).toBeUndefined();
   });
 
+  it("the halt probe honours the caller's flush timeout: none left, no request, the halt stays", async () => {
+    ctx.service.quota = 0;
+    const r = rec();
+    for (let i = 0; i < 3; i++) note(`n${i}`, {});
+    await tick(r); // refused: halted
+    ctx.service.quota = null;
+    const cli = new Recorder({ url: ctx.service.url, quiet: true });
+    try {
+      await cli.flush();
+    } finally {
+      cli.close();
+    }
+    const before = ctx.service.calls.length;
+    await r.flush(0); // no time left for the probe
+    expect(ctx.service.calls.slice(before)).toEqual([]);
+    expect((r as any).halted).toBeDefined();
+  });
+
   it("one flush in flight, and forced flushes honour the backoff", async () => {
     ctx.service.failAlways = [503, { error: { code: "unavailable", message: "Down for maintenance.", docs: "d" } }];
     const r = configure({ quiet: true, flushSize: 5, flushIntervalMs: 60_000 });

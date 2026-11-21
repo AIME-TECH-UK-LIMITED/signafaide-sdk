@@ -55,6 +55,11 @@ _PINNED_HASH = hash_json({"keys": list(DEFAULT_SERVICE_KEYS), "revoked": list(DE
 #: How long a fetched key list (its revoked ids) is used before it is fetched again: 10 minutes.
 KEYS_REFRESH_MS = 10 * 60_000
 
+#: Forced fetches of the rule set a ruling may cause (§8): per ``RULES_REFRESH_MS`` in all, and how
+#: many versions' last forced fetch the state file keeps.
+MAX_FORCED_PER_INTERVAL = 3
+MAX_FORCED_KEPT = 8
+
 #: What a broken held rule set with no protect record means (§8): never fail open.
 PROTECTION_UNKNOWN = (
     "protection list unknown: every checked call is refused until the rule set verifies; run `signafaide pull`"
@@ -1298,18 +1303,32 @@ class ChecksState:
 
     _force_rules = False
 
-    @property
-    def _forced_wakes(self) -> set:
-        if "_forced" not in self.__dict__:
-            self.__dict__["_forced"] = set()
-        return self.__dict__["_forced"]
+    def _may_force(self, version: Any) -> bool:
+        """Whether a ruling naming *version* may force a fetch now (§8): at most one per version per
+        ``RULES_REFRESH_MS``, and at most ``MAX_FORCED_PER_INTERVAL`` in all in that time, counted in
+        the rule set's state file (``forced``: the last forced fetch per version, the latest few
+        kept)."""
+        ok = [False]
 
-    def _retry_until(self) -> Optional[str]:
-        """When the rule set's retry wait ends (its state file), if one runs."""
-        p = self._state_path("rules", self.project_env())
-        d = _read(p) if p else None
-        r = d.get("retry") if isinstance(d, dict) else None
-        return r.get("until") if isinstance(r, dict) else None
+        def edit(d: dict) -> None:
+            now_ms = _now_ms()
+            f: Dict[str, str] = {}
+            for k, v in (d.get("forced") or {}).items() if isinstance(d.get("forced"), dict) else ():
+                t = _epoch_ms(v) if isinstance(v, str) else None
+                if t is not None:
+                    f[k] = _iso(min(t, now_ms))  # a time in the future counts as now
+
+            def within(t: str) -> bool:
+                return now_ms - (_epoch_ms(t) or 0) < C.RULES_REFRESH_MS
+
+            key = str(version)
+            if not (key in f and within(f[key])) and sum(1 for t in f.values() if within(t)) < MAX_FORCED_PER_INTERVAL:
+                f[key] = _iso(now_ms)
+                ok[0] = True
+            d["forced"] = dict(sorted(f.items(), key=lambda kv: -(_epoch_ms(kv[1]) or 0))[:MAX_FORCED_KEPT])
+
+        self._edit_state("rules", {"type": "resaved"}, self.project_env(), edit)
+        return ok[0]
 
     def protection_unknown(self, pe: Any = "current") -> bool:
         """Whether the held rule set is broken and nobody knows which tools it protected (§8):
@@ -1421,7 +1440,7 @@ class ChecksState:
         # process (an older release) wrote over it, or one that no longer parses, may protect others.
         v = rules.get("version") if isinstance(rules, dict) else None
         r = self._protect_record(pe)
-        rec = r if r is not None and r.get("version") == v else None
+        rec = r if r is not None and isinstance(r.get("version"), int) and r.get("version") == v else None
         return {
             "protect": {**named, **(r["protect"] if r else {})},
             "version": rec.get("version") if rec else None,
@@ -1568,14 +1587,10 @@ class ChecksState:
         if self.rec.test:
             return None
         pe = self.project_env()
-        blocks = []
         for kind in ("rules", "list"):
             info = self.stale_info(kind, pe)
             if not info:
                 continue
-            if info["expired"]:
-                tail = "" if info.get("unknown") else "; protected calls are refused"
-                blocks.append(f"{info['what']}: {info['words']}{tail}")
             if info["broken"] or not info["confirmed"]:
                 continue
             today = _iso(_now_ms())[:10]
@@ -1620,7 +1635,22 @@ class ChecksState:
                     d["stale"]["noted"] = d["stale"]["noted"] + [agent]
 
             self._edit_state(kind, {"type": "resaved"}, pe, mark)
-        return f"{'; '.join(blocks)} (spec §8)" if strict and blocks else None
+        return self.stale_refusal(pe) if strict else None
+
+    def stale_refusal(self, pe: Any = "current") -> Optional[str]:
+        """Why a protected call is refused now (§8), or None: the one reason the call, ``check`` and
+        ``rules test`` all give (the stale grace period over, a broken copy)."""
+        if self.rec.test:
+            return None
+        if pe == "current":
+            pe = self.project_env()
+        blocks = []
+        for kind in ("rules", "list"):
+            info = self.stale_info(kind, pe)
+            if info and info["expired"]:
+                tail = "" if info.get("unknown") else "; protected calls are refused"
+                blocks.append(f"{info['what']}: {info['words']}{tail}")
+        return f"{'; '.join(blocks)} (spec §8)" if blocks else None
 
     def witness_host(self) -> Optional[str]:
         return C.url_host(self.rec.url)
@@ -1937,14 +1967,13 @@ class ChecksState:
                         waiting = self._retrying("rules")
                         if not waiting:
                             self.wake()
-                        elif g["rules"]["version"] != self._refused_offered():
-                            # Forced at most once per retry interval per version: a witness naming
-                            # ever other versions in its rulings never makes a fetch per call.
-                            key = (g["rules"]["version"], self._retry_until())
-                            if key not in self._forced_wakes:
-                                self._forced_wakes.add(key)
-                                self._force_rules = True
-                                self.wake()
+                        elif g["rules"]["version"] != self._refused_offered() and self._may_force(
+                            g["rules"]["version"]
+                        ):
+                            # Bounded (``_may_force``): a witness naming other versions in its
+                            # rulings never makes a fetch per call.
+                            self._force_rules = True
+                            self.wake()
                     if g["ruling"] == "allow":
                         return "allow", None
                     return "block", self._ruling_error(tool, g)
@@ -2312,13 +2341,11 @@ class ChecksState:
                 )
         # The stale gate (§8), as the real call meets it: a protected call is refused, with the same reason.
         prs = rs if rs is not None else self._broken_protect()
-        if not self.rec.test and (ts["strict"] or self._protects(prs, decl)):
-            pe = self.project_env()
-            infos = [self.stale_info(k, pe) for k in ("rules", "list")]
-            reasons = [f"{i['what']}: {i['words']}; protected calls are refused" for i in infos if i and i["expired"]]
-            if reasons:
+        if ts["strict"] or self._protects(prs, decl):
+            why = self.stale_refusal()
+            if why:
                 blocked = True
-                out.append(f"would refuse {decl} did not run: {'; '.join(reasons)} (spec §8) (rules_unavailable)")
+                out.append(f"would refuse {decl} did not run: {why} (rules_unavailable)")
         out.append(f"             Dry run: nothing recorded, the tool did not run. Exit code {1 if blocked else 0}.")
         return out, blocked
 

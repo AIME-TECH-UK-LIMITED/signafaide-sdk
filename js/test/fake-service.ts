@@ -65,6 +65,9 @@ export class FakeService {
   listEntries: any[] = [];
   /** (version query, If-None-Match) of every GET /v1/rules. */
   rulesFetches: [string | undefined, string | undefined][] = [];
+  /** GET /v1/rules answers this version, when set (a witness that keeps answering an older one;
+   * rulings still name the newest). */
+  servedVersion: number | null = null;
   /** A witness that does not rule: receipts without a ruling. */
   noRuling = false;
   /** e.g. "rules_unavailable": the receipt says why there is no ruling. */
@@ -409,7 +412,8 @@ export class FakeService {
       const items = this.ruleItems.get(prj.project) ?? [];
       this.rulesFetches.push([q.version, this.ifNoneMatch]);
       if (!items.length) return [200, { rules: null }];
-      const item = q.version === undefined ? items.at(-1) : items.find((i) => String(i.rules.version) === q.version);
+      const wanted = q.version ?? (this.servedVersion !== null ? String(this.servedVersion) : undefined);
+      const item = wanted === undefined ? items.at(-1) : items.find((i) => String(i.rules.version) === wanted);
       if (!item) return err(404, "not_found", "No such version.");
       if (this.ifNoneMatch === `"${hashJson(item.rules)}"`) return [304, ""];
       return [200, item];
