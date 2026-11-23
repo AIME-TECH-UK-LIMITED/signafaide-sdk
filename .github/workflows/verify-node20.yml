@@ -1,6 +1,7 @@
-# The npm package signafaide-verify on the oldest Node.js it supports (20): packed as npm would
-# publish it, installed into an empty project, and run through the spec vectors and the input cases
-# (scripts/verify-vectors.mjs) on Node.js 20, with its tests' build for the pinned-keys cases.
+# The npm package signafaide-verify on the oldest Node.js it supports (20): built and packed as
+# release.yml does it, installed into an empty project, and run through the spec vectors and the
+# input cases (scripts/verify-vectors.mjs) on Node.js 20, with its tests' build for the pinned-keys
+# cases.
 
 name: signafaide-verify on Node.js 20
 
@@ -31,16 +32,21 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      # Built and packed on the release's Node.js (tsup 9 needs 22.18 or later), then installed and
+      # run on Node.js 20.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.22.3"
+      - name: Build and pack
+        run: |
+          (cd js && npm ci --ignore-scripts && npx tsup --config tsup.verify.config.ts)
+          mkdir -p /tmp/pack && (cd js/verify && npm pack --pack-destination /tmp/pack)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20.20.2"
-      - name: Build and pack on Node.js 20
-        run: |
-          node --version
-          (cd js && npm ci --ignore-scripts && npx tsup --config tsup.verify.config.ts)
-          mkdir -p /tmp/pack && (cd js/verify && npm pack --pack-destination /tmp/pack)
       - name: Install into an empty project and run the vectors on Node.js 20
         run: |
+          node --version
           mkdir /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
           npm install --ignore-scripts /tmp/pack/signafaide-verify-*.tgz
           ./node_modules/.bin/signafaide-verify --version
