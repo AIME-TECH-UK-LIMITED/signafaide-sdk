@@ -148,6 +148,18 @@ To build the verifier from source: `cargo run --release --manifest-path verifier
 
 A pack that passes shows what the agent's program recorded and that it was not changed later; it does not show that the content was true, or a call that was never recorded. The full list: [Limits of a signafAIde record](https://signafaide.co.uk/docs/limits).
 
+## For security scanners and reviewers
+
+Automated scanners flag this package because it reads credentials from the environment and talks to a network host. Both are expected for a client of a remote witness. This is what it does:
+
+- **Credentials:** it reads `SIGNAFAIDE_API_KEY` (or the key `signafaide login` and `init` save in your user config folder) and sends it only to the witness, as the bearer token. It reads no other service's credentials. The checks look at tool arguments and results for secrets to block them; they never send them anywhere.
+- **Other settings:** `SIGNAFAIDE_URL` (a self-hosted witness), `SIGNAFAIDE_HOME`, `SIGNAFAIDE_CHECKS` and a few more `SIGNAFAIDE_*` options listed in the SDK READMEs, and the standard proxy and CA variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`).
+- **Hosts, before any opt-in:** none. With no API key, records are signed and kept in `.signafaide/` on your machine.
+- **Hosts, after `signafaide init` or an API key:** the witness (`https://api.signafaide.co.uk`, or your `SIGNAFAIDE_URL`), and `https://signafaide.co.uk/.well-known/signafaide-keys.json` for the published service keys.
+- **Hosts when verifying:** a public block explorer API (`https://mempool.space/api` by default, or the one you pass) to confirm public timestamps, and the published key list. `--offline` makes no request at all.
+- **No install scripts:** the npm packages have no install or postinstall scripts, and the release workflow publishes with `--ignore-scripts`.
+- **What leaves your machine:** a salted content hash, the tool and agent names, the time and the chain links, plus only the argument fields a rule lists under `disclose`. See "Hashes, not content" above and the [privacy notice](https://signafaide.co.uk/legal/privacy).
+
 ## Privacy and support
 
 - Privacy: [privacy notice](https://signafaide.co.uk/legal/privacy)
