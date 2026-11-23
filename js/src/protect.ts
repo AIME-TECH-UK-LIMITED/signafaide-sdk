@@ -938,6 +938,29 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
         `  ${t.name}: no fields known, so only a limit on calls a minute can be set here. Name the fields in its type (or a destructuring pattern), or add rules in the console.`,
       );
   }
+  // The sandbox first, before any rule is asked: blocking needs the witness, so a person who says no
+  // knows it now, and the answers below are kept in the checks file for the next run.
+  let declinedSandbox = false;
+  if (!o.local && chosen.length && !rec.apiKey && prompt.person) {
+    out("");
+    out("Blocking needs signafAIde to allow each protected call; recording works on this machine without it.");
+    const ok = await prompt.confirm(
+      "Make a free sandbox for these rules? No sign-up; test data only, deleted after 30 days unless you keep it.",
+      true,
+    );
+    if (ok) {
+      rec.state.ignoreInGit(".env");
+      await rec.createSandbox({ writeUrl: false });
+      const sb = rec.state.sandbox();
+      out(`Sandbox    made for you, no sign-up. Test data only, deleted after 30 days.`);
+      if (sb?.claim_url) out(`           Keep it: ${sb.claim_url}`);
+    } else {
+      declinedSandbox = true;
+      out(
+        "  No sandbox: your answers are kept in the checks file, and the next npx signafaide protect offers them again.",
+      );
+    }
+  }
   const held = o.local ? null : rec.checks.heldRules();
   const taken = new Set<string>((held?.rules ?? []).map((r: Json) => r.id));
   let fileNow: Json | null = null;
@@ -965,12 +988,12 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
       consumed.add(pr.rule.id);
       if (
         await prompt.confirm(
-          `An agent run on ${pr.on} proposed this rule for ${t.name}; it blocks nothing yet: ${ruleWords(pr.rule)}\n  Use it, with the agent's value?`,
+          `A rule kept on ${pr.on} for ${t.name}, not saved then (no key); it blocks nothing yet: ${ruleWords(pr.rule)}\n  Use it, with that value?`,
           true,
         )
       )
         proposed = pr;
-      else out(`  The proposal of ${pr.on} is dropped; asking as usual.`);
+      else out(`  The rule kept on ${pr.on} is dropped; asking as usual.`);
     }
     if (o.limit) {
       // From the command line: the field and the limit are given, nothing is asked.
@@ -986,7 +1009,7 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
       rule = lim.rule(decl, String(o.limit.above), ruleId(decl, lim.key, taken));
     } else if (proposed) {
       rule = { ...proposed.rule, id: ruleId(decl, proposed.rule.id.slice(decl.length + 1) || "limit", taken) };
-      out(`  Rule: ${ruleWords(rule)}  (proposed by an agent run on ${proposed.on})`);
+      out(`  Rule: ${ruleWords(rule)}  (kept on ${proposed.on})`);
     } else if (!prompt.person && prompt.yes && defaultRule(t, decl, new Set(taken)) !== null) {
       // protect --yes: a sensible default for what the tool does, Calibrating (it blocks nothing).
       rule = defaultRule(t, decl, taken)!;
@@ -1086,21 +1109,9 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
     notDone.push("no sandbox and no API key, so protected tools stop until there is one");
     finish = "npx signafaide protect (in a terminal)";
   }
-  if (!o.local && chosen.length && !rec.apiKey && prompt.person) {
-    const ok = await prompt.confirm(
-      "Make a free sandbox for these rules? No sign-up; test data only, deleted after 30 days unless you keep it.",
-      true,
-    );
-    if (ok) {
-      rec.state.ignoreInGit(".env");
-      await rec.createSandbox({ writeUrl: false });
-      const sb = rec.state.sandbox();
-      out(`Sandbox    made for you, no sign-up. Test data only, deleted after 30 days.`);
-      if (sb?.claim_url) out(`           Keep it: ${sb.claim_url}`);
-    } else {
-      notDone.push("no sandbox and no API key, so protected tools stop until there is one");
-      finish ??= "npx signafaide protect, and answer yes to the sandbox (or set SIGNAFAIDE_API_KEY)";
-    }
+  if (declinedSandbox) {
+    notDone.push("no sandbox and no API key, so protected tools stop until there is one");
+    finish ??= "npx signafaide protect, and answer yes to the sandbox (or set SIGNAFAIDE_API_KEY)";
   }
   // The code. With --local there is no witness to wait for: the code records, and the checks
   // file's mode for the tool (enforce when a rule is On) decides whether the local rules block.
@@ -1108,6 +1119,18 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
   const protectSet = new Set(o.local ? [] : chosen.map((t) => t.name));
   const handLines: string[] = [];
   const changes = codeChanges(found, protectSet, agent, root, o.tool ? findTools(root) : found);
+  // No terminal and no --yes: nobody to show the change to, so it is shown here and nothing is written.
+  if (!prompt.person && !prompt.yes) {
+    for (const ch of changes) {
+      out(`Change     ${rel(ch.file)} (not written)`);
+      for (const l of lineDiff(ch.before, ch.after)) out(`  ${l}`);
+      out("");
+    }
+    out(
+      "Nothing written: there is no terminal to ask before changing your files. Run npx signafaide protect in a terminal, or npx signafaide protect --yes to apply the change above.",
+    );
+    return { code: 1, protected: [], rules: [], published: null };
+  }
   const written = new Set<string>();
   for (const ch of changes) {
     out(`Change     ${rel(ch.file)}`);
@@ -1199,7 +1222,7 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
   if (Array.isArray(doc.proposed)) doc.proposed = doc.proposed.filter((p: Json) => !consumed.has(proposedId(p)));
   // An agent run with no key cannot save its rule at the witness: it is kept here as a local
   // Calibrating rule (the tool's mode is watch, so it blocks nothing) that a person is offered later.
-  const keepProposal = !o.local && (!!o.limit || !!prompt.yes) && !prompt.person && !rec.apiKey && newRules.length > 0;
+  const keepProposal = !o.local && !rec.apiKey && newRules.length > 0 && (prompt.person || !!o.limit || !!prompt.yes);
   if (keepProposal) keepProposed(doc, newRules);
   if (Array.isArray(doc.proposed) && !doc.proposed.length) delete doc.proposed;
   if (o.local && newRules.length) {
@@ -1261,12 +1284,9 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
     if (keepProposal) {
       const one = newRules.length === 1;
       out(
-        `           Kept in ${rel(cp)} as ${one ? "a local Calibrating rule (it blocks nothing)" : "local Calibrating rules (they block nothing)"}; a person who runs npx signafaide protect in a terminal is offered ${one ? "it" : "them"}.`,
+        `           Kept in ${rel(cp)} as ${one ? "a local Calibrating rule (it blocks nothing)" : "local Calibrating rules (they block nothing)"}; npx signafaide protect in a terminal offers ${one ? "it" : "them"} again, with the free sandbox.`,
       );
     }
-    out(
-      "           A person runs npx signafaide protect in a terminal and answers yes to the free sandbox; it asks for the rules again.",
-    );
     notDone.push("the rules are not saved (no key yet)");
     finish ??= "npx signafaide protect (in a terminal)";
     code = 1;

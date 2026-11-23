@@ -173,30 +173,32 @@ def test_agent_rule_is_kept_as_a_local_calibrating_rule_once(flow, capsys):
     assert len(again["rules"]["rules"]) == 1 and len(again["proposed"]) == 1
 
 
-def test_a_person_is_offered_the_proposal_and_it_is_used_up(flow, capsys):
+def test_a_person_is_offered_the_kept_rule_and_with_no_sandbox_it_is_kept_again(flow, capsys):
     project, _ = flow
     run(capsys, *AGENT_RUN, prompter=FlagPrompter(yes=True))
-    p = ScriptedPrompter([True, 1, False, True, True])
+    # sandbox no, use the kept rule, Calibrating, write the code, the note
+    p = ScriptedPrompter([False, True, 1, True, True])
     code, out = run(capsys, "protect", "--tool", "approve_payout", prompter=p)
-    offer = next(q for q in p.asked if "proposed this rule" in q)
-    assert f"An agent run on {_today()} proposed this rule for approve_payout" in offer
+    offer = next(q for q in p.asked if q.startswith("A rule kept on"))
+    assert f"A rule kept on {_today()} for approve_payout" in offer
     assert "Block approve_payout when amount is above 1,000" in offer
     assert not any(q.startswith("What should we block on") for q in p.asked)
-    assert re.search(
-        r"Rule: Block approve_payout when amount is above 1,000 +\(proposed by an agent run on \d{4}-\d{2}-\d{2}\)", out
-    )
+    assert re.search(r"Rule: Block approve_payout when amount is above 1,000 +\(kept on \d{4}-\d{2}-\d{2}\)", out)
     file = json.loads((project / "signafaide.checks.json").read_text())
-    assert "proposed" not in file and file["rules"] is None and "mode" not in file["tools"]["approve_payout"]
+    assert len(file["proposed"]) == 1
+    assert [r["id"] for r in file["rules"]["rules"]] == ["approve_payout-amount"]
 
 
 def test_a_person_can_drop_the_proposal(flow, capsys):
     project, _ = flow
     run(capsys, *AGENT_RUN, prompter=FlagPrompter(yes=True))
-    p = ScriptedPrompter([False, 0, "500", 1, [False, False], False, True])
+    p = ScriptedPrompter([False, False, 0, "500", 1, [False, False], True])
     code, out = run(capsys, "protect", "--tool", "approve_payout", prompter=p)
     assert "is dropped; asking as usual" in out
     assert any(q.startswith("What should we block on") for q in p.asked)
-    assert "proposed" not in json.loads((project / "signafaide.checks.json").read_text())
+    # No sandbox again: the new answer is kept in place of the dropped one.
+    kept = json.loads((project / "signafaide.checks.json").read_text())
+    assert len(kept["proposed"]) == 1 and kept["rules"]["rules"][0]["when"][0]["value"] == 500
 
 
 def test_a_proposal_for_a_rule_that_is_not_there_is_an_error():
@@ -230,7 +232,7 @@ def test_a_person_says_no_to_the_note(flow, capsys):
         "amount",
         "--above",
         "500",
-        prompter=ScriptedPrompter([0, False, True, False]),
+        prompter=ScriptedPrompter([False, 0, True, False]),
     )
     assert "Not added; run this command again to add it." in out
     assert not (project / "AGENTS.md").exists()
@@ -341,5 +343,72 @@ def test_in_a_test_runner_it_still_runs(project, monkeypatch):
 def test_several_kept_rules_are_said_in_the_plural(flow, capsys):
     code, out = run(capsys, "protect", "--yes", prompter=FlagPrompter(yes=True))
     assert "Kept in signafaide.checks.json as local Calibrating rules (they block nothing)" in out
-    assert "is offered them." in out
+    assert "offers them again, with the free sandbox." in out
     assert "a local Calibrating rule" not in out
+
+
+def test_check_a_protected_tool_with_no_key_exits_1(flow, capsys):
+    run(capsys, *AGENT_RUN, prompter=FlagPrompter(yes=True))
+    code, out = run(capsys, "check", "approve_payout", "amount=800", "currency=GBP")
+    assert code == 1
+    assert "would refuse approve_payout is protected and there is no API key" in out
+    assert "Exit code 1." in out
+    code, _ = run(capsys, "check", "lookup_invoice", "invoice_id=1")
+    assert code == 0
+
+
+def test_the_sandbox_is_asked_before_any_rule_and_answers_are_kept(flow, capsys):
+    project, _ = flow
+    # tick approve_payout, sandbox no, rule 0, value 750, On, no extras, write, note
+    p = ScriptedPrompter([[True, False, False], False, 0, "750", 0, [False, False], True, True])
+    code, out = run(capsys, "protect", prompter=p)
+    sandbox_at = next(i for i, q in enumerate(p.asked) if q.startswith("Make a free sandbox"))
+    rule_at = next(i for i, q in enumerate(p.asked) if q.startswith("What should we block on"))
+    assert sandbox_at < rule_at
+    assert "Blocking needs signafAIde to allow each protected call" in out
+    assert "it asks for the rules again" not in out
+    file = json.loads((project / "signafaide.checks.json").read_text())
+    assert file["rules"]["rules"][0]["id"] == "approve_payout-amount"
+    assert file["rules"]["rules"][0]["when"][0]["value"] == 750
+    assert len(file["proposed"]) == 1
+    q = ScriptedPrompter([[True, False, False], False, True, 0, True, True])
+    run(capsys, "protect", prompter=q)
+    assert any(x.startswith("A rule kept on") for x in q.asked)
+    assert not any(x.startswith("What should we block on") for x in q.asked)
+
+
+class _Client:
+    def __init__(self, kid):
+        self.kid = kid
+
+    def head(self, agent):
+        return {"head": {"agent": agent, "seq": 3, "record_hash": "b" * 64}}
+
+    def record(self, record_hash):
+        return {"record": {"key_id": self.kid}}
+
+
+class _State:
+    def __init__(self, mine):
+        self.mine = mine
+
+    def agent_public_keys(self):
+        return [{"agent": "payout-bot", "key_id": k} for k in self.mine]
+
+
+class _Rec:
+    def __init__(self, kid, mine, api_key="sfa_test_" + "a" * 32):
+        self.api_key, self.state, self._client = api_key, _State(mine), _Client(kid)
+
+    def client(self, timeout=None):
+        return self._client
+
+
+def test_key_mismatch_says_one_agent_name_one_key():
+    from signafaide.tool_commands import key_mismatch
+
+    why = key_mismatch(_Rec("1" * 16, ["2" * 16]), "payout-bot")
+    assert why and f"signs with key {'1' * 16}" in why and f"this machine has {'2' * 16}" in why
+    assert "one agent name = one key" in why
+    assert key_mismatch(_Rec("1" * 16, ["2" * 16, "1" * 16]), "payout-bot") is None
+    assert key_mismatch(_Rec("1" * 16, [], api_key=None), "payout-bot") is None

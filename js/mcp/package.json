@@ -1,6 +1,6 @@
 {
   "name": "signafaide-mcp",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "mcpName": "uk.co.signafaide/signafaide",
   "description": "Checks risky AI agent tool calls before they run: an independent witness allows or blocks them under your rules, and every call is signed and verifiable offline.",
   "license": "Apache-2.0",

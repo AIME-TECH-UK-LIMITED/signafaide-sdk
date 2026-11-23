@@ -55,7 +55,7 @@ tools = [approve_payout, delete_payee, send_receipt, lookup_invoice]
 
 #: The mockup's answers: approve_payout only, block above 1000, On, also calibrate currency not
 #: GBP, a sandbox, write the code. Python names arguments by the signature: no question for that.
-MOCKUP = [[True, False, False, False], 0, "1000", 0, [True, False], True, True]
+MOCKUP = [[True, False, False, False], True, 0, "1000", 0, [True, False], True]
 
 
 @pytest.fixture

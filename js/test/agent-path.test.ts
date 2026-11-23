@@ -15,6 +15,7 @@ import { main, setPrompter } from "../src/cli.js";
 import { CALIBRATING_LINE, flagPrompter, scriptedPrompter, toVersion2 } from "../src/protect.js";
 import { protect } from "../src/record.js";
 import { configure, getRecorder } from "../src/runtime.js";
+import { keyMismatch } from "../src/tool-commands.js";
 import { useProject } from "./helpers.js";
 
 const TOOLS_TS = `export async function approve_payout(payee: string, amount: number, currency: string) {
@@ -128,36 +129,71 @@ describe("protect --yes --tool --limit-field --above, with no key", () => {
     setPrompter(() => flagPrompter({ yes: true }));
     const [, out] = await cli("protect", "--yes");
     expect(out).toContain("Kept in signafaide.checks.json as local Calibrating rules (they block nothing)");
-    expect(out).toContain("is offered them.");
+    expect(out).toContain("offers them again, with the free sandbox.");
     expect(out).not.toContain("a local Calibrating rule");
   });
 
-  it("accepting the proposal uses the agent's value, says where it came from and uses the proposal up", async () => {
+  it("accepting the kept rule uses its value and says where it came from; with no sandbox it is kept again", async () => {
     setPrompter(() => flagPrompter({ yes: true }));
     await cli(...AGENT_RUN);
-    const p = scriptedPrompter([true, 1, false, true, true], true);
+    // sandbox no, use the kept rule, Calibrating, write the code, the note
+    const p = scriptedPrompter([false, true, 1, true, true], true);
     setPrompter(() => p);
     const [, out] = await cli("protect", "--tool", "approve_payout");
-    expect(p.asked.some((q) => q.includes("proposed this rule"))).toBe(true);
+    expect(p.asked.some((q) => q.startsWith("A rule kept on"))).toBe(true);
     expect(p.asked.some((q) => q.startsWith("What should we block on"))).toBe(false);
-    expect(out).toMatch(
-      /Rule: Block approve_payout when amount is above 1,000 +\(proposed by an agent run on \d{4}-\d{2}-\d{2}\)/,
-    );
+    expect(out).toMatch(/Rule: Block approve_payout when amount is above 1,000 +\(kept on \d{4}-\d{2}-\d{2}\)/);
     const file = JSON.parse(read("signafaide.checks.json"));
-    expect(file.proposed).toBeUndefined();
-    expect(file.rules).toBeNull();
-    expect(file.tools.approve_payout.mode).toBeUndefined();
+    expect(file.proposed).toHaveLength(1);
+    expect(file.rules.rules.map((r: { id: string }) => r.id)).toEqual(["approve_payout-amount"]);
   });
 
   it("saying no to the proposal drops it and asks as usual", async () => {
     setPrompter(() => flagPrompter({ yes: true }));
     await cli(...AGENT_RUN);
-    const p = scriptedPrompter([false, 0, "500", 1, [false, false], false, true], true);
+    const p = scriptedPrompter([false, false, 0, "500", 1, [false, false], true], true);
     setPrompter(() => p);
     const [, out] = await cli("protect", "--tool", "approve_payout");
     expect(out).toContain("is dropped; asking as usual");
     expect(p.asked.some((q) => q.startsWith("What should we block on"))).toBe(true);
-    expect(JSON.parse(read("signafaide.checks.json")).proposed).toBeUndefined();
+    // No sandbox again: the new answer is kept in place of the dropped one.
+    const kept = JSON.parse(read("signafaide.checks.json"));
+    expect(kept.proposed).toHaveLength(1);
+    expect(kept.rules.rules[0].when[0].value).toBe(500);
+  });
+
+  it("check: a protected tool with no key would be refused, so the dry run exits 1", async () => {
+    setPrompter(() => flagPrompter({ yes: true }));
+    await cli(...AGENT_RUN);
+    const [c, out] = await cli("check", "approve_payout", "amount=800", "currency=GBP");
+    expect(c).toBe(1);
+    expect(out).toContain("would refuse approve_payout is protected and there is no API key");
+    expect(out).toContain("Exit code 1.");
+    // A tool that is only recorded is not refused.
+    const [c2] = await cli("check", "lookup_invoice", "id=1");
+    expect(c2).toBe(0);
+  });
+
+  it("asks for the sandbox before any rule, and keeps the answers when the person says no", async () => {
+    // tick approve_payout, named arguments yes, sandbox no, rule 0, value 750, On, no extras, write, note
+    const p = scriptedPrompter([[true, false], true, false, 0, "750", 0, [false, false], true, true], true);
+    setPrompter(() => p);
+    const [, out] = await cli("protect");
+    const sandboxAt = p.asked.findIndex((q) => q.startsWith("Make a free sandbox"));
+    const ruleAt = p.asked.findIndex((q) => q.startsWith("What should we block on"));
+    expect(sandboxAt).toBeGreaterThanOrEqual(0);
+    expect(sandboxAt).toBeLessThan(ruleAt);
+    expect(out).toContain("Blocking needs signafAIde to allow each protected call");
+    expect(out).not.toContain("it asks for the rules again");
+    const file = JSON.parse(read("signafaide.checks.json"));
+    expect(file.rules.rules[0]).toMatchObject({ id: "approve_payout-amount", when: [{ op: "gt", value: 750 }] });
+    expect(file.proposed).toHaveLength(1);
+    // The next run offers the kept rule instead of asking again.
+    const q = scriptedPrompter([[true, false], false, true, 0, true, true], true);
+    setPrompter(() => q);
+    await cli("protect");
+    expect(q.asked.some((x) => x.startsWith("A rule kept on"))).toBe(true);
+    expect(q.asked.some((x) => x.startsWith("What should we block on"))).toBe(false);
   });
 
   it("a checks file with a proposal for a rule that is not there is an error", () => {
@@ -180,8 +216,8 @@ describe("protect --yes --tool --limit-field --above, with no key", () => {
   });
 
   it("a person who says no to the note: nothing added", async () => {
-    // tick approve_payout, named arguments yes, On, sandbox no, write the code yes, note no
-    setPrompter(() => scriptedPrompter([true, 0, false, true, false]));
+    // named arguments yes, sandbox no, On, write the code yes, note no
+    setPrompter(() => scriptedPrompter([true, false, 0, true, false]));
     const [, out] = await cli("protect", "--tool", "approve_payout", "--limit-field", "amount", "--above", "500");
     expect(out).toContain("Not added; run this command again to add it.");
     expect(fs.existsSync(path.join(ctx.root, "AGENTS.md"))).toBe(false);
@@ -292,5 +328,30 @@ describe("a protected tool with no key or sandbox", () => {
     } finally {
       process.env.SIGNAFAIDE_TEST = "0";
     }
+  });
+});
+
+describe("one agent name = one key", () => {
+  const recWith = (witnessKey: string, mine: string[]): any => ({
+    apiKey: "sfa_test_" + "a".repeat(32),
+    client: () => ({
+      head: async (agent: string) => ({ head: { agent, seq: 3, record_hash: "b".repeat(64) } }),
+      record: async () => ({ record: { key_id: witnessKey } }),
+    }),
+    state: { agentPublicKeys: () => mine.map((key_id) => ({ agent: "payout-bot", key_id })) },
+  });
+
+  it("says when the witness's newest record was signed by a key this machine does not hold", async () => {
+    const why = await keyMismatch(recWith("1111111111111111", ["2222222222222222"]), "payout-bot");
+    expect(why).toContain("agent payout-bot on the witness signs with key 1111111111111111");
+    expect(why).toContain("this machine has 2222222222222222");
+    expect(why).toContain("one agent name = one key");
+  });
+
+  it("says nothing when the key is one this machine holds, now or retired, or with no API key", async () => {
+    expect(
+      await keyMismatch(recWith("1111111111111111", ["2222222222222222", "1111111111111111"]), "payout-bot"),
+    ).toBeNull();
+    expect(await keyMismatch({ ...recWith("1111111111111111", []), apiKey: null }, "payout-bot")).toBeNull();
   });
 });

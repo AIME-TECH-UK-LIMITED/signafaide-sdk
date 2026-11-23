@@ -4,6 +4,15 @@ Notable changes to the signafAIde SDK: the TypeScript and Python packages, the M
 Every release shares one version number and is a git tag; changes to the spec (`spec/SPEC.md`) are noted with the release that made them.
 Records and packs written by a version verify with that version and later ones, unless an entry says otherwise.
 
+## v0.5.6 (2026-11-24)
+
+Spec stays 1.1; records do not change. Fewer surprises for a developer trying it for the first time.
+
+- `protect` asks about the free sandbox before any rule question, and says that blocking needs the witness while recording does not. A person who says no keeps their answers: the rules are kept in `signafaide.checks.json` (as `proposed`, Calibrating, blocking nothing) and the next `protect` offers them instead of asking again.
+- `signafaide check` on a protected tool with no API key exits 1 and says a real run would be refused (`no_key`); before, it said "nothing to evaluate" and exited 0. A tool that is only recorded still exits 0.
+- `protect` without a terminal and without `--yes` shows the code change and writes nothing (exit 1); before, it wrote the change. `--yes` is unchanged.
+- `status` and `prove` say when the witness's newest record of an agent was signed by a key this machine does not hold (another machine or folder uses the same agent name): one agent name = one key. `prove` then makes no proof, since its pack would fail the agent signatures, unless `--force`.
+
 ## v0.5.5 (2026-11-23)
 
 Spec stays 1.1; records do not change. Release fix: v0.5.4 was tagged but never published to npm or PyPI (a publish path bug); 0.5.5 is the first published `signafaide-verify` and has v0.5.4's changes below, with the fix and the changes in this entry.

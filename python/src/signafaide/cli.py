@@ -268,6 +268,14 @@ def cmd_status(a: argparse.Namespace) -> int:
     )
     for line in blocked:
         print(line)
+    # One agent name = one key: say so when the witness holds another key for an agent here.
+    if answered and project.get("project"):
+        from .tool_commands import key_mismatch
+
+        for agent in dict.fromkeys(c["agent"] for c in s["chains"] if c.get("current")):
+            why = key_mismatch(rec, agent)
+            if why:
+                print(f"KEY {why}")
     if s["api_key"]:
         try:
             u = rec.client(timeout=5).usage()
@@ -924,6 +932,11 @@ def _prove_args(p: argparse.ArgumentParser) -> None:
         help="how long the link works (default 30, or the longest your plan allows); an active link for the same "
         "tool is reused unless --days is given",
     )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="make it even when this machine's agent key is not the one the witness holds",
+    )
 
 
 @command(
@@ -948,6 +961,7 @@ def cmd_prove(a: argparse.Namespace) -> int:
         content=a.content,
         all_=a.all,
         days=a.days,
+        force=a.force,
     )
 
 

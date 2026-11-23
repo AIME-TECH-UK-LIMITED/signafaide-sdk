@@ -274,6 +274,21 @@ export async function runCheck(
     }
   }
   const { lines, blocked } = rec.checks.dryRun(tool, args, agent ?? rec.defaultAgent);
+  // A protected tool with no key never runs (no_key), whatever the rules say: so the dry run fails too.
+  let file: Record<string, any> | null = null;
+  try {
+    file = rec.checks.file();
+  } catch {
+    file = null;
+  }
+  if (!rec.apiKey && file && C.toolSettings(file, declaredName(tool)).strict) {
+    if (lines.length && lines[lines.length - 1].includes("Dry run:")) lines.pop();
+    lines.push(
+      `would refuse ${declaredName(tool)} is protected and there is no API key, so a real run is refused (no_key). Run npx signafaide protect in a terminal (a free sandbox), or set SIGNAFAIDE_API_KEY.`,
+      "             Dry run: nothing recorded, the tool did not run. Exit code 1.",
+    );
+    return [lines, 1];
+  }
   return [lines, blocked ? 1 : 0];
 }
 
@@ -456,6 +471,28 @@ function callFate(c: Call): [string, string] {
   return ["recorded", ch ? "not protected" : "before protection"];
 }
 
+/** One line when the witness's newest record of `agent` was signed by a key this machine does not
+ * hold: another machine (or folder) uses the same agent name with its own key, so protected calls
+ * here are refused and a pack made here fails its signatures. Null when they match or it cannot tell. */
+export async function keyMismatch(rec: Recorder, agent: string): Promise<string | null> {
+  if (!rec.apiKey) return null;
+  try {
+    const client = rec.client(5000);
+    const h = (await client.head(agent))?.head;
+    if (!h || !/^[0-9a-f]{64}$/.test(String(h.record_hash)) || h.agent !== agent) return null;
+    const kid = (await client.record(h.record_hash))?.record?.key_id;
+    if (typeof kid !== "string" || !/^[0-9a-f]{16}$/.test(kid)) return null;
+    const mine = rec.state
+      .agentPublicKeys()
+      .filter((k) => k.agent === agent)
+      .map((k) => k.key_id);
+    if (mine.includes(kid)) return null;
+    return `agent ${agent} on the witness signs with key ${kid}, but this machine has ${mine.length ? mine.join(", ") : "no key for it"}: one agent name = one key. Give this machine its own agent name, or use the same key here (signafaide keys create --print; see the production guide).`;
+  } catch {
+    return null;
+  }
+}
+
 export interface ProveOptions {
   tool?: string;
   agent?: string;
@@ -466,6 +503,8 @@ export interface ProveOptions {
   all?: boolean;
   /** How long the link works; default: 30, or the longest the plan allows when that is less. */
   days?: number;
+  /** Make the proof even when this machine's agent key is not the one the witness holds. */
+  force?: boolean;
   out: (s: string) => void;
   prompt: Prompter;
   dir?: string;
@@ -501,6 +540,13 @@ export async function runProve(rec: Recorder, o: ProveOptions): Promise<number> 
       byHash.set(r.draft ? "" : recordHash(r), c);
     } else if (e.kind === "outcome" && e.ref && byHash.has(e.ref)) byHash.get(e.ref)!.o = r;
   }
+  const mismatch = await keyMismatch(rec, agent);
+  if (mismatch && !o.force) {
+    out(`No proof made: ${mismatch}`);
+    out("           A pack made here would fail its agent signatures. --force makes it anyway.");
+    return 1;
+  }
+  if (mismatch) out(`Warning    ${mismatch}`);
   const what = tool ? `${o.tool} (agent ${agent})` : `agent ${agent}`;
   const env = rec.apiKey?.startsWith("sfa_live_") ? "Live" : rec.apiKey ? "Sandbox" : "this machine only";
   const t0 = calls[0]?.d.envelope.time ?? recs[0]?.envelope.time;
