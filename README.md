@@ -4,6 +4,10 @@
 
 signafAIde checks each risky AI agent tool call before it runs, and proves what your agents did.
 
+![signafaide protect on the payout example: an 800 GBP payout runs, a 1,200 GBP payout is blocked by the witness, then verify passes](.github/assets/demo.gif)
+
+<sub>A real run of [`examples/payout-agent`](examples/payout-agent) against a free sandbox (the claim link is masked).</sub>
+
 - **Record:** every tool call is signed with the agent's own key and chained on the machine that made it.
 - **Protect:** an independent witness allows or blocks risky calls (pay, delete, send, run a command, push code) under your published rules; protect a tool with `npx signafaide protect` or one click in the console.
 - **Prove:** share a link your auditor checks offline, without trusting you or us ([for auditors](#for-auditors)).
@@ -13,6 +17,18 @@ signafAIde checks each risky AI agent tool call before it runs, and proves what 
 - **Hashes, not content:** after the opt-in, each record sends its content hash with its tool name, agent name and time (and its chain links), never its inputs or outputs, unless you turn on stored content. Tool and agent names are sent as you write them, so don't put personal data in them. Each content hash is salted with 16 random bytes that stay on your machine with the content, so the hash alone cannot be used to guess the content, even when it has only a few possible values.
 - **Your environment:** the default witness is the hosted service (`https://api.signafaide.co.uk`). A self-hosted witness, under an Enterprise contract, is set with `SIGNAFAIDE_URL` ([self-host guide](https://signafaide.co.uk/docs/self-host)). Running in production: [production guide](https://signafaide.co.uk/docs/production).
 - **Independent checks:** the protocol is a public spec with test vectors, and the verifier checks a verification pack without our service.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[Your agent] -->|tool call| S[signafAIde SDK<br/>signs and chains the record<br/>on your machine]
+    S -->|protected tool:<br/>content hash + the fields a rule needs| W[Witness<br/>allows or blocks under your rules,<br/>co-signs, adds public time bounds]
+    W -->|ruling| S
+    S -->|allowed| T[The tool runs]
+    S --> P[Verification pack]
+    P --> V[Auditor runs the verifier offline,<br/>without trusting you or us]
+```
 
 ## What is here
 
@@ -44,6 +60,21 @@ uv run signafaide protect         # Python (after uv add signafaide; or .venv/bi
 npx signafaide check approve_payout amount=1200 currency=GBP   # a dry run: exit 1 when it would block
 npx signafaide status                                            # one line per tool: recorded, protected, proof
 npx signafaide prove approve_payout                              # a read-only link for your auditor
+```
+
+To wrap a tool in code instead (this is what `protect` writes):
+
+```python
+import signafaide
+
+@signafaide.protect(agent="payout-bot")   # asks the witness before it runs
+def approve_payout(payee: str, amount: float, currency: str): ...
+```
+
+```ts
+import { protect } from "signafaide";
+
+export const approvePayoutTool = protect(approvePayout, { args: ["payee", "amount", "currency"], agent: "payout-bot" });
 ```
 
 `pull` fetches the rules saved in the console, `login` signs a person in to save rules after the sandbox is kept. A runnable example: [`examples/payout-agent`](examples/payout-agent); starters with a protected tool in place: [`templates/`](templates). To wrap tools by hand, see the reference sections of the [Python](python/README.md) and [TypeScript](js/README.md) READMEs.
@@ -126,3 +157,7 @@ Apache-2.0, see [LICENSE](LICENSE).
 ## Contributing and security
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the layout and how to run the checks. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+## Support the project
+
+If signafAIde is useful to you, a star on this repository helps other developers find it.
