@@ -429,4 +429,4 @@ jobs:
           if [ "$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/signafaide-verify/$VERSION")" = 200 ]; then
             echo "signafaide-verify $VERSION is on npm already"; exit 0
           fi
-          npm publish dist/signafaide-verify-*.tgz --provenance --access public --ignore-scripts
+          npm publish ./dist/signafaide-verify-*.tgz --provenance --access public --ignore-scripts
