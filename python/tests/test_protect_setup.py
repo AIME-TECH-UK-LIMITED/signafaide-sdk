@@ -41,7 +41,7 @@ def lookup_invoice(invoice_id: str) -> str:
 '''
 
 #: approve_payout only, block above 1000, On, also calibrate currency, a sandbox, write.
-ANSWERS = [[True, False, False, False], 0, "1000", 0, [True, False], True, True]
+ANSWERS = [[True, False, False, False], True, 0, "1000", 0, [True, False], True]
 
 
 @pytest.fixture
@@ -135,7 +135,7 @@ class Payout:
 def approve_payout(payout: Payout) -> str:
     return f"paid {payout.amount}"
 """)
-    p = Recording([[True], 0, "1000", 0, [True, False], True, True])
+    p = Recording([[True], True, 0, "1000", 0, [True, False], True])
     code, text = run(capsys, "protect", prompter=p)
     assert code == 0, text
     assert p.choices["What should we block on approve_payout?"] == [
@@ -156,7 +156,7 @@ def approve_payout(payout: Payout) -> str:
 def test_object_fields_asked(flow, capsys):
     project, _ = flow
     (project / "src" / "tools.py").write_text("def charge(req: dict) -> str:\n    return 'ok'\n")
-    p = Recording([[True], "amount, currency", 0, "500", 1, [False, False], True, True])
+    p = Recording([[True], "amount, currency", True, 0, "500", 1, [False, False], True])
     code, text = run(capsys, "protect", prompter=p)
     assert code == 0, text
     assert p.choices["What should we block on charge?"][0] == "Payouts above an amount"
@@ -187,7 +187,7 @@ tools = [approve_payout, lookup_invoice]
     assert '@signafaide.protect(agent="billing-agent", store_content=True)\ndef approve_payout(' in changes["tools.py"]
     assert "declare_tools(" not in changes["tools.py"]
     assert 'signafaide.declare_tools([t.__name__ for t in tools], agent="billing-agent")' in changes["main.py"]
-    code, text = run(capsys, "protect", prompter=ScriptedPrompter([[True, False], 3, True, True, True]))
+    code, text = run(capsys, "protect", prompter=ScriptedPrompter([[True, False], True, 3, True, True]))
     assert "Agent      billing-agent (the name the code already uses)" in text
 
 

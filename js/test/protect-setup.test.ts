@@ -74,21 +74,21 @@ const OBJECT = POSITIONAL.replace(
 /** Ticks approve_payout, block above 1000, On, also calibrate the currency, a sandbox, write. */
 const ANSWERS_OBJECT = (): (string | number | boolean | boolean[])[] => [
   [true, false, false, false],
+  true,
   0,
   "1000",
   0,
   [true, false],
-  true,
   true,
 ];
 const ANSWERS_POSITIONAL = (): (string | number | boolean | boolean[])[] => [
   [true, false, false, false],
   true,
+  true,
   0,
   "1000",
   0,
   [true, false],
-  true,
   true,
 ];
 
@@ -202,7 +202,7 @@ export async function charge(input: Charge) { return input; }
       path.join(ctx.root, "src", "tools.ts"),
       `import type { Charge } from "./types";\nexport async function charge(input: Charge) { return input; }\n`,
     );
-    const p = recordingPrompter([[true], "amount, currency", 0, "500", 1, [false, false], true, true]);
+    const p = recordingPrompter([[true], "amount, currency", true, 0, "500", 1, [false, false], true]);
     setPrompter(() => p);
     const [code, text] = await cli("protect");
     expect(code, text).toBe(0);
@@ -247,7 +247,7 @@ export const tools = {
       'declareTools(Object.keys(tools), { agent: "billing-agent" });',
     );
     // protect uses the name the code already gives.
-    setPrompter(() => scriptedPrompter([[true, false], 3, true, true, true]));
+    setPrompter(() => scriptedPrompter([[true, false], true, 3, true, true]));
     const [, text] = await cli("protect");
     expect(text).toContain("Agent      billing-agent (the name the code already uses)");
   }, 60_000);

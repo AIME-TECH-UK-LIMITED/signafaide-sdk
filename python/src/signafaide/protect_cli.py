@@ -1617,6 +1617,27 @@ def run_protect(
                 f"  {t.name}: no fields known, so only a limit on calls a minute can be set here. Annotate its argument with a dataclass, "
                 "TypedDict or model, or add rules in the console."
             )
+    # The sandbox first, before any rule is asked: blocking needs the witness, so a person who says no
+    # knows it now, and the answers below are kept in the checks file for the next run.
+    declined_sandbox = False
+    if not local and chosen and not rec.api_key and prompt.person:
+        out("")
+        out("Blocking needs signafAIde to allow each protected call; recording works on this machine without it.")
+        if prompt.confirm(
+            "Make a free sandbox for these rules? No sign-up; test data only, deleted after 30 days unless you keep it.",
+            True,
+        ):
+            rec.state.ignore_in_git()
+            rec.create_sandbox(write_url=False)
+            sb = rec.state.sandbox() or {}
+            out("Sandbox    made for you, no sign-up. Test data only, deleted after 30 days.")
+            if sb.get("claim_url"):
+                out(f"           Keep it: {sb['claim_url']}")
+        else:
+            declined_sandbox = True
+            out(
+                "  No sandbox: your answers are kept in the checks file, and the next signafaide protect offers them again."
+            )
     held = None if local else rec.checks.held_rules()
     taken = {r["id"] for r in (held or {}).get("rules", [])}
     try:
@@ -1640,13 +1661,13 @@ def run_protect(
         if pr:
             consumed.add(pr[0]["id"])
             if prompt.confirm(
-                f"An agent run on {pr[1]} proposed this rule for {t.name}; it blocks nothing yet: {rule_words(pr[0])}\n"
-                "  Use it, with the agent's value?",
+                f"A rule kept on {pr[1]} for {t.name}, not saved then (no key); it blocks nothing yet: {rule_words(pr[0])}\n"
+                "  Use it, with that value?",
                 True,
             ):
                 proposed = pr
             else:
-                out(f"  The proposal of {pr[1]} is dropped; asking as usual.")
+                out(f"  The rule kept on {pr[1]} is dropped; asking as usual.")
         if limit:
             # From the command line: the field and the limit are given, nothing is asked.
             lim = limit_choice(t, limit[0])
@@ -1660,7 +1681,7 @@ def run_protect(
             rule = lim.make(decl, _limit_text(limit[1]), rule_id(decl, lim.key, taken))
         elif proposed:
             rule = {**proposed[0], "id": rule_id(decl, proposed[0]["id"][len(decl) + 1 :] or "limit", taken)}
-            out(f"  Rule: {rule_words(rule)}  (proposed by an agent run on {proposed[1]})")
+            out(f"  Rule: {rule_words(rule)}  (kept on {proposed[1]})")
         elif not prompt.person and prompt.yes and default_rule(t, decl, set(taken)) is not None:
             # protect --yes: a sensible default for what the tool does, Calibrating (it blocks nothing).
             rule = default_rule(t, decl, taken)  # type: ignore[assignment]
@@ -1763,27 +1784,29 @@ def run_protect(
         out("Sandbox    not made: only a person at a terminal opts in. Run signafaide protect (or init) in a terminal.")
         not_done.append("no sandbox and no API key, so protected tools stop until there is one")
         finish = "signafaide protect (in a terminal)"
-    if not local and chosen and not rec.api_key and prompt.person:
-        if prompt.confirm(
-            "Make a free sandbox for these rules? No sign-up; test data only, deleted after 30 days unless you keep it.",
-            True,
-        ):
-            rec.state.ignore_in_git()
-            rec.create_sandbox(write_url=False)
-            sb = rec.state.sandbox() or {}
-            out("Sandbox    made for you, no sign-up. Test data only, deleted after 30 days.")
-            if sb.get("claim_url"):
-                out(f"           Keep it: {sb['claim_url']}")
-        else:
-            not_done.append("no sandbox and no API key, so protected tools stop until there is one")
-            finish = finish or "signafaide protect, and answer yes to the sandbox (or set SIGNAFAIDE_API_KEY)"
+    if declined_sandbox:
+        not_done.append("no sandbox and no API key, so protected tools stop until there is one")
+        finish = finish or "signafaide protect, and answer yes to the sandbox (or set SIGNAFAIDE_API_KEY)"
     changed: List[Tuple[str, str]] = []
     # With --local there is no witness to wait for: the code records, and the checks file's mode
     # for the tool (enforce when a rule is On) decides whether the local rules block.
     protect_set = set() if local else {t.name for t in chosen}
     written: List[Path] = []
     hand: List[str] = []
-    for ch in code_changes(found, protect_set, agent, root, find_tools(root) if tool else None):
+    changes = code_changes(found, protect_set, agent, root, find_tools(root) if tool else None)
+    # No terminal and no --yes: nobody to show the change to, so it is shown here and nothing is written.
+    if not prompt.person and not prompt.yes:
+        for ch in changes:
+            out(f"Change     {rel(ch.file)} (not written)")
+            for line in line_diff(ch.before, ch.after):
+                out(f"  {line}")
+            out("")
+        out(
+            "Nothing written: there is no terminal to ask before changing your files. Run signafaide protect in a "
+            "terminal, or signafaide protect --yes to apply the change above."
+        )
+        return 1, []
+    for ch in changes:
         out(f"Change     {rel(ch.file)}")
         for line in line_diff(ch.before, ch.after):
             out(f"  {line}")
@@ -1850,7 +1873,7 @@ def run_protect(
         doc["proposed"] = [p for p in doc["proposed"] if proposed_id(p) not in consumed]
     # An agent run with no key cannot save its rule at the witness: it is kept here as a local
     # Calibrating rule (the tool's mode is watch, so it blocks nothing) that a person is offered later.
-    keep_proposal = bool(not local and (limit or prompt.yes) and not prompt.person and not rec.api_key and new_rules)
+    keep_proposal = bool(not local and not rec.api_key and new_rules and (prompt.person or limit or prompt.yes))
     if keep_proposal:
         keep_proposed(doc, new_rules)
     if "proposed" in doc and not doc["proposed"]:
@@ -1902,11 +1925,8 @@ def run_protect(
                 else "local Calibrating rules (they block nothing)"
             )
             out(
-                f"           Kept in {rel(cp)} as {what}; a person who runs signafaide protect in a terminal is offered {'it' if one else 'them'}."
+                f"           Kept in {rel(cp)} as {what}; signafaide protect in a terminal offers {'it' if one else 'them'} again, with the free sandbox."
             )
-        out(
-            "           A person runs signafaide protect in a terminal and answers yes to the free sandbox; it asks for the rules again."
-        )
         not_done.append("the rules are not saved (no key yet)")
         finish = finish or "signafaide protect (in a terminal)"
         code = 1

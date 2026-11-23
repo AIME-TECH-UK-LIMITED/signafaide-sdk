@@ -10,7 +10,7 @@ A verification pack from a small demo agent (`claims-bot`) that ran against the 
 Check it on your own machine:
 
 ```sh
-npx signafaide-verify@0.5.5 pack.json --agent-keys agent-keys.json --head head.json
+npx signafaide-verify@0.5.6 pack.json --agent-keys agent-keys.json --head head.json
 ```
 
 The records are hash-only, so the content check reports "not checked": the inputs and outputs stay with the organisation that ran the agent.

@@ -248,6 +248,20 @@ def run_check(rec: Any, tool: str, pairs: List[str], agent: Optional[str] = None
         except SignafaideError:
             pass
     lines, blocked = rec.checks.dry_run(tool, args, agent or rec.default_agent)
+    # A protected tool with no key never runs (no_key), whatever the rules say: so the dry run fails too.
+    try:
+        file = rec.checks.file()
+    except Exception:
+        file = None
+    if not rec.api_key and file and C.tool_settings(file, declared_name(tool))["strict"]:
+        if lines and "Dry run:" in lines[-1]:
+            lines.pop()
+        lines.append(
+            f"would refuse {declared_name(tool)} is protected and there is no API key, so a real run is refused (no_key). "
+            "Run signafaide protect in a terminal (a free sandbox), or set SIGNAFAIDE_API_KEY."
+        )
+        lines.append("             Dry run: nothing recorded, the tool did not run. Exit code 1.")
+        return lines, 1
     return lines, 1 if blocked else 0
 
 
@@ -545,6 +559,33 @@ def _reused_link_lines(rec: Any, link: dict, days: int, tool: Optional[str]) -> 
     ]
 
 
+def key_mismatch(rec: Any, agent: str) -> Optional[str]:
+    """One line when the witness's newest record of ``agent`` was signed by a key this machine does not
+    hold: another machine (or folder) uses the same agent name with its own key, so protected calls
+    here are refused and a pack made here fails its signatures. None when they match or it cannot tell."""
+    if not rec.api_key:
+        return None
+    try:
+        client = rec.client(timeout=5)
+        h = (client.head(agent) or {}).get("head") or {}
+        rh = h.get("record_hash")
+        if not isinstance(rh, str) or not re.fullmatch(r"[0-9a-f]{64}", rh) or h.get("agent") != agent:
+            return None
+        kid = ((client.record(rh) or {}).get("record") or {}).get("key_id")
+        if not isinstance(kid, str) or not re.fullmatch(r"[0-9a-f]{16}", kid):
+            return None
+        mine = [k["key_id"] for k in rec.state.agent_public_keys() if k["agent"] == agent]
+        if kid in mine:
+            return None
+        have = ", ".join(mine) if mine else "no key for it"
+        return (
+            f"agent {agent} on the witness signs with key {kid}, but this machine has {have}: one agent name = one key. "
+            "Give this machine its own agent name, or use the same key here (signafaide keys create --print; see the production guide)."
+        )
+    except Exception:
+        return None
+
+
 def run_prove(
     rec: Any,
     prompt: Prompter,
@@ -556,6 +597,7 @@ def run_prove(
     all_: bool = False,
     dir_: Optional[Path] = None,
     days: Optional[int] = None,
+    force: bool = False,
 ) -> int:
     """``signafaide prove [tool]``: the link (or files) for an auditor, and what they show."""
     chains = chains_by_agent(rec)
@@ -581,6 +623,13 @@ def run_prove(
                 by_hash[record_hash(r)] = c
         elif e["kind"] == "outcome" and e.get("ref") in by_hash:
             by_hash[e["ref"]][1] = r
+    mismatch = key_mismatch(rec, agent)
+    if mismatch and not force:
+        out(f"No proof made: {mismatch}")
+        out("           A pack made here would fail its agent signatures. --force makes it anyway.")
+        return 1
+    if mismatch:
+        out(f"Warning    {mismatch}")
     what = f"{tool} (agent {agent})" if tool else f"agent {agent}"
     env = "Live" if (rec.api_key or "").startswith("sfa_live_") else "Sandbox" if rec.api_key else "this machine only"
     t0 = calls[0][0]["envelope"]["time"] if calls else (recs[0]["envelope"]["time"] if recs else None)

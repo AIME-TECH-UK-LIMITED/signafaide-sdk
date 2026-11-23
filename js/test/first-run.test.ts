@@ -116,11 +116,16 @@ describe("protect --yes (1, 2)", () => {
     expect(Object.keys(f.tools).sort()).toEqual(["deleteCustomerRecord", "issueRefund", "sendEmail"]);
   });
 
-  it("without a terminal and without --yes adds no rule", async () => {
+  it("without a terminal and without --yes shows the change and writes nothing", async () => {
+    const before = read("tools.ts");
     setPrompter(() => flagPrompter({ yes: false }));
-    const [, out] = await cli("protect");
+    const [c, out] = await cli("protect");
+    expect(c).toBe(1);
     expect(out).not.toContain("Rule:");
-    expect(out).toContain("no rule was chosen for sendEmail, issueRefund, deleteCustomerRecord");
+    expect(out).toContain("(not written)");
+    expect(out).toContain("Nothing written: there is no terminal to ask before changing your files.");
+    expect(read("tools.ts")).toBe(before);
+    expect(fs.existsSync(path.join(ctx.root, "signafaide.checks.json"))).toBe(false);
   });
 });
 

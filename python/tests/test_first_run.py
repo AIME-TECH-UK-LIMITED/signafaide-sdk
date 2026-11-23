@@ -123,10 +123,16 @@ def test_yes_without_a_key_keeps_the_rule_it_can_keep(flow, capsys):
     assert set(f["tools"]) == {"send_email", "issue_refund", "delete_customer_record"}
 
 
-def test_no_terminal_without_yes_asks_nothing_and_adds_no_rule(flow, capsys):
+def test_no_terminal_without_yes_shows_the_change_and_writes_nothing(flow, capsys):
+    project = flow[0] if isinstance(flow, tuple) else flow
+    before = {p: p.read_text() for p in project.rglob("*.py")}
     code, out = run(capsys, "protect", prompter=FlagPrompter(yes=False))
+    assert code == 1
     assert "Rule:" not in out
-    assert "no rule was chosen for send_email, issue_refund, delete_customer_record" in out
+    assert "(not written)" in out
+    assert "Nothing written: there is no terminal to ask before changing your files." in out
+    assert {p: p.read_text() for p in project.rglob("*.py")} == before
+    assert not (project / "signafaide.checks.json").exists()
 
 
 # --- 3: declare_tools before the main guard ------------------------------------------------------

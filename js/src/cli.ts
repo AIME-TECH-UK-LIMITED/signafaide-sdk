@@ -20,7 +20,7 @@ import { checksPath } from "./checks-runtime.js";
 import { CiError, ciCheck, ciLines } from "./ci-check.js";
 import { flagPrompter, runProtect, runRulesPublish, terminalPrompter, type Prompter } from "./protect.js";
 import { loadSession, login, logout, personWitness } from "./session.js";
-import { auditorCommands, runCheck, runProve, runPull, startFresh, statusTable } from "./tool-commands.js";
+import { auditorCommands, keyMismatch, runCheck, runProve, runPull, startFresh, statusTable } from "./tool-commands.js";
 import { VERSION } from "./version.js";
 
 export interface Command {
@@ -151,6 +151,12 @@ export async function statusLines(rec: Recorder): Promise<string[]> {
     `outbox: ${plural(s.outbox, "record")} waiting` + (s.outbox && !blocked.length ? "; run `signafaide flush`" : ""),
   );
   lines.push(...blocked);
+  // One agent name = one key: say so when the witness holds another key for an agent here.
+  if (answered && project.project)
+    for (const agent of new Set(s.chains.filter((c) => c.current).map((c) => c.agent))) {
+      const why = await keyMismatch(rec, agent);
+      if (why) lines.push(`KEY ${why}`);
+    }
   if (s.api_key) {
     try {
       const u = await rec.client(5000).usage();
@@ -327,13 +333,14 @@ export const COMMANDS: Record<string, Command> = {
   prove: {
     help: "what to give your auditor: a read-only link (or files with --files), with the calls, the rules in words, what ran before protection and the tool coverage",
     usage:
-      "prove [tool] [--agent X] [--days N] [--files] [--content] [--all]\n  --days: how long the link works (default 30, or the longest your plan allows); an active link for the same tool is reused unless --days is given\n  --files: write proof/<tool>/ (pack, agent keys, head, and the content when you say so)\n  --all: from the agent's first record, not from `signafaide start-fresh`",
+      "prove [tool] [--agent X] [--days N] [--files] [--content] [--all] [--force]\n  --days: how long the link works (default 30, or the longest your plan allows); an active link for the same tool is reused unless --days is given\n  --files: write proof/<tool>/ (pack, agent keys, head, and the content when you say so)\n  --all: from the agent's first record, not from `signafaide start-fresh`\n  --force: make it even when this machine's agent key is not the one the witness holds",
     options: {
       agent: { type: "string" },
       days: { type: "string" },
       files: { type: "boolean" },
       content: { type: "boolean" },
       all: { type: "boolean" },
+      force: { type: "boolean" },
     },
     async run(v, pos) {
       let days: number | undefined;
@@ -353,6 +360,7 @@ export const COMMANDS: Record<string, Command> = {
           files: !!v.files,
           content: v.content ? true : undefined,
           all: !!v.all,
+          force: !!v.force,
           out,
           prompt: p,
         });

@@ -78,16 +78,16 @@ async function cli(...args: string[]): Promise<[number, string]> {
   }
 }
 
-/** The answers of the mockup's terminal session: approve_payout only, named arguments, block
- * above 1000, On, also calibrate currency not GBP, a sandbox, write the code. */
+/** The answers of the mockup's terminal session: approve_payout only, named arguments, a sandbox,
+ * block above 1000, On, also calibrate currency not GBP, write the code. */
 const MOCKUP_ANSWERS = (): (string | number | boolean | boolean[])[] => [
   [true, false, false, false],
+  true,
   true,
   0,
   "1000",
   0,
   [true, false],
-  true,
   true,
 ];
 
