@@ -4,10 +4,16 @@ Notable changes to the signafAIde SDK: the TypeScript and Python packages, the M
 Every release shares one version number and is a git tag; changes to the spec (`spec/SPEC.md`) are noted with the release that made them.
 Records and packs written by a version verify with that version and later ones, unless an entry says otherwise.
 
-## Unreleased
+## v0.5.5 (2026-11-23)
+
+Spec stays 1.1; records do not change. Release fix: v0.5.4 was tagged but never published to npm or PyPI (a publish path bug); 0.5.5 is the first published `signafaide-verify` and has v0.5.4's changes below, with the fix and the changes in this entry.
 
 - Breaking: Python 3.9 is no longer supported (end of life October 2025); Python 3.10 or later is required.
 - Breaking: Node.js 18 is no longer supported (end of life April 2025); the npm packages need Node.js 20 or later.
+- `release.yml` publishes the npm package from `./dist/...`: without the `./`, npm read the path as a GitHub repository and the v0.5.4 publish failed before npm or PyPI had it.
+- Supply chain: OpenSSF Scorecard and CodeQL run on the repository, every GitHub Action is pinned to a commit, Dependabot proposes weekly updates, and the remaining vulnerability findings in the lockfiles are cleared. SECURITY.md gives the security@ address and response targets.
+- The packages are built with tsup 9 (building needs Node.js 22.18 or later); CI installs the packed `signafaide`, `signafaide-mcp` and `signafaide-verify` packages on Node.js 20 and runs them there.
+- README: a recorded demo of the payout example, a diagram of how a call is checked and proved, and how to protect a tool in code; a code of conduct, issue forms and a pull request template.
 
 ## v0.5.4 (2026-11-20)
 

@@ -136,8 +136,8 @@ describe("the skill", () => {
     expect(body).not.toMatch(/—|–/);
   });
 
-  it("the version is 0.5.4 everywhere the package says it", () => {
-    expect(VERSION).toBe("0.5.4");
+  it("the version is 0.5.5 everywhere the package says it", () => {
+    expect(VERSION).toBe("0.5.5");
     expect(JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8")).version).toBe(VERSION);
     expect(JSON.parse(fs.readFileSync(path.join(__dirname, "../mcp/package.json"), "utf8")).version).toBe(VERSION);
   });
