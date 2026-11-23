@@ -342,7 +342,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ inputs.version }}
         run: |
-          at=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null || true)
+          # On a 404 gh prints the error body to stdout, so its exit status decides, not its output.
+          at=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null) || at=""
           if [ -z "$at" ]; then
             gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
           elif [ "$at" != "$GITHUB_SHA" ]; then
