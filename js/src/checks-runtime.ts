@@ -1539,7 +1539,7 @@ export class ChecksState {
       const r = this.protectRecord(pe);
       if (r && r.version === v) return;
       const own = isObj(doc.rules.protect) ? doc.rules.protect : {};
-      const ahead = r && typeof r.version === "number" && r.version > v;
+      const ahead = r && Number.isInteger(r.version) && r.version > v;
       writeAtomic(
         this.protectPath(pe),
         pretty({ witness: this.rec.url, version: v, protect: ahead ? { ...own, ...r!.protect } : own }),
@@ -1560,7 +1560,7 @@ export class ChecksState {
     // process (an older release) wrote over it, or one that no longer parses, may protect others.
     const v = isObj(raw) && isObj(raw.rules) ? raw.rules.version : undefined;
     const r = this.protectRecord(pe);
-    const rec = r && typeof r.version === "number" && r.version === v ? r : null;
+    const rec = r && Number.isInteger(r.version) && r.version === v ? r : null;
     return { protect: { ...named, ...(r ? r.protect : {}) }, version: rec ? rec.version : null, unknown: !rec };
   }
 

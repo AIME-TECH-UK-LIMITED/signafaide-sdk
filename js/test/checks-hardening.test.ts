@@ -942,19 +942,24 @@ describe("hardening: the witness's keys", () => {
     ctx.service.servedVersion = null;
   });
 
-  it("a protect record without a version never counts: the protection list is unknown", async () => {
-    await noFileProtecting({ pay: { fail: "closed" } });
-    const f = rulesFiles();
-    fs.writeFileSync(f.record, JSON.stringify({ witness: ctx.rec.url, protect: { pay: { fail: "closed" } } }));
-    breakHeldCopy();
-    const e = await refused("lookup");
-    expect(e.code).toBe("rules_unavailable");
-    expect(e.message).toContain("protection list unknown");
-    // The dry run gives exactly the reason the call gave.
-    expect(ctx.rec.checks.dryRun("lookup", { amount: 5 }, "support-bot").lines).toContain(
-      `would refuse ${e.message} (rules_unavailable)`,
-    );
-  });
+  it.each([["missing"], [1.5], [true], ["1"]])(
+    "a protect record without a whole-number version never counts (%s): the protection list is unknown",
+    async (version) => {
+      await noFileProtecting({ pay: { fail: "closed" } });
+      const f = rulesFiles();
+      const rec: Record<string, unknown> = { witness: ctx.rec.url, protect: { pay: { fail: "closed" } } };
+      if (version !== "missing") rec.version = version;
+      fs.writeFileSync(f.record, JSON.stringify(rec));
+      breakHeldCopy();
+      const e = await refused("lookup");
+      expect(e.code).toBe("rules_unavailable");
+      expect(e.message).toContain("protection list unknown");
+      // The dry run gives exactly the reason the call gave.
+      expect(ctx.rec.checks.dryRun("lookup", { amount: 5 }, "support-bot").lines).toContain(
+        `would refuse ${e.message} (rules_unavailable)`,
+      );
+    },
+  );
 
   it("a copy from before 0.5.4 read while still valid gets its protect record, at status too", async () => {
     ctx.service.publishRules(ctx.rec.apiKey!, [], { mode: "enforce", protect: { pay: { fail: "closed" } } });

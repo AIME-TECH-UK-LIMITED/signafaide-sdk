@@ -145,6 +145,13 @@ NO_KEY_WHY = (
 )
 
 
+def _whole(x: object) -> bool:
+    """A JSON whole number, as JavaScript's Number.isInteger reads it: 2 and 2.0 yes, 1.5 and true no."""
+    if isinstance(x, bool):
+        return False
+    return isinstance(x, int) or (isinstance(x, float) and x.is_integer())
+
+
 class CheckError(SignafaideError):
     """A tool call that did not run: ``blocked`` (a check or the witness's ruling), ``no_ruling``,
     ``rules_unavailable``, ``no_key`` (strict without a key) or ``state`` (the checks file is
@@ -1413,10 +1420,10 @@ class ChecksState:
             if not isinstance(cur, dict) or not isinstance(cur.get("rules"), dict) or cur["rules"].get("version") != v:
                 return
             r = self._protect_record(pe)
-            if r is not None and r.get("version") == v:
+            if r is not None and _whole(r.get("version")) and r.get("version") == v:
                 return
             own = doc["rules"].get("protect") if isinstance(doc["rules"].get("protect"), dict) else {}
-            ahead = r is not None and type(r.get("version")) is int and r["version"] > v
+            ahead = r is not None and _whole(r.get("version")) and r["version"] > v
             _write_pretty(
                 self._protect_path(pe),
                 {"witness": self.rec.url, "version": v, "protect": {**own, **r["protect"]} if ahead else own},
@@ -1440,7 +1447,7 @@ class ChecksState:
         # process (an older release) wrote over it, or one that no longer parses, may protect others.
         v = rules.get("version") if isinstance(rules, dict) else None
         r = self._protect_record(pe)
-        rec = r if r is not None and type(r.get("version")) is int and r.get("version") == v else None
+        rec = r if r is not None and _whole(r.get("version")) and r.get("version") == v else None
         return {
             "protect": {**named, **(r["protect"] if r else {})},
             "version": rec.get("version") if rec else None,

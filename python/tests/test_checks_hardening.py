@@ -985,10 +985,14 @@ def test_rulings_naming_a_different_version_each_call_stay_bounded(online, servi
     service.served_version = None
 
 
-def test_a_protect_record_without_a_version_never_counts(online, service, project):
+@pytest.mark.parametrize("version", ["missing", 1.5, True, "1"])
+def test_a_protect_record_without_a_version_never_counts(online, service, project, version):
     _no_file_protecting(online, service, project, {"pay": {"fail": "closed"}})
     _, record, _ = _rules_files(online, service)
-    record.write_text(json.dumps({"witness": online.url, "protect": {"pay": {"fail": "closed"}}}))
+    rec = {"witness": online.url, "protect": {"pay": {"fail": "closed"}}}
+    if version != "missing":
+        rec["version"] = version
+    record.write_text(json.dumps(rec))
     _break_held_copy(online)
     e = _refused("lookup")
     assert e.code == "rules_unavailable" and "protection list unknown" in str(e)
@@ -1239,3 +1243,10 @@ def test_the_rule_set_documents_fingerprint_exceptions_are_optional_and_validate
         {**ok, "fingerprint_exceptions": [{"kind": "description", "fingerprint": "ab" * 32}]}
     )
     assert "listed twice" in C.rule_set_errors({**ok, "fingerprint_exceptions": ok["fingerprint_exceptions"] * 2})
+
+
+def test_whole_reads_versions_as_javascript_does():
+    from signafaide.checks_runtime import _whole
+
+    assert _whole(2) and _whole(2.0)
+    assert not _whole(1.5) and not _whole(True) and not _whole("1") and not _whole(None)
