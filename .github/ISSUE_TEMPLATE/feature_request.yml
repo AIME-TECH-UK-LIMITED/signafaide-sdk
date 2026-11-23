@@ -1,0 +1,16 @@
+name: Feature request
+description: A framework, check, rule or command you would like signafAIde to support
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The agent, its tools and what you want to check, block or prove.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help
+      description: The API, command or behaviour you have in mind, if any.

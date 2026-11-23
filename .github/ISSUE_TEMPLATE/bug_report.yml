@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in an SDK, the CLI, the MCP server or the verifier does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a security problem, do not open an issue: see [SECURITY.md](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/blob/main/SECURITY.md).
+        Do not paste API keys, claim links or record contents here.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - TypeScript SDK or CLI (signafaide on npm)
+        - Python SDK or CLI (signafaide on PyPI)
+        - MCP server (signafaide-mcp)
+        - LangChain middleware (langchain-signafaide)
+        - Rust verifier or core
+        - GitHub Action
+        - Coding-agent plugin or agent setup
+        - Spec or test vectors
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `npx signafaide --version` or `signafaide --version`
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command or code you ran, what you expected, and what you got (paste the output).
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node.js or Python version, and the coding agent or framework if one is involved.
