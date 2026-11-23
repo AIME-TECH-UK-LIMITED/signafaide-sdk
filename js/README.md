@@ -280,7 +280,7 @@ import { verifyPack, loadDrandVerifier } from "signafaide/core";
 const report = verifyPack(pack, serviceKeys, { drand: await loadDrandVerifier() });
 ```
 
-`record`, `wrapTools` and the CLI need Node 18+ because they keep local state on disk.
+`record`, `wrapTools` and the CLI need Node 20+ because they keep local state on disk.
 
 
 **For an auditor** the agent keys must come from you, not from the pack (otherwise a service could add a key of its own): `signafaide keys export -o agent-keys.json` writes every agent key, each signed by itself. The auditor runs the standalone verifier, `npx signafaide-verify@<version> pack.json --agent-keys agent-keys.json --head head.json` (`signafaide prove --files` prints it with this release's version; also on PyPI and as a single binary: [for auditors](../README.md#for-auditors)). It uses the hosted witness's keys pinned in it and checks them against the published list online; for a self-hosted witness add `--keys <witness>/.well-known/signafaide-keys.json`. `head.json` is your `.signafaide/head.json`, which catches records cut off at the end. Without `--agent-keys` the client-signature check says `NOT INDEPENDENT` and the result is FAIL; `--trust-embedded-agent-keys` accepts the pack's keys and says so in the result line. On your own machine, `signafaide verify pack.json` uses this project's agent keys automatically. Public timestamps are checked online (`--timestamp-check <url>`, default `https://mempool.space/api`); with `--offline` they show `NOT CHECKED`, never confirmed. `signafaide keys rotate --agent X` gives an agent a new key; the SDK signs the registration of the new key with the old one.

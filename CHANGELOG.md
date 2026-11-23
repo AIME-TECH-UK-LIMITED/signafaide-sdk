@@ -4,6 +4,11 @@ Notable changes to the signafAIde SDK: the TypeScript and Python packages, the M
 Every release shares one version number and is a git tag; changes to the spec (`spec/SPEC.md`) are noted with the release that made them.
 Records and packs written by a version verify with that version and later ones, unless an entry says otherwise.
 
+## Unreleased
+
+- Breaking: Python 3.9 is no longer supported (end of life October 2025); Python 3.10 or later is required.
+- Breaking: Node.js 18 is no longer supported (end of life April 2025); the npm packages need Node.js 20 or later.
+
 ## v0.5.4 (2026-11-20)
 
 Spec stays 1.1; records do not change. The new standalone `signafaide-verify` packages start at this version.

@@ -14,6 +14,6 @@ This plugin adds:
 - The service keeps these records with no time limit, because they are the evidence. A sandbox that nobody claims expires. See the [privacy notice](https://signafaide.co.uk/legal/privacy).
 - Requests to the service carry a client header: the SDK name and version, the runtime and its version, the framework adapter in use, the coding agent that set the project up, and how the request was made. `verify` and `export` also send one event naming the command. Never content, file paths, hostnames or user names. `SIGNAFAIDE_TELEMETRY=0` drops the adapter, the agent and the events.
 
-Nothing is sent until a person runs `signafaide init` (a free sandbox: no account, email or card) or sets `SIGNAFAIDE_API_KEY`; `SIGNAFAIDE_URL` points it at a self-hosted witness. The SDK needs Node.js 18 or later, or Python 3.9 or later.
+Nothing is sent until a person runs `signafaide init` (a free sandbox: no account, email or card) or sets `SIGNAFAIDE_API_KEY`; `SIGNAFAIDE_URL` points it at a self-hosted witness. The SDK needs Node.js 20 or later, or Python 3.10 or later.
 
 `skills/signafaide/SKILL.md` is generated from `js/src/skill.ts` with `npm run plugin` in `js/`.

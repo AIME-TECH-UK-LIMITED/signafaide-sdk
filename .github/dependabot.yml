@@ -1,0 +1,41 @@
+# Weekly dependency updates, one grouped pull request per ecosystem and folder.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+      - "/action"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    # js/mcp has no lockfile of its own: its dependencies are installed and locked through js.
+    directory: "/js"
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directories:
+      - "/python"
+      - "/python-langchain"
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directories:
+      - "/core"
+      - "/verifier"
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
