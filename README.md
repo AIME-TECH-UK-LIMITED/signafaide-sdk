@@ -74,7 +74,9 @@ def approve_payout(payee: str, amount: float, currency: str): ...
 ```ts
 import { protect } from "signafaide";
 
-export const approvePayoutTool = protect(approvePayout, { args: ["payee", "amount", "currency"], agent: "payout-bot" });
+export const tools = {
+  approve_payout: protect(approve_payout, { args: ["payee", "amount", "currency"], agent: "payout-bot" }),
+};
 ```
 
 `pull` fetches the rules saved in the console, `login` signs a person in to save rules after the sandbox is kept. A runnable example: [`examples/payout-agent`](examples/payout-agent); starters with a protected tool in place: [`templates/`](templates). To wrap tools by hand, see the reference sections of the [Python](python/README.md) and [TypeScript](js/README.md) READMEs.
