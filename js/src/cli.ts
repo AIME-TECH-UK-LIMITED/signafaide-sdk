@@ -20,7 +20,7 @@ import { checksPath } from "./checks-runtime.js";
 import { CiError, ciCheck, ciLines } from "./ci-check.js";
 import { flagPrompter, runProtect, runRulesPublish, terminalPrompter, type Prompter } from "./protect.js";
 import { loadSession, login, logout, personWitness } from "./session.js";
-import { runCheck, runProve, runPull, startFresh, statusTable } from "./tool-commands.js";
+import { auditorCommands, runCheck, runProve, runPull, startFresh, statusTable } from "./tool-commands.js";
 import { VERSION } from "./version.js";
 
 export interface Command {
@@ -600,7 +600,7 @@ export const COMMANDS: Record<string, Command> = {
         const file = v.output ?? "agent-keys.json";
         fs.writeFileSync(file, JSON.stringify(doc, null, 2) + "\n");
         out(
-          `wrote ${file} (${plural(doc.keys.length, "key")}); give it to your auditors with pack.json and head.json: signafaide verify pack.json --keys <witness>/.well-known/signafaide-keys.json --agent-keys ${file} --head head.json`,
+          `wrote ${file} (${plural(doc.keys.length, "key")}); give it to your auditors with pack.json and head.json: ${auditorCommands(rec.url, file)[0]}`,
         );
         return 0;
       }
@@ -980,7 +980,7 @@ export const COMMANDS: Record<string, Command> = {
     async run(v, pos) {
       const rec = v.url ? configure({ quiet: true, via: "cli", url: personWitness(v.url) }) : recorder();
       if (pos[0] === "pull") {
-        out(await rec.checks.pullRules());
+        out(await rec.checks.forcedPull());
         return "rules" in rec.checks.problems ? 1 : 0;
       }
       if (pos[0] === "publish") {

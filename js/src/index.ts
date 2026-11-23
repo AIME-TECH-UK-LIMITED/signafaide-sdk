@@ -11,6 +11,7 @@
  */
 
 import { installNodeCrypto } from "./nodecrypto.js";
+import { pinned } from "./pinned.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -27,24 +28,24 @@ import { plural } from "./plural.js";
 import { recordHash, type SignedRecord } from "./records.js";
 import type { State } from "./state.js";
 import { DEFAULT_TIMESTAMP_URL, lookupTimestamps } from "./timestamps.js";
+import { loadContent, plainHttp, readInput } from "./pack-inputs.js";
 import {
   DRAND_NOT_CHECKED,
   KeysRequired,
-  contentFromText,
   isLoopbackUrl,
   loadDrandVerifier,
   parseAgentKeys,
   parseHeadFile,
-  parseServiceKeys,
+  serviceKeySet,
   timestampHeights,
   verifyLocalState,
   verifyPack,
   type KeyDoc,
-  type LocalContent,
   type Report,
 } from "./verifier.js";
 
 export * from "./core.js";
+export { loadContent } from "./pack-inputs.js";
 
 installNodeCrypto();
 export {
@@ -209,24 +210,6 @@ export function checkHeld(rec: Recorder): {
   return { records, segments: segs.length, failures };
 }
 
-async function readInput(src: string | object, flag: string): Promise<unknown> {
-  if (typeof src !== "string") return src;
-  if (/^https?:\/\//.test(src)) {
-    if (src.startsWith("http://")) {
-      if (!isLoopbackUrl(src)) {
-        throw new Error(
-          `${flag} ${src} uses plain http://, which anyone on the network path can alter; use https:// (plain http is accepted only from this machine, e.g. http://127.0.0.1)`,
-        );
-      }
-      console.error(`WARNING: ${flag} ${src} uses plain http:// on this machine; the keys do not count as independent`);
-    }
-    return parseJson(JSON.stringify(await (await import("./http.js")).fetchJson(src)));
-  }
-  return parseJson(fs.readFileSync(src, "utf8"));
-}
-
-const plainHttp = (src: unknown): boolean => typeof src === "string" && src.startsWith("http://");
-
 /** What the local verify could not check because the records have not reached a witness yet. */
 export function notYet(unsent: number, total: number, hasKey: boolean): string[] {
   if (!unsent) return [];
@@ -239,17 +222,6 @@ export function notYet(unsent: number, total: number, hasKey: boolean): string[]
   ];
 }
 
-/** record_hash -> {content, salt} from a chain .jsonl file or every *.jsonl below a folder (§7). */
-export function loadContent(src: string): Map<string, LocalContent> {
-  const out = new Map<string, LocalContent>();
-  const walk = (p: string): void => {
-    if (fs.statSync(p).isDirectory()) for (const f of fs.readdirSync(p).sort()) walk(path.join(p, f));
-    else if (p === src || p.endsWith(".jsonl")) contentFromText(fs.readFileSync(p, "utf8"), out);
-  };
-  walk(src);
-  return out;
-}
-
 /**
  * Run the §7 verifier on a pack (path or object) or, with no pack, on the local
  * `.signafaide` state. `String(report)` is one line per check and PASS or FAIL;
@@ -260,9 +232,10 @@ export async function verify(pack?: string | object | null, opts: VerifyOptions 
   const rec = getRecorder();
   const notes: string[] = [];
   let keys: KeyDoc[] | null = null;
+  let revoked: string[] = [];
   let keysPlain = false;
   if (opts.keys !== undefined) {
-    keys = parseServiceKeys(await readInput(opts.keys, "--keys"));
+    ({ keys, revoked } = serviceKeySet(await readInput(opts.keys, "--keys")));
     keysPlain = plainHttp(opts.keys);
     notes.push(`service keys: ${typeof opts.keys === "string" ? opts.keys : "given"}`);
   } else if (pack == null && !Object.keys(rec.state.chainHeads()).length) {
@@ -276,7 +249,9 @@ export async function verify(pack?: string | object | null, opts: VerifyOptions 
     }
     keysPlain = url.startsWith("http://");
     try {
-      keys = parseServiceKeys(await rec.client().request("GET", "/.well-known/signafaide-keys.json", { auth: false }));
+      ({ keys, revoked } = serviceKeySet(
+        await rec.client().request("GET", "/.well-known/signafaide-keys.json", { auth: false }),
+      ));
       notes.push(`service keys: ${url}${keysPlain ? " (plain http on this machine: not independent)" : ""}`);
     } catch (e) {
       if (pack != null || Object.keys(rec.state.chainHeads()).length) {
@@ -312,6 +287,7 @@ export async function verify(pack?: string | object | null, opts: VerifyOptions 
       keys ?? [],
       drand,
       keysPlain,
+      [...new Set([...revoked, ...serviceKeySet(pinned.doc).revoked])],
     );
     notes.unshift(`local state: ${st.home}`);
     const unsent = records.filter((r) => !r.receipt).length;
@@ -377,6 +353,9 @@ export async function verify(pack?: string | object | null, opts: VerifyOptions 
       drand,
       serviceKeysPlainHttp: keysPlain,
       agentKeysPlainHttp: plainHttp(opts.agentKeys),
+      // The release's pinned revocations always apply, whatever the keys' source (spec §7):
+      // `--trust-embedded-keys` too.
+      revokedServiceKeys: [...new Set([...revoked, ...serviceKeySet(pinned.doc).revoked])],
     });
     if (!agentKeys && !opts.trustEmbeddedAgentKeys)
       notes.push(

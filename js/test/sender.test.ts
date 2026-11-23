@@ -1,5 +1,6 @@
 /** With a witness: the background sender, BLOCKED chains and repair, clocks ahead,
  * ephemeral disks, segments, claim links and errors about the API key. */
+import { SignafaideError } from "../src/http.js";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
@@ -13,6 +14,15 @@ import { useProject } from "./helpers.js";
 const ctx = useProject({ optIn: true });
 const rec = (): Recorder => getRecorder();
 const tick = (r: Recorder): Promise<void> => (r as any).tick();
+
+/** Wait for `cond`, a state the sender reaches (polled, never a fixed sleep); fails after 15 s. */
+async function until(cond: () => boolean): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error("the sender never reached the state waited for");
+    await new Promise((res) => setTimeout(res, 5));
+  }
+}
 const recordCalls = () => ctx.service.calls.filter((c) => c === "POST /v1/records").length;
 const chain = () =>
   rec()
@@ -56,14 +66,100 @@ describe("background sender", () => {
     expect(r.state.outboxSize()).toBe(0);
   });
 
+  it("an explicit flush keeps the halt while it runs: the background sender never sends alongside it", async () => {
+    ctx.service.quota = 0;
+    const r = rec();
+    for (let i = 0; i < 3; i++) note(`n${i}`, {});
+    await tick(r); // refused: halted
+    expect(recordCalls()).toBe(1);
+    const real = (r as any).shipChain.bind(r);
+    let release!: () => void;
+    const held = new Promise<void>((res) => (release = res));
+    let entered!: () => void;
+    const inside = new Promise<void>((res) => (entered = res));
+    (r as any).shipChain = async (...a: unknown[]) => {
+      entered();
+      await held; // the explicit flush is in the middle of its shipment
+      return real(...a);
+    };
+    const explicit = r.flush();
+    await inside;
+    const ticks = [0, 1, 2, 3, 4].map(() => tick(r)); // the sender's ticks while it runs
+    release();
+    expect((await explicit).errors).not.toEqual({});
+    await Promise.all(ticks);
+    for (let i = 0; i < 5; i++) await tick(r);
+    expect(recordCalls()).toBe(2); // the explicit one only
+    (r as any).shipChain = real;
+  });
+
+  for (const where of ["resolving the project", "shipping"] as const)
+    it(`an explicit flush that fails while ${where} (a network error) keeps the halt`, async () => {
+      ctx.service.quota = 0;
+      const r = rec();
+      for (let i = 0; i < 3; i++) note(`n${i}`, {});
+      await tick(r); // refused: halted
+      expect(recordCalls()).toBe(1);
+      const net = new SignafaideError("Cannot reach the service.", { code: "network" });
+      const name = where === "shipping" ? "shipChain" : "resolveProject";
+      const real = (r as any)[name];
+      (r as any)[name] = async () => {
+        throw net;
+      };
+      expect(Object.values((await r.flush()).errors)[0].code).toBe("network");
+      (r as any)[name] = real;
+      expect((r as any).halted).toBeDefined();
+      for (let i = 0; i < 5; i++) await tick(r);
+      expect(recordCalls()).toBe(1); // the halt held: the background sender sent nothing
+    });
+
+  it("an explicit flush with nothing to ship (another process drained the outbox) asks the witness once and ends the halt", async () => {
+    ctx.service.quota = 0;
+    const r = rec();
+    for (let i = 0; i < 3; i++) note(`n${i}`, {});
+    await tick(r); // refused: halted
+    expect((r as any).halted).toBeDefined();
+    ctx.service.quota = null;
+    const cli = new Recorder({ url: ctx.service.url, quiet: true }); // `signafaide flush` in another process
+    try {
+      expect((await cli.flush()).left).toBe(0);
+    } finally {
+      cli.close();
+    }
+    const before = ctx.service.calls.length;
+    const r2 = await r.flush();
+    expect([r2.shipped, r2.left, r2.errors]).toEqual([0, 0, {}]);
+    expect(ctx.service.calls.slice(before)).toEqual(["GET /v1/project"]);
+    expect((r as any).halted).toBeUndefined();
+  });
+
+  it("the halt probe honours the caller's flush timeout: none left, no request, the halt stays", async () => {
+    ctx.service.quota = 0;
+    const r = rec();
+    for (let i = 0; i < 3; i++) note(`n${i}`, {});
+    await tick(r); // refused: halted
+    ctx.service.quota = null;
+    const cli = new Recorder({ url: ctx.service.url, quiet: true });
+    try {
+      await cli.flush();
+    } finally {
+      cli.close();
+    }
+    const before = ctx.service.calls.length;
+    await r.flush(0); // no time left for the probe
+    expect(ctx.service.calls.slice(before)).toEqual([]);
+    expect((r as any).halted).toBeDefined();
+  });
+
   it("one flush in flight, and forced flushes honour the backoff", async () => {
     ctx.service.failAlways = [503, { error: { code: "unavailable", message: "Down for maintenance.", docs: "d" } }];
     const r = configure({ quiet: true, flushSize: 5, flushIntervalMs: 60_000 });
     for (let i = 0; i < 60; i++) r.write("note", `n${i}`, {}); // 12 forced flushes in a storm
-    await new Promise((res) => setTimeout(res, 300));
+    // The one attempt has ended (refused) and set its backoff: the other 11 found it in flight.
+    await until(() => !(r as any).inFlight && (r as any).nextAttempt > 0);
     expect(recordCalls()).toBe(1);
-    for (let i = 0; i < 40; i++) r.write("note", `m${i}`, {});
-    await new Promise((res) => setTimeout(res, 300));
+    for (let i = 0; i < 40; i++) r.write("note", `m${i}`, {}); // each forced flush meets the backoff at once
+    expect((r as any).inFlight).toBe(false);
     expect(recordCalls()).toBe(1); // inside the backoff
     ctx.service.failAlways = null;
   });
@@ -75,8 +171,11 @@ describe("background sender", () => {
     const url = `http://127.0.0.1:${(hole.address() as net.AddressInfo).port}`;
     try {
       const r = configure({ quiet: true, url, flushIntervalMs: 20 });
+      const realTick = (r as any).tick.bind(r);
+      let ticks = 0;
+      (r as any).tick = () => (ticks++, realTick());
       r.write("note", "n", {});
-      await new Promise((res) => setTimeout(res, 1200)); // 60 ticks
+      await until(() => ticks >= 60); // 60 ticks of the sender, counted
       expect(conns.length).toBe(1);
       r.close();
     } finally {

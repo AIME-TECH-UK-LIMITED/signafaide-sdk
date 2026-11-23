@@ -56,6 +56,10 @@ const KEY_MAX_AGE_MS = 7 * 86_400_000 - 3_600_000;
 /** Problems found on this machine, not refusals by the witness: they never slow shipping down. */
 const LOCAL_CODES = new Set(["too_old", "chain_exists"]);
 
+/** Refusals that apply to the whole project and that retrying cannot fix: the background sender
+ * stops until the configuration changes (§8). */
+const WIDE_CODES: readonly string[] = ["invalid_key", "quota_exceeded", "plan_required"];
+
 /** Set while a compare runs a candidate function: any record written in that context is
  * refused, so a candidate never adds to a chain (and a recorded tool it calls never runs). */
 export const noWrites = new AsyncLocalStorage<string>();
@@ -868,10 +872,34 @@ export class Recorder {
    * errors about the key) to the one-sentence fix. Records of other projects (an earlier key)
    * wait for that key. An explicit flush always tries, even after a refusal. */
   flush(timeoutMs = 10_000, mode: IoMode = "fg"): Promise<FlushResult> {
-    if (mode === "fg") {
-      this.halted = undefined;
-      this.blocked.clear();
-    }
+    if (mode !== "fg") return this.flushNow(timeoutMs, mode);
+    const started = monotonicMs();
+    this.blocked.clear();
+    // An explicit flush that the refusal no longer stops ends the halt of the background sender.
+    // Never at its start: a tick would send alongside it while it runs.
+    return this.flushNow(timeoutMs, mode).then(async (r) => {
+      const clean = !Object.values(r.errors).some((e) => !LOCAL_CODES.has(e.code));
+      // Only a flush that sent something and met no refusal or failure (a network error, the
+      // project not resolved) shows the refusal no longer applies.
+      if (r.shipped > 0 && clean) this.halted = undefined;
+      else if (this.halted && clean && r.shipped === 0 && !this.waiting() && this.apiKey) {
+        // Nothing to ship (another process drained the outbox): one cheap authenticated request
+        // tells whether the witness accepts this configuration now.
+        try {
+          // Within the caller's timeout: what is left of it, at most 10 s.
+          const left = Math.min(10_000, timeoutMs - (monotonicMs() - started));
+          if (left <= 0) return r;
+          await this.client(left, this.apiKey).project();
+          this.halted = undefined;
+        } catch {
+          /* still refused, or unreachable: the halt stays */
+        }
+      }
+      return r;
+    });
+  }
+
+  private flushNow(timeoutMs: number, mode: IoMode): Promise<FlushResult> {
     return this.serial(mode, async () => {
       let shipped = 0;
       const errors: Record<string, SignafaideError> = {};
@@ -1243,7 +1271,7 @@ export class Recorder {
       this.nextAttempt = 0;
       return;
     }
-    const wide = errs.find((e) => e.permanent && ["invalid_key", "quota_exceeded", "plan_required"].includes(e.code));
+    const wide = errs.find((e) => e.permanent && WIDE_CODES.includes(e.code));
     if (wide) {
       this.halted = { fp, err: wide };
       this.report(

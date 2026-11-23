@@ -1,0 +1,48 @@
+# The npm package signafaide-verify on the oldest Node.js it supports (20): packed as npm would
+# publish it, installed into an empty project, and run through the spec vectors and the input cases
+# (scripts/verify-vectors.mjs) on Node.js 20, with its tests' build for the pinned-keys cases.
+
+name: signafaide-verify on Node.js 20
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/verify-node20.yml"
+      - "js/**"
+      - "scripts/verify-vectors.mjs"
+      - "scripts/fixtures/**"
+      - "spec/**"
+      - "verifier/service-keys.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-node20-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node20:
+    name: Packed signafaide-verify on Node.js 20
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20.20.2"
+      - name: Build and pack on Node.js 20
+        run: |
+          node --version
+          (cd js && npm ci --ignore-scripts && npx tsup --config tsup.verify.config.ts)
+          mkdir -p /tmp/pack && (cd js/verify && npm pack --pack-destination /tmp/pack)
+      - name: Install into an empty project and run the vectors on Node.js 20
+        run: |
+          mkdir /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null
+          npm install --ignore-scripts /tmp/pack/signafaide-verify-*.tgz
+          ./node_modules/.bin/signafaide-verify --version
+          cd "$GITHUB_WORKSPACE"
+          node scripts/verify-vectors.mjs /tmp/smoke/node_modules/.bin/signafaide-verify --test js/verify/dist-test/cli.js

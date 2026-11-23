@@ -925,7 +925,7 @@ pub fn generate() -> Value {
     ];
     let mut cases = Vec::new();
     for (name, held, item, want) in acc {
-        let got = rules::accept((!held.is_null()).then_some(held), &item, &keys, PROJECT, ENV);
+        let got = rules::accept((!held.is_null()).then_some(held), &item, &keys, PROJECT, ENV, &[]);
         assert_eq!(got, want, "rule update {name}");
         cases.push(json!({"name": name, "held": held, "offered": item, "expect": want}));
     }
@@ -1436,7 +1436,7 @@ pub fn generate() -> Value {
         let mut held = fingerprints::Held::default();
         let mut err = None;
         for it in &items {
-            match fingerprints::accept(&held, it, &keys) {
+            match fingerprints::accept(&held, it, &keys, &[]) {
                 Ok(h) => held = h,
                 Err(e) => {
                     err = Some(e);

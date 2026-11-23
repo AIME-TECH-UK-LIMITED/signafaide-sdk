@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { main, setPrompter } from "../src/cli.js";
 import { CheckError, SignafaideBlocked } from "../src/checks-runtime.js";
 import { verify } from "../src/index.js";
+import { VERSION } from "../src/version.js";
+import { auditorCommands } from "../src/tool-commands.js";
 import {
   addImport,
   codeChanges,
@@ -365,6 +367,16 @@ describe("protect, then the first blocked payout", () => {
     // prove --files: a pack that verifies, with the rules in words.
     [c, out] = await cli("prove", "approve_payout", "--files", "--content");
     expect(c, out).toBe(0);
+    // The auditor is pointed at the standalone verifier, pinned to this release; this witness is not
+    // the hosted one, so its own key list is named (the hosted witness's keys are pinned in it).
+    for (const via of ["npx", "uvx"])
+      expect(out).toContain(
+        `${via} signafaide-verify@${VERSION} pack.json --keys ${ctx.service.url}/.well-known/signafaide-keys.json --agent-keys agent-keys.json --head head.json --content content.jsonl`,
+      );
+    expect(auditorCommands("https://api.signafaide.co.uk/", "agent-keys.json")).toEqual([
+      `npx signafaide-verify@${VERSION} pack.json --agent-keys agent-keys.json --head head.json`,
+      `uvx signafaide-verify@${VERSION} pack.json --agent-keys agent-keys.json --head head.json`,
+    ]);
     const dir = path.join(ctx.root, "proof", "approve_payout");
     expect(fs.readdirSync(dir).sort()).toEqual(["agent-keys.json", "content.jsonl", "head.json", "pack.json"]);
     const r = await verify(path.join(dir, "pack.json"), {

@@ -246,6 +246,16 @@ export interface ReportScope {
 export const PENDING_MEANS =
   "pending: co-signed, waiting for the public timestamp (an anchor is made every hour and usually confirms within a few hours); never counted as passed";
 
+/** One line of text output with every control character (and the Unicode line and paragraph
+ * separators) written as `\uXXXX`, so a value from the pack can never break a line (§7). The
+ * Rust core's `clean_line` writes the same. */
+export function cleanLine(line: string): string {
+  return line.replace(
+    /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g,
+    (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+  );
+}
+
 export class Report {
   /** Lines shown after the checks, before the result line: for local state, what still needs
    * the witness (co-signature, public timestamp). */
@@ -287,6 +297,18 @@ export class Report {
   /** e.g. `PASS: export of every agent, all records, generated <t>`, or
    * `PASS (agent keys taken from the pack, not independent): export of ...` (§7). */
   get resultLine(): string {
+    let line = this.unqualifiedResultLine();
+    for (const note of this.qualifiers) {
+      const i = line.indexOf(": ");
+      const head = line.slice(0, i);
+      line = head.endsWith(")")
+        ? `${head.slice(0, -1)}; ${note})${line.slice(i)}`
+        : `${head} (${note})${line.slice(i)}`;
+    }
+    return line;
+  }
+
+  private unqualifiedResultLine(): string {
     const s = this.scope;
     let counts = countsText(this.checks, this.nothingCosigned);
     if (this.blocked.length)
@@ -383,8 +405,21 @@ export class Report {
     return out;
   }
 
+  /** The text output: `lines()`, each through `cleanLine`, so no value from the pack (a project
+   * name, a field name in an error) can start a line of its own and pass for a result line (§7). */
   toString(): string {
-    return this.lines().join("\n");
+    return this.lines().map(cleanLine).join("\n");
+  }
+
+  /** Notes a caller adds to the result line's bracket (`qualify`). */
+  private readonly qualifiers: string[] = [];
+
+  /** Add a note to the result line's bracket: `PASS: ...` becomes `PASS (<note>): ...`, and
+   * `PASS (<reason>): ...` becomes `PASS (<reason>; <note>): ...`. For a caller's own fact about
+   * its inputs (the standalone verifier: keys given with --keys that differ from its pinned set).
+   * The part before the first `: ` is only ever the result and the reasons this verifier writes. */
+  qualify(note: string): void {
+    this.qualifiers.push(note);
   }
 
   toJSON(): object {
@@ -411,7 +446,91 @@ export class Report {
   }
 }
 
-/** Service keys from `{"keys": [...]}` (the well-known document) or a bare list. */
+/** The one service-key loader (§5): the whole key list (every key, revoked ones too, as the
+ * anchors' `keys_hash` covers them) and the ids of the revoked keys (no signature by one of them
+ * verifies). A revoked entry needs only its `key_id`; other fields are ignored. A `revoked` that is
+ * not a list of entries with a string `key_id` is a malformed document. */
+export function serviceKeySet(doc: unknown): { keys: KeyDoc[]; revoked: string[] } {
+  const keys = parseServiceKeys(doc);
+  const r = Array.isArray(doc) ? undefined : (doc as { revoked?: unknown })?.revoked;
+  if (r === undefined) return { keys, revoked: [] };
+  // As the Rust core reads it: a key_id, and revoked_at and reason absent, null or strings.
+  const entry = (x: any) =>
+    x &&
+    typeof x === "object" &&
+    !Array.isArray(x) &&
+    typeof x.key_id === "string" &&
+    (x.revoked_at == null || typeof x.revoked_at === "string") &&
+    (x.reason == null || typeof x.reason === "string");
+  if (!Array.isArray(r) || !r.every(entry)) throw new Error("keys: revoked must be a list of entries with a key_id");
+  return { keys, revoked: r.map((x: any) => x.key_id) };
+}
+
+/** What the cross-check (§7) found: the published list cannot be read (`unreadable`), the pinned
+ * keys differ from it (`differ`, the problems: KEYS DIFFER), or it matched: the newer key ids, the
+ * retirements applied, the revoked ids named (revoked there, not already in the pinned file), and
+ * the keys document to verify with (the pinned keys, retirements applied, `revoked` the union of
+ * the pinned and the published ids). The same as the Rust core's `keyset::cross_check`. */
+export type CrossCheckResult =
+  | { unreadable: string }
+  | { differ: string[] }
+  | {
+      newer: string[];
+      retired: [string, string][];
+      revoked: string[];
+      document: { keys: KeyDoc[]; revoked: { key_id: string }[] };
+    };
+
+/** The published keys document (its text) against a release's pinned keys document (§5, §7). */
+export function crossCheckKeys(pinnedDoc: unknown, published: string): CrossCheckResult {
+  let doc: any;
+  try {
+    doc = JSON.parse(published);
+  } catch (e) {
+    return { unreadable: `not JSON: ${(e as Error).message.replace(/\s+/g, " ")}` };
+  }
+  if (!doc || typeof doc !== "object" || !Array.isArray(doc.keys)) return { unreadable: 'not {"keys": [...]}' };
+  const str = (k: any, f: string): string | null => (typeof k?.[f] === "string" ? k[f] : null);
+  let revokedThere: string[];
+  try {
+    revokedThere = serviceKeySet({ keys: [], revoked: doc.revoked }).revoked;
+  } catch {
+    return { differ: ["its `revoked` is not a list of entries with a key_id"] };
+  }
+  const pinnedSet = serviceKeySet(pinnedDoc);
+  const problems: string[] = [];
+  const retired: [string, string][] = [];
+  const keys = pinnedSet.keys.map((p) => ({ ...p }));
+  for (const p of keys) {
+    const k = doc.keys.find((x: any) => str(x, "key_id") === p.key_id);
+    if (!k) problems.push(`${p.key_id} is not in the published list`);
+    else if (str(k, "public_key") !== p.public_key) problems.push(`${p.key_id} has another public key there`);
+    else if (str(k, "valid_from") !== p.valid_from) problems.push(`${p.key_id} has another valid_from there`);
+    else if (k.valid_to != null) {
+      // A valid_to that is not a protocol time string makes the document malformed (§7).
+      const to = str(k, "valid_to");
+      if (to === null || !validTime(to)) {
+        problems.push(`${p.key_id} has an invalid valid_to there`);
+        continue;
+      }
+      // The earlier of the two retirements applies (a later one there never widens the pin).
+      if (p.valid_to != null && Date.parse(p.valid_to) <= Date.parse(to)) continue;
+      p.valid_to = to;
+      retired.push([p.key_id, to]);
+    }
+  }
+  if (problems.length) return { differ: problems };
+  const revoked = pinnedSet.keys
+    .filter((p) => revokedThere.includes(p.key_id) && !pinnedSet.revoked.includes(p.key_id))
+    .map((p) => p.key_id);
+  const applied = [...new Set([...pinnedSet.revoked, ...revokedThere])];
+  const newer = doc.keys
+    .map((x: any) => str(x, "key_id"))
+    .filter((id: string | null): id is string => id !== null && !pinnedSet.keys.some((p) => p.key_id === id));
+  return { newer, retired, revoked, document: { keys, revoked: applied.map((key_id) => ({ key_id })) } };
+}
+
+/** Service keys from `{"keys": [...]}` (the well-known document) or a bare list: the whole list. */
 export function parseServiceKeys(doc: unknown): KeyDoc[] {
   const keys = Array.isArray(doc) ? doc : (doc as { keys?: unknown })?.keys;
   if (!Array.isArray(keys))
@@ -510,6 +629,9 @@ export interface PackOptions {
   agentKeysPlainHttp?: boolean;
   /** The service checks its own pack with its own key registry (never independent). */
   byService?: boolean;
+  /** Ids of revoked service keys (§5 `revoked`, from `serviceKeySet`): they stay in the key list
+   * and in `keys_hash`, but no signature by one of them verifies. */
+  revokedServiceKeys?: string[];
 }
 
 /** `records_hash` (§7): sha256(JCS(list)) of every record's `receipt.record_hash`, in pack order. */
@@ -646,6 +768,7 @@ export function verifyPack(pack: any, serviceKeys: KeyDoc[] | null, opts: PackOp
       pack,
     },
   );
+  v.revoked = opts.revokedServiceKeys ?? [];
   const report = new Report(
     v.run(pack.records, pack.anchors),
     pack.project,
@@ -695,8 +818,10 @@ export function verifyLocalState(
   serviceKeys: KeyDoc[],
   drand: DrandVerifier | null = null,
   serviceKeysPlainHttp = false,
+  revokedServiceKeys: string[] = [],
 ): Report {
   const v = new Verifier(serviceKeys, local.agentKeys, new Map(), null, null, true, local.heads, drand);
+  v.revoked = revokedServiceKeys;
   v.drafts = local.drafts ?? 0;
   v.localBases = local.bases ?? {};
   const checks = v.run(local.records, [], local.chainIds);
@@ -940,16 +1065,22 @@ class Verifier {
     return this.toMs !== null && (s === null || s + MAX_CLOCK_SKEW_MS >= this.toMs);
   }
 
+  /** Revoked service keys (§5): in the key list and the hash, never used to verify. */
+  revoked: string[] = [];
+
   private serviceKey(kid: unknown, at: unknown): KeyDoc {
     const k = this.serviceKeys.find((k) => k.key_id === kid);
     if (!k) throw new Error(`unknown service key ${kid}`);
+    if (this.revoked.includes(k.key_id)) throw new Error(`service key ${kid} is revoked`);
     if (!active(k, ms(at))) throw new Error(`service key ${kid} was not active at ${at}`);
     return k;
   }
 
   private anyKey(domain: "head" | "anchor" | "export", h: string, sig: string, at: unknown): boolean {
     const t = ms(at);
-    return this.serviceKeys.some((k) => active(k, t) && verifySig(k.public_key, domain, h, sig));
+    return this.serviceKeys.some(
+      (k) => !this.revoked.includes(k.key_id) && active(k, t) && verifySig(k.public_key, domain, h, sig),
+    );
   }
 
   private chainOf = new Map<any, string>();
@@ -1544,7 +1675,7 @@ class Verifier {
       if (serviceKeysHash(this.serviceKeys, created) !== a.keys_hash)
         a10.fail(
           item,
-          "keys_hash does not match the service keys supplied: the key list was changed after this anchor was signed",
+          "keys_hash does not match the service keys supplied: this anchor counts a key they do not have (a newer verifier release is needed) or the key list was changed after it was signed",
         );
       for (const [bh, p] of Object.entries<any>(entry.paths)) {
         if (verifyInclusion(bh, p.index, a.size, p.path, a.root)) {
@@ -1639,7 +1770,7 @@ class Verifier {
       acc.checked++;
       if (!exactKeys(e, ["rules", "sig", "service_key_id"]))
         return acc.fail(item, "a rule_sets entry is {rules, sig, service_key_id}");
-      const step = acceptRules(null, e, this.serviceKeys, this.project ?? "", this.env ?? "");
+      const step = acceptRules(null, e, this.serviceKeys, this.project ?? "", this.env ?? "", this.revoked);
       if (step !== null) {
         const why: Record<string, string> = {
           schema: "not a valid rule set",

@@ -251,7 +251,10 @@ describe("signafaide gateway (built command line)", () => {
 
       // The same result line from all three.
       const last = (text: string): string => text.trim().split("\n").at(-1)!;
-      expect(last(rust.stdout)).toBe(ts.resultLine);
+      // The standalone Rust verifier names keys given with --keys that are not its pinned set (§7).
+      const note = " (service keys from --keys differ from the pinned set)";
+      expect(last(rust.stdout)).toContain(note);
+      expect(last(rust.stdout).replace(note, "")).toBe(ts.resultLine);
       expect(last(py.stdout)).toBe(ts.resultLine);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

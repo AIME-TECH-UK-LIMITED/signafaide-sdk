@@ -1,0 +1,431 @@
+# The standalone verifier `signafaide-verify`, released three ways:
+#   - single binaries: Linux x86_64 and arm64 (static, musl), macOS x86_64 and arm64, Windows
+#     x86_64 (static C runtime);
+#   - PyPI wheels made from those same binaries (scripts/binary-wheel.py), and an sdist that
+#     builds from source where there is no wheel (needs a Rust toolchain);
+#   - the npm package (js/verify: the TypeScript verifier bundled into one file).
+#
+# A release is started by hand on main (Actions, Release verifier, Run workflow, version X.Y.Z),
+# so it always runs main's copy of this file. The preflight job refuses to go on unless every
+# prerequisite holds (CONTRIBUTING.md, Releasing the verifier): main, the version in every
+# package, CI passed on this commit, no tag or published version yet, both package names owned
+# by the right accounts, the three environments protected (required reviewer, main only), and
+# THIRD-PARTY-NOTICES.md up to date. Nothing is uploaded anywhere before it passes.
+#
+# Each binary and wheel runs the spec vectors and input cases (scripts/verify-vectors.mjs) on its
+# own platform's runner; the sdist is built from source and run; the npm package is installed and
+# run. Then, in the `release` environment, the tag vX.Y.Z is made at this commit, with
+# SHA256SUMS, a signed build provenance attestation per file and the GitHub release. npm publishes
+# next, and PyPI only after npm succeeded, each in its own environment, both through trusted
+# publishing (OIDC): no token is stored anywhere. Both publish the files of the GitHub release,
+# checked against its SHA256SUMS.
+#
+# Re-running: re-run the failed jobs of the same run, or run the workflow again on the same main
+# commit. The preflight then accepts the existing tag at this commit (at another commit it stops),
+# the release job checks the existing release has every file and changes nothing, npm skips a
+# version it already has, and PyPI uploads only the files it does not have yet and then checks that
+# every file is there.
+#
+# A pull request that changes this file runs the preflight checks that need no release and every
+# build and test job, and releases nothing.
+
+name: Release verifier
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to release, X.Y.Z (the one in verifier/Cargo.toml)"
+        required: true
+  pull_request:
+    paths: [".github/workflows/release.yml", "scripts/binary-wheel.py"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUST_TOOLCHAIN: "1.94.1"
+  CARGO_ABOUT: "0.9.3"
+  CARGO_ABOUT_SHA256: "3ad1e94ea1e63d69d1961f4fb15ccbbe9575d906111f96d2cb4dce6df48f71b4"
+
+jobs:
+  preflight:
+    name: Preflight (every prerequisite, before any upload)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read # the CI runs of this commit
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: The version is the same in every package
+        env:
+          WANT: ${{ inputs.version }}
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' verifier/Cargo.toml | head -1)
+          npm=$(node -p 'require("./js/verify/package.json").version')
+          sdk=$(node -p 'require("./js/package.json").version')
+          echo "verifier/Cargo.toml $v, js/verify/package.json $npm, js/package.json $sdk"
+          test "$v" = "$npm" && test "$v" = "$sdk"
+          grep -q '^dynamic = \["version"\]' verifier/pyproject.toml
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            test "$WANT" = "$v" || { echo "asked to release $WANT, but the packages on main are $v"; exit 1; }
+          fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+      - name: Pinned service keys only ever gain keys (spec §5)
+        run: node scripts/pinned-keys-append-only.mjs
+      - name: THIRD-PARTY-NOTICES.md is what cargo-about makes from Cargo.lock
+        run: |
+          curl -sSfLo /tmp/cargo-about.tgz "https://github.com/EmbarkStudios/cargo-about/releases/download/$CARGO_ABOUT/cargo-about-$CARGO_ABOUT-x86_64-unknown-linux-musl.tar.gz"
+          echo "$CARGO_ABOUT_SHA256  /tmp/cargo-about.tgz" | sha256sum --check
+          tar -C /tmp -xzf /tmp/cargo-about.tgz
+          "/tmp/cargo-about-$CARGO_ABOUT-x86_64-unknown-linux-musl/cargo-about" generate --locked --manifest-path verifier/Cargo.toml verifier/about.hbs -o verifier/THIRD-PARTY-NOTICES.md
+          git diff --exit-code -- verifier/THIRD-PARTY-NOTICES.md \
+            || { echo "verifier/THIRD-PARTY-NOTICES.md is out of date: run cargo about generate (verifier/about.toml)"; exit 1; }
+      - name: Started on main, from main's copy of this file
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main" || { echo "a release runs only on main (this is $GITHUB_REF)"; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: CI and the Node.js 20 run passed on this commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in ci.yml verify-node20.yml; do
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?head_sha=$GITHUB_SHA&event=push&status=success" --jq .total_count)
+            test "$n" -ge 1 || { echo "no successful $wf run on main for $GITHUB_SHA: wait for it, then run this again"; exit 1; }
+          done
+      - name: Not released yet (or a re-run of this very release), and the package names are ours
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          # The tag at another commit: refuse. At this commit: a re-run of this release, so a version
+          # already on npm or PyPI is fine (npm skips it, PyPI uploads only its missing files). Without the tag, nothing may be out yet.
+          tagged=$(git ls-remote --tags origin "refs/tags/v$VERSION^{}" "refs/tags/v$VERSION" | awk '{print $1}' | head -1)
+          if [ -n "$tagged" ] && [ "$tagged" != "$GITHUB_SHA" ]; then echo "the tag v$VERSION exists at $tagged, not at $GITHUB_SHA"; exit 1; fi
+          owners=$(curl -sSf https://registry.npmjs.org/signafaide-verify | jq -r '[.maintainers[].name] | join(",")')
+          test "$owners" = "aimetech" || { echo "npm signafaide-verify maintainers are '$owners', not aimetech alone"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' https://pypi.org/pypi/signafaide-verify/json)
+          test "$code" = "200" || { echo "PyPI signafaide-verify is not claimed (HTTP $code)"; exit 1; }
+          if [ -z "$tagged" ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/signafaide-verify/$VERSION")
+            test "$code" = "404" || { echo "npm signafaide-verify $VERSION exists already (HTTP $code), with no tag v$VERSION"; exit 1; }
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/signafaide-verify/$VERSION/json")
+            test "$code" = "404" || { echo "PyPI signafaide-verify $VERSION exists already (HTTP $code), with no tag v$VERSION"; exit 1; }
+          fi
+      - name: Prerequisites the registries do not show
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          # npm does not publish a package's trusted publisher settings, so this cannot be checked
+          # here; npm publishes first (and PyPI only after it), so a missing setting stops the
+          # release before anything reaches PyPI.
+          {
+            echo "### Hard prerequisites this run cannot check"
+            echo "- npm: signafaide-verify, Settings, Trusted publishing = GitHub Actions, AIME-TECH-UK-LIMITED/signafaide-sdk, workflow release.yml, environment npm. Configure it before the first run; without it publish-npm fails and nothing is published to PyPI."
+            echo "- PyPI: the trusted publisher for signafaide-verify (release.yml, environment pypi)."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: The release, pypi and npm environments need a reviewer and allow main only
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for e in release pypi npm; do
+            doc=$(gh api "repos/$GITHUB_REPOSITORY/environments/$e") || { echo "the environment $e does not exist"; exit 1; }
+            echo "$doc" | jq -e '[.protection_rules[]?.type] | index("required_reviewers")' >/dev/null \
+              || { echo "the environment $e has no required reviewer"; exit 1; }
+            echo "$doc" | jq -e '.deployment_branch_policy.custom_branch_policies == true' >/dev/null \
+              || { echo "the environment $e is not limited to selected branches"; exit 1; }
+            names=$(gh api "repos/$GITHUB_REPOSITORY/environments/$e/deployment-branch-policies" --jq '[.branch_policies[] | (.type // "branch") + ":" + .name] | join(",")')
+            test "$names" = "branch:main" || { echo "the environment $e allows '$names', not branch main alone"; exit 1; }
+          done
+
+  binaries:
+    name: Binary ${{ matrix.name }}
+    needs: preflight
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-24.04, target: x86_64-unknown-linux-musl }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+          - { name: macos-x86_64, os: macos-15-intel, target: x86_64-apple-darwin }
+          - { name: macos-arm64, os: macos-15, target: aarch64-apple-darwin }
+          - { name: windows-x86_64, os: windows-2025, target: x86_64-pc-windows-msvc, exe: .exe }
+    env:
+      FILE: signafaide-verify-${{ matrix.name }}${{ matrix.exe }}
+      TARGET: ${{ matrix.target }}
+      EXE: ${{ matrix.exe }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - name: musl C toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q musl-tools
+      - name: Build (the release, and the tests' build with the feature test-keys-url)
+        shell: bash
+        env:
+          # Windows: link the C runtime statically, so the .exe needs no Visual C++ redistributable.
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+        run: |
+          cargo build --release --locked --manifest-path verifier/Cargo.toml --target "$TARGET"
+          cargo build --release --locked --manifest-path verifier/Cargo.toml --target "$TARGET" --features test-keys-url --target-dir verifier/target/test-keys-url
+          mkdir -p dist
+          cp "verifier/target/$TARGET/release/signafaide-verify$EXE" "dist/$FILE"
+      - name: The Linux binary is static
+        if: runner.os == 'Linux'
+        run: |
+          file "dist/$FILE"
+          file "dist/$FILE" | grep -Eq 'statically linked|static-pie linked'
+      - name: The release binary has no test address variable
+        shell: bash
+        run: |
+          if grep -aq SIGNAFAIDE_VERIFY_KEYS_URL "dist/$FILE"; then echo "the release binary reads SIGNAFAIDE_VERIFY_KEYS_URL"; exit 1; fi
+      - name: Spec vectors and input cases through the binary, on its own platform
+        shell: bash
+        run: node scripts/verify-vectors.mjs "dist/$FILE" --test "verifier/target/test-keys-url/$TARGET/release/signafaide-verify$EXE"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: binary-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  wheels:
+    name: Wheel ${{ matrix.name }}
+    needs: binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-24.04
+            tag: manylinux_2_17_x86_64.manylinux2014_x86_64.musllinux_1_1_x86_64
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            tag: manylinux_2_17_aarch64.manylinux2014_aarch64.musllinux_1_1_aarch64
+          - { name: macos-x86_64, os: macos-15-intel, tag: macosx_10_12_x86_64 }
+          - { name: macos-arm64, os: macos-15, tag: macosx_11_0_arm64 }
+          - { name: windows-x86_64, os: windows-2025, tag: win_amd64, exe: .exe }
+    env:
+      NAME: ${{ matrix.name }}
+      TAG: ${{ matrix.tag }}
+      EXE: ${{ matrix.exe }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: binary-${{ matrix.name }}
+          path: bin
+      - name: The wheel from the release binary
+        shell: bash
+        run: python scripts/binary-wheel.py "bin/signafaide-verify-$NAME$EXE" "$TAG" dist
+      - name: Spec vectors and input cases through the installed wheel, on its own platform
+        shell: bash
+        run: |
+          python -m venv wheel-venv
+          if [ -n "$EXE" ]; then cmd=wheel-venv/Scripts/signafaide-verify.exe; pip=wheel-venv/Scripts/pip; else cmd=wheel-venv/bin/signafaide-verify; pip=wheel-venv/bin/pip; fi
+          "$pip" install --no-index dist/*.whl
+          node scripts/verify-vectors.mjs "$cmd"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wheel-${{ matrix.name }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: Python sdist
+    needs: preflight
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Build the sdist with maturin pinned by hash
+        run: |
+          python3 -m venv /tmp/maturin
+          /tmp/maturin/bin/pip install --require-hashes --only-binary :all: -r .github/requirements/maturin.txt
+          /tmp/maturin/bin/maturin sdist -m verifier/Cargo.toml --out dist
+          tar tzf dist/*.tar.gz | grep -q '/LICENSE$'
+          tar tzf dist/*.tar.gz | grep -q '/THIRD-PARTY-NOTICES.md$'
+      - name: It builds from source, and the result runs the vectors
+        run: |
+          # The build backend runs `maturin` from PATH: the pinned one in this venv.
+          PATH="/tmp/maturin/bin:$PATH" /tmp/maturin/bin/pip install --no-build-isolation --no-index dist/*.tar.gz
+          node scripts/verify-vectors.mjs /tmp/maturin/bin/signafaide-verify
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  npm:
+    name: npm package
+    needs: preflight
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.22.3"
+      - name: Build and pack
+        run: |
+          (cd js && npm ci --ignore-scripts && npx tsup --config tsup.verify.config.ts)
+          if grep -q SIGNAFAIDE_VERIFY_KEYS_URL js/verify/dist/cli.js; then echo "the release bundle reads SIGNAFAIDE_VERIFY_KEYS_URL"; exit 1; fi
+          mkdir -p dist
+          (cd js/verify && npm pack --pack-destination ../../dist)
+      - name: Spec vectors and input cases through the installed package
+        run: |
+          mkdir /tmp/npm-verify
+          (cd /tmp/npm-verify && npm init -y >/dev/null && npm install --ignore-scripts "$GITHUB_WORKSPACE"/dist/signafaide-verify-*.tgz)
+          node scripts/verify-vectors.mjs /tmp/npm-verify/node_modules/.bin/signafaide-verify --test js/verify/dist-test/cli.js
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm
+          path: dist/*.tgz
+          if-no-files-found: error
+
+  release:
+    name: Tag, checksums, provenance and the GitHub release
+    if: github.event_name == 'workflow_dispatch'
+    needs: [preflight, binaries, wheels, sdist, npm]
+    runs-on: ubuntu-24.04
+    environment: release # a required reviewer, branch main only
+    permissions:
+      contents: write # the tag, the release and its files
+      id-token: write # the Sigstore signing certificate
+      attestations: write # the provenance attestations
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            LICENSE
+            verifier/THIRD-PARTY-NOTICES.md
+          sparse-checkout-cone-mode: false
+          path: src
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Licences and SHA256SUMS
+        run: |
+          cp src/LICENSE dist/LICENSE
+          cp src/verifier/THIRD-PARTY-NOTICES.md dist/THIRD-PARTY-NOTICES.md
+          cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: The tag at this commit, and the GitHub release (both kept on a re-run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ inputs.version }}
+        run: |
+          at=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null || true)
+          if [ -z "$at" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
+          elif [ "$at" != "$GITHUB_SHA" ]; then
+            echo "the tag $TAG exists at $at, not at $GITHUB_SHA"; exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # A re-run: the release exists (and may be immutable). Every file must already be there.
+            have=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | sort | join(" ")')
+            want=$(cd dist && ls | sort | tr '\n' ' ' | sed 's/ $//')
+            test "$have" = "$want" || { echo "the release $TAG has '$have', this run made '$want'"; exit 1; }
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" \
+              --notes "See CHANGELOG.md for $TAG. Check the signafaide-verify files with SHA256SUMS and gh attestation verify (README.md, For auditors)." \
+              dist/*
+          fi
+
+  publish-pypi:
+    name: Publish to PyPI (after npm)
+    if: github.event_name == 'workflow_dispatch'
+    needs: [preflight, release, publish-npm]
+    runs-on: ubuntu-24.04
+    environment: pypi # a required reviewer, branch main only
+    permissions:
+      contents: read # the release's files
+      id-token: write # PyPI trusted publishing: no token is stored
+    steps:
+      - name: The wheels and sdist from the GitHub release, checked against its SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ inputs.version }}
+        run: |
+          mkdir dist && cd dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.whl' --pattern '*.tar.gz' --pattern SHA256SUMS
+          sha256sum --check --ignore-missing SHA256SUMS
+          rm SHA256SUMS
+          ls > ../expected-files
+      # File by file: a file PyPI already has (an earlier, partial upload) is skipped, every other
+      # one is uploaded.
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          skip-existing: true
+      - name: Every file is on PyPI
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # PyPI's JSON can lag an upload by a little: ask for up to five minutes.
+          for i in $(seq 1 30); do
+            curl -sSf "https://pypi.org/pypi/signafaide-verify/$VERSION/json" | jq -r '.urls[].filename' | sort > on-pypi || true
+            missing=$(sort expected-files | comm -23 - on-pypi)
+            [ -z "$missing" ] && { echo "all $(wc -l < expected-files) files are on PyPI"; exit 0; }
+            sleep 10
+          done
+          echo "not on PyPI: $missing"; exit 1
+
+  publish-npm:
+    name: Publish to npm
+    if: github.event_name == 'workflow_dispatch'
+    needs: [preflight, release]
+    runs-on: ubuntu-24.04
+    environment: npm # a required reviewer, branch main only
+    permissions:
+      contents: read # the release's files
+      id-token: write # npm trusted publishing and provenance: no token is stored
+    steps:
+      - name: The package from the GitHub release, checked against its SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ inputs.version }}
+        run: |
+          mkdir dist && cd dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.tgz' --pattern SHA256SUMS
+          sha256sum --check --ignore-missing SHA256SUMS
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # Its bundled npm (11.19.1) publishes through trusted publishing; nothing is installed
+          # in this job and no package script runs.
+          node-version: "24.22.3"
+          registry-url: https://registry.npmjs.org
+      - name: Publish with provenance (skipped when a re-run finds it published)
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/signafaide-verify/$VERSION")" = 200 ]; then
+            echo "signafaide-verify $VERSION is on npm already"; exit 0
+          fi
+          npm publish dist/signafaide-verify-*.tgz --provenance --access public --ignore-scripts

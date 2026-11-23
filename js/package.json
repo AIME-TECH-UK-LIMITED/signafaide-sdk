@@ -1,6 +1,6 @@
 {
   "name": "signafaide",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Checks risky AI agent tool calls before they run: an independent witness allows or blocks them under your rules, and every call is signed and verifiable offline.",
   "license": "Apache-2.0",
   "type": "module",
@@ -54,7 +54,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "rm -rf dist && tsup && tsup --config tsup.mcp.config.ts",
+    "build": "rm -rf dist && tsup && tsup --config tsup.mcp.config.ts && tsup --config tsup.verify.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && vitest run --maxWorkers=2",
     "plugin": "node --experimental-strip-types --no-warnings scripts/plugin.ts"

@@ -985,13 +985,14 @@ pub fn client_entry(rs: &RuleSet, mode: Mode, set: &str, agent: &str, tool: &str
 /// The name of the first §10.2 step that refuses a fetched version (`schema`, `project`,
 /// `signature`, `set`, `older`, `conflict`, `issued`, `prev`), or `None` when the client accepts
 /// it. `held` is the document the client holds; `item` is `{rules, sig, service_key_id}` as
-/// `GET /v1/rules` serves it.
+/// `GET /v1/rules` serves it; `revoked` the revoked service key ids (§5).
 pub fn accept(
     held: Option<&Value>,
     item: &Value,
     service_keys: &[crate::KeyEntry],
     project: &str,
     env: &str,
+    revoked: &[String],
 ) -> Option<&'static str> {
     let doc = &item["rules"];
     let Ok(rs) = RuleSet::parse(doc) else {
@@ -1000,23 +1001,21 @@ pub fn accept(
     if rs.project != project || rs.env != env {
         return Some("project");
     }
-    let Ok(issued_ms) = time::parse(&rs.issued) else {
+    if time::parse(&rs.issued).is_err() {
         return Some("schema");
-    };
-    let key = service_keys
-        .iter()
-        .find(|k| Some(k.key_id.as_str()) == item["service_key_id"].as_str());
-    let signed = key.is_some_and(|k| {
-        crate::key_active(&k.valid_from, k.valid_to.as_deref(), issued_ms)
-            && crate::hash::hash_json(doc).is_ok_and(|h| {
-                crate::sign::verify(
-                    &k.public_key,
-                    crate::sign::Domain::Rules,
-                    &h,
-                    item["sig"].as_str().unwrap_or(""),
-                )
-                .is_ok()
-            })
+    }
+    // The one key judgement (§5): unknown key, revoked, not active at issued, signature.
+    let signed = crate::hash::hash_json(doc).is_ok_and(|h| {
+        crate::keyset::key_problem(
+            service_keys,
+            revoked,
+            item["service_key_id"].as_str().unwrap_or(""),
+            &rs.issued,
+            crate::sign::Domain::Rules,
+            &h,
+            item["sig"].as_str().unwrap_or(""),
+        )
+        .is_none()
     });
     if !signed {
         return Some("signature");

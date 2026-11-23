@@ -129,7 +129,7 @@ pub fn verify(public_key_b64: &str, domain: Domain, hash: &Hash, sig_b64: &str) 
         .try_into()
         .map_err(|_| Error::new("signature must be 64 bytes"))?;
     vk.verify_strict(&message(domain, hash), &Signature::from_bytes(&sig_bytes))
-        .map_err(|_| Error::new(format!("signature does not verify for domain '{}'", domain.as_str())))
+        .map_err(|_| Error::new("signature does not verify"))
 }
 
 #[cfg(test)]

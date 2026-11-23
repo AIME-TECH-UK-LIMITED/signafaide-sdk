@@ -11,6 +11,12 @@ fn vectors() -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
 }
 
+/// The JSON report in the output (after any stderr lines).
+fn json_of(out: &str) -> serde_json::Value {
+    let start = out.find("\n{").map_or(0, |i| i + 1);
+    serde_json::from_str(&out[if out.starts_with('{') { 0 } else { start }..]).unwrap()
+}
+
 fn tmp(name: &str, v: &serde_json::Value) -> String {
     let dir = std::env::temp_dir().join(format!("signafaide-verify-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -19,11 +25,31 @@ fn tmp(name: &str, v: &serde_json::Value) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// The note the result line carries when --keys gives keys other than the pinned set (the
+/// vectors' keys always are): taken out here, so the tests compare the rest; `pinned_set_note`
+/// checks it.
+const NOT_PINNED: &str = "service keys from --keys differ from the pinned set";
+
+fn plain(out: &str) -> String {
+    out.replace(&format!(" ({NOT_PINNED})"), "")
+        .replace(&format!("; {NOT_PINNED})"), ")")
+}
+
 fn run(args: &[&str]) -> (i32, String) {
-    let out = Command::new(BIN).args(args).output().unwrap();
+    let (code, out) = run_raw(args);
+    (code, plain(&out))
+}
+
+fn run_raw(args: &[&str]) -> (i32, String) {
+    let out = Command::new(BIN)
+        .args(args)
+        .env_remove("SSL_CERT_FILE")
+        .output()
+        .unwrap();
     (
         out.status.code().unwrap(),
-        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
+        // stderr first: it holds the notes (where the service keys came from), stdout the report.
+        String::from_utf8_lossy(&out.stderr).into_owned() + &String::from_utf8_lossy(&out.stdout),
     )
 }
 
@@ -115,7 +141,7 @@ fn valid_pack_passes_with_independent_keys() {
 
     let (code, out) = run(&[&pack, "--keys", &keys, "--agent-keys", &agents, "--offline", "--json"]);
     assert_eq!(code, 0);
-    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let report: serde_json::Value = json_of(&out);
     assert_eq!(report["result"], "PASS");
     assert_eq!(report["result_line"], format!("PASS{SCOPE}"));
     assert_eq!(report["generated"], "2026-11-13T12:00:00.000Z");
@@ -178,7 +204,7 @@ fn tool_coverage_is_reported_in_text_and_json() {
         );
         let (code, out) = run(&[&pack, "--keys", &keys, "--agent-keys", &agents, "--offline", "--json"]);
         assert_eq!(code, 0, "{}", t["name"]);
-        let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let report: serde_json::Value = json_of(&out);
         assert_eq!(report["coverage"], t["expect"]["coverage"], "{}", t["name"]);
         assert_eq!(report["telemetry"], t["expect"]["telemetry"], "{}", t["name"]);
         if out.contains("\"declared_at_seq\": 1") {
@@ -190,11 +216,48 @@ fn tool_coverage_is_reported_in_text_and_json() {
 }
 
 #[test]
-fn keys_are_required_and_agent_keys_must_be_independent() {
+fn pinned_keys_by_default_and_agent_keys_must_be_independent() {
     let v = vectors();
     let pack = tmp("pack2.json", &v["pack"]["pack"]);
     let agents = tmp("agents2.json", &v["agent_keys_document"]);
-    assert_eq!(run(&[&pack, "--agent-keys", &agents, "--offline"]).0, 2);
+    // No --keys: the keys pinned in this release (the hosted witness's), which did not sign the
+    // vectors' batches; offline, the output says they were not cross-checked, above the result line.
+    let (code, out) = run(&[&pack, "--agent-keys", &agents, "--offline"]);
+    assert_eq!(code, 1, "{out}");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines[lines.len() - 2],
+        concat!(
+            "service keys: pinned in signafaide-verify ",
+            env!("CARGO_PKG_VERSION"),
+            ", not cross-checked (--offline)"
+        ),
+        "{out}"
+    );
+    let (code, out) = run(&[&pack, "--agent-keys", &agents, "--offline", "--json"]);
+    assert_eq!(code, 1, "{out}");
+    let report = json_of(&out);
+    assert!(report["service_keys_source"]
+        .as_str()
+        .unwrap()
+        .starts_with("pinned in signafaide-verify"));
+    assert_eq!(report["service_keys_cross_check"], "not_done_offline");
+    // A release build has no way to change the address the pinned keys are checked against:
+    // SIGNAFAIDE_VERIFY_KEYS_URL is compiled only into the tests' build (feature test-keys-url).
+    if !cfg!(feature = "test-keys-url") {
+        let out = Command::new(BIN)
+            .args([&pack, "--agent-keys", &agents, "--offline"])
+            .env("SIGNAFAIDE_VERIFY_KEYS_URL", "http://127.0.0.1:9/keys.json")
+            .env_remove("SSL_CERT_FILE")
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{text}");
+        assert!(
+            !text.contains("127.0.0.1:9") && text.contains("not cross-checked (--offline)"),
+            "{text}"
+        );
+    }
     let (code, out) = run(&[&pack, "--trust-embedded-keys", "--agent-keys", &agents, "--offline"]);
     assert_eq!(code, 0, "{out}");
     assert!(
@@ -376,7 +439,7 @@ fn content_from_a_chain_directory() {
         "--json",
     ]);
     assert_eq!(code, 0, "{out}");
-    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let report: serde_json::Value = json_of(&out);
     assert_eq!(report["checks"][11]["checked"], 4);
 }
 
@@ -453,4 +516,79 @@ fn clean_and_unclean_restarts_are_told_apart() {
     let (code, out) = run_pack("cut.json", find("a clean restart exported from its start note on"));
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("had not sent are not known: agent-a after seq 2"), "{out}");
+}
+
+/// Keys given with --keys that are not the pinned set: the result line says so, in text and JSON;
+/// the pinned set given with --keys carries no note.
+#[test]
+fn pinned_set_note() {
+    let v = vectors();
+    let pack = tmp("pack-note.json", &v["pack"]["pack"]);
+    let keys = tmp("keys-note.json", &v["keys_document"]);
+    let agents = tmp("agents-note.json", &v["agent_keys_document"]);
+    let (code, out) = run_raw(&[&pack, "--keys", &keys, "--agent-keys", &agents, "--offline"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.trim_end().ends_with(&format!("PASS ({NOT_PINNED}){SCOPE}")),
+        "{out}"
+    );
+    let (_, out) = run_raw(&[&pack, "--keys", &keys, "--agent-keys", &agents, "--offline", "--json"]);
+    let report = json_of(&out);
+    assert_eq!(report["result_line"], format!("PASS ({NOT_PINNED}){SCOPE}"));
+    assert_eq!(report["service_keys_pinned_set"], false);
+    let pinned = concat!(env!("CARGO_MANIFEST_DIR"), "/service-keys.json");
+    let (code, out) = run_raw(&[&pack, "--keys", pinned, "--agent-keys", &agents, "--offline", "--json"]);
+    assert_eq!(code, 1, "{out}");
+    let report = json_of(&out);
+    assert!(!report["result_line"].as_str().unwrap().contains(NOT_PINNED), "{out}");
+    assert_eq!(report["service_keys_pinned_set"], true);
+    // The pinned entries with a valid_to added, a valid_from moved, or a revocation: all differ.
+    let doc: serde_json::Value = serde_json::from_str(include_str!("../service-keys.json")).unwrap();
+    let k = doc["keys"][0].clone();
+    let mut retired = k.clone();
+    retired["valid_to"] = "2026-12-01T00:00:00.000Z".into();
+    let mut moved = k.clone();
+    moved["valid_from"] = "2026-11-14T17:36:25.017Z".into();
+    for (name, d) in [
+        ("retired", serde_json::json!({"keys": [retired]})),
+        ("moved", serde_json::json!({"keys": [moved]})),
+        (
+            "revoked",
+            serde_json::json!({"keys": [k.clone()], "revoked": [{"key_id": k["key_id"], "revoked_at": "2026-12-01T00:00:00.000Z", "reason": "compromised"}]}),
+        ),
+    ] {
+        let f = tmp(&format!("keys-{name}.json"), &d);
+        let (_, out) = run_raw(&[&pack, "--keys", &f, "--agent-keys", &agents, "--offline", "--json"]);
+        let report = json_of(&out);
+        assert!(
+            report["result_line"].as_str().unwrap().contains(NOT_PINNED),
+            "{name}: {out}"
+        );
+        assert_eq!(report["service_keys_pinned_set"], false, "{name}");
+    }
+}
+
+/// A key the supplied document lists as revoked is never used: the batches it signed fail.
+#[test]
+fn revoked_keys_in_the_supplied_document_are_not_used() {
+    let v = vectors();
+    let pack = tmp("pack-rev.json", &v["pack"]["pack"]);
+    let agents = tmp("agents-rev.json", &v["agent_keys_document"]);
+    let mut doc = v["keys_document"].clone();
+    let id = doc["keys"][0]["key_id"].clone();
+    doc["revoked"] =
+        serde_json::json!([{"key_id": id, "revoked_at": "2026-12-01T00:00:00.000Z", "reason": "compromised"}]);
+    let keys = tmp("keys-rev.json", &doc);
+    let (code, out) = run(&[&pack, "--keys", &keys, "--agent-keys", &agents, "--offline", "--json"]);
+    assert_eq!(code, 1, "{out}");
+    let report = json_of(&out);
+    let batch = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "batch_sig")
+        .unwrap();
+    assert_eq!(batch["status"], "fail", "{out}");
+    // It stays in the list keys_hash is computed from (§5): the anchors' keys_hash still matches.
+    assert!(!out.contains("keys_hash does not match"), "{out}");
 }

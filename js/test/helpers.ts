@@ -51,6 +51,8 @@ export function useProject(opts: { optIn?: boolean } = {}): Ctx {
   });
   afterEach(async () => {
     ctx.rec.close();
+    // No request of this test outlives it (a later test's fake service may get the same port).
+    await ctx.rec.checks.settled();
     configure({ quiet: true }).close();
     await ctx.service.close();
     process.chdir(cwd);

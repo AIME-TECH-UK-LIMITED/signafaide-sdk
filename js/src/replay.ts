@@ -8,6 +8,7 @@
  */
 
 import * as fs from "node:fs";
+import { pinned } from "./pinned.js";
 import { hashJson } from "./crypto.js";
 import { fetchJson } from "./http.js";
 import { plural } from "./plural.js";
@@ -17,7 +18,7 @@ import { StateError } from "./state.js";
 import {
   KeysRequired,
   loadDrandVerifier,
-  parseServiceKeys,
+  serviceKeySet,
   verifyLocalState,
   type KeyDoc,
   type Report,
@@ -26,10 +27,16 @@ import {
 const TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Service keys from a file path, an http(s) URL or the parsed document. */
+/** Service keys and the revoked ids (`serviceKeySet`) from a file path, an http(s) URL or the
+ * parsed document. */
+export async function loadServiceKeySet(src: string | object): Promise<{ keys: KeyDoc[]; revoked: string[] }> {
+  if (typeof src !== "string") return serviceKeySet(src);
+  return serviceKeySet(/^https?:\/\//.test(src) ? await fetchJson(src) : JSON.parse(fs.readFileSync(src, "utf8")));
+}
+
+/** Service keys (the whole list) from a file path, an http(s) URL or the parsed document. */
 export async function loadServiceKeys(src: string | object): Promise<KeyDoc[]> {
-  if (typeof src !== "string") return parseServiceKeys(src);
-  return parseServiceKeys(/^https?:\/\//.test(src) ? await fetchJson(src) : JSON.parse(fs.readFileSync(src, "utf8")));
+  return (await loadServiceKeySet(src)).keys;
 }
 
 /** `YYYY-MM-DD` or a protocol time as a protocol time; a bare date as an end bound means the end of that day. */
@@ -64,18 +71,19 @@ export async function verifyChain(rec: Recorder, chain: string, keys?: string | 
   const st = rec.state;
   const records = st.readAll(chain); // drafts (§8) are signed locally and verified too
   let serviceKeys: KeyDoc[];
+  let revoked: string[] = [];
   let note: string;
   if (keys !== undefined) {
-    serviceKeys = await loadServiceKeys(keys);
+    ({ keys: serviceKeys, revoked } = await loadServiceKeySet(keys));
     note = `service keys: ${typeof keys === "string" ? keys : "given"}`;
   } else if (!records.some((r) => r.receipt)) {
     serviceKeys = []; // no request: nothing has been co-signed
     note = "service keys: none needed (nothing co-signed yet)";
   } else {
     try {
-      serviceKeys = parseServiceKeys(
+      ({ keys: serviceKeys, revoked } = serviceKeySet(
         await rec.client().request("GET", "/.well-known/signafaide-keys.json", { auth: false }),
-      );
+      ));
       note = `service keys: ${rec.url}/.well-known/signafaide-keys.json`;
     } catch (e) {
       if (records.some((r) => r.receipt))
@@ -99,6 +107,9 @@ export async function verifyChain(rec: Recorder, chain: string, keys?: string | 
     { records, chainIds: records.map(() => chain), agentKeys, heads, bases: base ? { [chain]: base } : {} },
     serviceKeys,
     await loadDrandVerifier(),
+    false,
+    // The release's pinned revocations always apply (spec §7).
+    [...new Set([...revoked, ...serviceKeySet(pinned.doc).revoked])],
   );
   report.notes.unshift(`chain: ${chain}`, note);
   return report;

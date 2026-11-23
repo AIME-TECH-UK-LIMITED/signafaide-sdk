@@ -12,6 +12,7 @@ import pytest
 
 from signafaide import cli, runtime
 from signafaide import verify
+from signafaide._version import __version__
 from signafaide.checks_runtime import CheckError, SignafaideBlocked
 from signafaide.decorator import protect, record
 from signafaide.protect_cli import (
@@ -25,7 +26,7 @@ from signafaide.protect_cli import (
 )
 from signafaide.records import record_hash
 from signafaide.session import load_session, login, logout, session_file
-from signafaide.tool_commands import parse_field_args
+from signafaide.tool_commands import auditor_commands, parse_field_args
 
 from conftest import _recorder, _stop
 
@@ -279,6 +280,17 @@ def test_the_mockup_session(flow, capsys):
     # prove --files: a pack that verifies, with the rules in words.
     code, out = run(capsys, "prove", "approve_payout", "--files", "--content")
     assert code == 0, out
+    # The auditor is pointed at the standalone verifier, pinned to this release; this witness is not
+    # the hosted one, so its own key list is named (the hosted witness's keys are pinned in it).
+    for via in ("npx", "uvx"):
+        assert (
+            f"{via} signafaide-verify@{__version__} pack.json --keys {service.url}/.well-known/signafaide-keys.json"
+            " --agent-keys agent-keys.json --head head.json --content content.jsonl"
+        ) in out
+    assert auditor_commands("https://api.signafaide.co.uk/", "agent-keys.json") == [
+        f"npx signafaide-verify@{__version__} pack.json --agent-keys agent-keys.json --head head.json",
+        f"uvx signafaide-verify@{__version__} pack.json --agent-keys agent-keys.json --head head.json",
+    ]
     d = project / "proof" / "approve_payout"
     assert sorted(x.name for x in d.iterdir()) == ["agent-keys.json", "content.jsonl", "head.json", "pack.json"]
     r = verify(

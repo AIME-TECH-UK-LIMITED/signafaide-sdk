@@ -286,7 +286,7 @@ export async function runPull(rec: Recorder, prompt: Prompter, out: (s: string) 
   const before = rec.checks.heldRules()?.version ?? null;
   let code = 0;
   if (rec.apiKey) {
-    const said = await rec.checks.pullRules();
+    const said = await rec.checks.forcedPull(); // a person asked: key list, rule set and list, never waiting
     if ("rules" in rec.checks.problems) {
       out(`Rules      ${said}`);
       code = 1;
@@ -848,11 +848,27 @@ async function writeProofFiles(
   }
   const rel = path.relative(rec.state.root, dir) || dir;
   out(`Wrote ${rel}/  ${files.join(" ")}`);
-  out("Your auditor checks them with:");
-  out(
-    `  npx signafaide verify pack.json --keys https://cdn.jsdelivr.net/npm/signafaide@${VERSION}/service-keys.json --agent-keys agent-keys.json --head head.json${content ? " --content content.jsonl" : ""}`,
-  );
+  out("Your auditor checks them with the standalone verifier (no account, no SDK), one of:");
+  for (const line of auditorCommands(rec.url, "agent-keys.json", content ? " --content content.jsonl" : ""))
+    out(`  ${line}`);
+  out(`or with the signafaide-verify binary and the same arguments: ${AUDITOR_DOCS_URL}`);
   return 0;
+}
+
+/** How auditors install the standalone verifier (§7). */
+export const AUDITOR_DOCS_URL = "https://signafaide.co.uk/docs/verify";
+
+/** The hosted witness, whose service keys are pinned in signafaide-verify. */
+const HOSTED = ["https://api.signafaide.co.uk", "https://signafaide.co.uk"];
+
+/** The one command an auditor runs, as npx and uvx lines, pinned to this release. For the hosted
+ * witness it passes no --keys: signafaide-verify uses the keys pinned in it and checks them
+ * against the published list. A self-hosted witness's keys come from that witness. */
+export function auditorCommands(witness: string, agentKeys: string, extra = ""): string[] {
+  const base = witness.replace(/\/+$/, "");
+  const keys = HOSTED.includes(base) ? "" : ` --keys ${base}/.well-known/signafaide-keys.json`;
+  const args = `pack.json${keys} --agent-keys ${agentKeys} --head head.json${extra}`;
+  return [`npx signafaide-verify@${VERSION} ${args}`, `uvx signafaide-verify@${VERSION} ${args}`];
 }
 
 export { CHECKS_FILE };
