@@ -29,19 +29,19 @@ jobs:
     name: Packed signafaide-verify on Node.js 20
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Built and packed on the release's Node.js (tsup 9 needs 22.18 or later), then installed and
       # run on Node.js 20.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.22.3"
       - name: Build and pack
         run: |
           (cd js && npm ci --ignore-scripts && npx tsup --config tsup.verify.config.ts)
           mkdir -p /tmp/pack && (cd js/verify && npm pack --pack-destination /tmp/pack)
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "20.20.2"
       - name: Install into an empty project and run the vectors on Node.js 20
