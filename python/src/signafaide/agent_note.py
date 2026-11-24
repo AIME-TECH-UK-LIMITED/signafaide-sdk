@@ -82,7 +82,7 @@ def merged(prev: str) -> str:
     return (prev.rstrip("\n") + "\n\n" + section) if prev else section
 
 
-def offer_note(root: Path, prompt: Any, out: Callable[[str], None]) -> List[Tuple[str, str]]:
+def offer_note(root: Path, prompt: Any, out: Callable[[str], None], default: bool = True) -> List[Tuple[str, str]]:
     """``protect`` and ``init``: add the note to the project's instructions files, after asking.
     Returns ``(file, "created" | "updated")`` for each file written; a file that already has the
     note is not asked about. A symbolic link is never written through."""
@@ -105,7 +105,7 @@ def offer_note(root: Path, prompt: Any, out: Callable[[str], None]) -> List[Tupl
         f"Agents     {names}: a short marked block that tells coding agents to protect the tools that pay, delete, send, run commands "
         "or push code, and how."
     )
-    if not prompt.confirm(f"{NOTE_QUESTION} {names}?", True):
+    if not prompt.confirm(f"{NOTE_QUESTION} {names}?", default):
         out("           Not added; run this command again to add it.")
         return []
     done: List[Tuple[str, str]] = []

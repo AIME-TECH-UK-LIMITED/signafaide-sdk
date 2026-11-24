@@ -28,7 +28,7 @@ one sentence, and records stay signed on the machine meanwhile. The SDK goes thr
 the SDK's version:
 
 ```json
-{"command": "npx", "args": ["-y", "signafaide-mcp@0.5.8"]}
+{"command": "npx", "args": ["-y", "signafaide-mcp@0.5.9"]}
 ```
 
 ## Tools

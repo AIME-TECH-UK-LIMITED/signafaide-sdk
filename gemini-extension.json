@@ -1,11 +1,11 @@
 {
   "name": "signafaide",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "description": "Use when the user asks to add signafAIde, to check or block an AI agent's tool calls before they run (for example payments, deletions, outgoing messages or commands), or for a signed audit trail of what an AI agent did. signafAIde's protect() checks each call against the rules a person set before it runs and signs a record of it; records stay on this machine until a person opts in.",
   "mcpServers": {
     "signafaide": {
       "command": "npx",
-      "args": ["-y", "signafaide-mcp@0.5.8"]
+      "args": ["-y", "signafaide-mcp@0.5.9"]
     }
   }
 }
