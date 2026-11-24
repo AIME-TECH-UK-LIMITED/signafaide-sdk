@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { noteSection } from "../src/agents.js";
+import { noteSection, offerNote } from "../src/agents.js";
 import * as C from "../src/checks.js";
 import { SignafaideBlocked } from "../src/checks-runtime.js";
 import { main, setPrompter } from "../src/cli.js";
@@ -65,7 +65,7 @@ const ctx = useProject();
 describe("protect --yes --tool --limit-field --above, with no key", () => {
   beforeEach(project);
 
-  it("writes the code, the note and a Calibrating rule it cannot save yet, and says what a person does next", async () => {
+  it("writes the code and a Calibrating rule it cannot save yet, never the project note, and says what a person does next", async () => {
     setPrompter(() => flagPrompter({ yes: true }));
     const [c, out] = await cli(...AGENT_RUN);
     expect(c, out).toBe(1); // not finished: the rule waits for a key
@@ -76,20 +76,24 @@ describe("protect --yes --tool --limit-field --above, with no key", () => {
     expect(out).not.toContain("npx signafaide login");
     expect(read("src/tools.ts")).toContain("protect(approve_payout");
     expect(JSON.parse(read("signafaide.checks.json")).tools.approve_payout).toEqual({ protect: true, mode: "watch" }); // no field approved without a person; watch: the kept rule blocks nothing
-    expect(read("AGENTS.md")).toBe(noteSection());
-    expect(read("CLAUDE.md")).toBe("@AGENTS.md\n"); // Claude Code reads the same note
-    expect(out).toMatch(/AGENTS\.md +signafAIde note for coding agents/);
+    // Without a person no instructions for later sessions are written (directory policy 1G).
+    expect(fs.existsSync(path.join(ctx.root, "AGENTS.md"))).toBe(false);
+    expect(fs.existsSync(path.join(ctx.root, "CLAUDE.md"))).toBe(false);
+    expect(out).not.toContain("Agents     ");
     expect(ctx.service.calls).not.toContain("POST /v1/sandbox");
-    // Run again: the note is there, so it is neither asked about nor written twice.
-    const [, again] = await cli(...AGENT_RUN);
-    expect(again).not.toContain("Agents     ");
-    expect(read("AGENTS.md").split("<!-- signafaide:start -->")).toHaveLength(2);
   });
 
-  it("adds the note to an existing CLAUDE.md and creates no AGENTS.md", async () => {
+  it("leaves an existing CLAUDE.md alone and creates no AGENTS.md without a person", async () => {
     fs.writeFileSync(path.join(ctx.root, "CLAUDE.md"), "# Project\n");
     setPrompter(() => flagPrompter({ yes: true }));
     await cli(...AGENT_RUN);
+    expect(read("CLAUDE.md")).toBe("# Project\n");
+    expect(fs.existsSync(path.join(ctx.root, "AGENTS.md"))).toBe(false);
+  });
+
+  it("a person is offered the note: added to an existing CLAUDE.md, no AGENTS.md", async () => {
+    fs.writeFileSync(path.join(ctx.root, "CLAUDE.md"), "# Project\n");
+    await offerNote(ctx.root, { confirm: async () => true }, () => {});
     expect(read("CLAUDE.md")).toBe("# Project\n\n" + noteSection());
     expect(fs.existsSync(path.join(ctx.root, "AGENTS.md"))).toBe(false);
   });
@@ -205,13 +209,13 @@ describe("protect --yes --tool --limit-field --above, with no key", () => {
   it("with no CLAUDE.md, a note in AGENTS.md gives CLAUDE.md just the import; a CLAUDE.md that exists gets the block once; one that imports AGENTS.md is left alone", async () => {
     fs.writeFileSync(path.join(ctx.root, "AGENTS.md"), "# Team\n\n" + noteSection());
     fs.writeFileSync(path.join(ctx.root, "CLAUDE.md"), "# Project\n");
-    setPrompter(() => flagPrompter({ yes: true }));
-    await cli(...AGENT_RUN);
+    const yes = { confirm: async () => true };
+    await offerNote(ctx.root, yes, () => {});
     expect(read("CLAUDE.md")).toBe("# Project\n\n" + noteSection());
-    await cli(...AGENT_RUN);
+    await offerNote(ctx.root, yes, () => {});
     expect(read("CLAUDE.md").split("<!-- signafaide:start -->")).toHaveLength(2);
     fs.writeFileSync(path.join(ctx.root, "CLAUDE.md"), "# Project\n\n@AGENTS.md\n");
-    await cli(...AGENT_RUN);
+    await offerNote(ctx.root, yes, () => {});
     expect(read("CLAUDE.md")).toBe("# Project\n\n@AGENTS.md\n");
   });
 

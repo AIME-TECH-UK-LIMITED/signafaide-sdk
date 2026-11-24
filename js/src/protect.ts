@@ -1187,7 +1187,9 @@ export async function runProtect(o: ProtectOptions): Promise<ProtectResult> {
     out("");
   }
   // The project note, so the next coding agent here protects such tools too (asked; never twice).
-  const noteChanges = await offerNote(root, prompt, out);
+  // Only a person at a terminal is offered it: a run without one (a coding agent's --yes) never
+  // writes AGENTS.md or CLAUDE.md, the instructions that shape later sessions.
+  const noteChanges = prompt.person ? await offerNote(root, prompt, out) : [];
   if (noteChanges.length) out("");
   // The checks file (version 2).
   const cp = checksPath(rec.state.root) ?? path.join(root, CHECKS_FILE);

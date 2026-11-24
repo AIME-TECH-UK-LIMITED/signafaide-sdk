@@ -491,9 +491,7 @@ describe("a partial setup is never Done, and the .env line only when true", () =
     setPrompter(() => flagPrompter({ yes: true }));
     const [, out] = await cli("protect");
     expect(out).not.toMatch(/^Done\./m);
-    expect(out).toContain(
-      "Not finished. Done: checks file signafaide.checks.json, code in src/tools.ts, the note in AGENTS.md, the note in CLAUDE.md.",
-    );
+    expect(out).toContain("Not finished. Done: checks file signafaide.checks.json, code in src/tools.ts.");
     expect(out).toContain("  - no sandbox and no API key, so protected tools stop until there is one");
     expect(out).toContain("To finish: npx signafaide protect (in a terminal)");
   });

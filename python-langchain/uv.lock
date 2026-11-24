@@ -1363,7 +1363,7 @@ wheels = [
 
 [[package]]
 name = "signafaide"
-version = "0.5.7"
+version = "0.5.8"
 source = { editable = "../python" }
 dependencies = [
     { name = "cryptography" },

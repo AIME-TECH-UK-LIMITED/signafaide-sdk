@@ -49,7 +49,7 @@ describe("agent setup", () => {
     expect(json(".mcp.json")).toEqual({ mcpServers: { signafaide: { type: "stdio", ...SERVER, env: {} } } });
     expect(read(".claude/skills/signafaide/SKILL.md")).toBe(claudeSkill());
     expect(read(".claude/skills/signafaide/SKILL.md")).toMatch(
-      /^---\nname: signafaide\ndescription: Use when adding or changing a tool that pays, deletes, sends messages, runs commands, pushes code, or edits secrets or config/,
+      /^---\nname: signafaide\ndescription: Use when the user asks to add signafAIde, to check or block an AI agent's tool calls before they run/,
     );
     expect(fs.readFileSync(path.join(home, ".codex/config.toml"), "utf8")).toBe(
       `[mcp_servers.signafaide]\ncommand = "npx"\nargs = ["-y", "signafaide-mcp@${VERSION}"]\n`,
@@ -263,10 +263,10 @@ describe("skill text", () => {
     const head = SKILL_BODY.split("\n").slice(0, 8).join("\n");
     // An agent decides from the request alone: the first line says when.
     expect(SKILL_BODY.split("\n")[2]).toMatch(
-      /^Use this when you add or change a tool that pays, deletes, sends messages, runs commands, pushes code, or edits secrets or config\./,
+      /^Use this when the user asks for signafAIde, asks to check or block an AI agent's tool calls before they run, or asks for a signed audit trail of what an agent did\./,
     );
     expect(SKILL_DESCRIPTION).toMatch(
-      /^Use when adding or changing a tool that pays, deletes, sends messages, runs commands, pushes code, or edits secrets or config/,
+      /^Use when the user asks to add signafAIde, to check or block an AI agent's tool calls before they run/,
     );
     expect(head).toContain(
       "Nothing is sent until a person runs `signafaide protect` or `signafaide init`, or sets `SIGNAFAIDE_API_KEY`",
@@ -349,7 +349,7 @@ describe("the project note", () => {
     expect(fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8")).toBe(NOTE);
     expect(fs.readFileSync(path.join(dir, "cursor-rules.mdc"), "utf8")).toBe(cursorNoteRule());
     expect(cursorNoteRule()).toMatch(
-      /^---\ndescription: Use when adding .+\nalwaysApply: true\n---\n\n## signafAIde\n/,
+      /^---\ndescription: Use when the user asks .+\nalwaysApply: true\n---\n\n## signafAIde\n/,
     );
     expect(fs.readFileSync(path.join(dir, "llms-snippet.md"), "utf8")).toBe(llmsSnippet());
     expect(llmsSnippet().split("\n")[2]).toMatch(

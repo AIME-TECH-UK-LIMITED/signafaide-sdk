@@ -340,7 +340,7 @@ export function createServer(root: string = process.cwd()): McpServer {
     {
       title: "signafAIde snippet for a language and framework",
       description:
-        "Use when adding or changing a tool that pays, deletes, sends messages, runs commands, pushes code, or edits secrets or config, in a stack that is not the open project. " +
+        "Use when the user asks how to add signafAIde, or how to check or record an AI agent's tool calls, in a stack that is not the open project. " +
         "A reference snippet for a language and framework you name: returns the install command, the canonical code to record an agent's tool calls with signafAIde, and the verify command. " +
         "It reads nothing in the project, detects nothing, changes nothing and sends nothing; the same arguments always give the same answer. " +
         "Use it to answer a question about a stack that is not the open project, or when signafaide_setup could not tell the language. " +

@@ -392,10 +392,7 @@ def test_prove_limit_in_words_and_no_keys_taken(flow, capsys):
 def test_partial_setup_not_done(flow, capsys):
     code, out = run(capsys, "protect", prompter=FlagPrompter(yes=True))
     assert not re.search(r"^Done\.", out, re.M)
-    assert (
-        "Not finished. Done: checks file signafaide.checks.json, code in src/tools.py, the note in AGENTS.md, the note in CLAUDE.md."
-        in out
-    )
+    assert "Not finished. Done: checks file signafaide.checks.json, code in src/tools.py." in out
     assert "  - no sandbox and no API key, so protected tools stop until there is one" in out
     assert "To finish: signafaide protect (in a terminal)" in out
 
