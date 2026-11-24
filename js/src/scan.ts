@@ -771,7 +771,7 @@ export function punycodeDecode(input: string): string | null {
   let n = 128;
   let i = 0;
   let bias = 72;
-  for (let idx = b >= 0 ? b + 1 : 0; idx < input.length; ) {
+  for (let idx = b >= 0 ? b + 1 : 0; idx < input.length;) {
     const old = i;
     let w = 1;
     for (let k = base; ; k += base) {

@@ -195,20 +195,18 @@ export function receiptErrors(rc: any): string[] {
   if (!["batch_sig", "head_sig", "service_key_id"].every((k) => typeof rc[k] === "string"))
     errs.push("receipt batch_sig, head_sig and service_key_id are strings");
   if (!sameKeys(b, BATCH_FIELDS)) errs.push("batch fields are " + [...BATCH_FIELDS].sort().join(", "));
-  else if (
-    !(
-      b.v === 1 &&
-      validProjectId(b.project) &&
-      (b.env === "test" || b.env === "live") &&
-      isInt(b.seq) &&
-      b.seq >= 1 &&
-      (b.prev === null || isHex(b.prev)) &&
-      isHex(b.root) &&
-      isInt(b.size) &&
-      b.size >= 1 &&
-      validTime(b.server_time)
-    )
-  )
+  else if (!(
+    b.v === 1 &&
+    validProjectId(b.project) &&
+    (b.env === "test" || b.env === "live") &&
+    isInt(b.seq) &&
+    b.seq >= 1 &&
+    (b.prev === null || isHex(b.prev)) &&
+    isHex(b.root) &&
+    isInt(b.size) &&
+    b.size >= 1 &&
+    validTime(b.server_time)
+  ))
     errs.push("batch has an invalid value");
   else if (
     b.drand !== null &&
@@ -220,17 +218,15 @@ export function receiptErrors(rc: any): string[] {
   )
     errs.push("batch drand must be null or {chain, round, randomness, signature}");
   if (!sameKeys(h, HEAD_FIELDS)) errs.push("head fields are " + [...HEAD_FIELDS].sort().join(", "));
-  else if (
-    !(
-      validProjectId(h.project) &&
-      (h.env === "test" || h.env === "live") &&
-      typeof h.agent === "string" &&
-      AGENT_RE.test(h.agent) &&
-      isInt(h.seq) &&
-      isHex(h.record_hash) &&
-      validTime(h.server_time)
-    )
-  )
+  else if (!(
+    validProjectId(h.project) &&
+    (h.env === "test" || h.env === "live") &&
+    typeof h.agent === "string" &&
+    AGENT_RE.test(h.agent) &&
+    isInt(h.seq) &&
+    isHex(h.record_hash) &&
+    validTime(h.server_time)
+  ))
     errs.push("head has an invalid value");
   return errs;
 }

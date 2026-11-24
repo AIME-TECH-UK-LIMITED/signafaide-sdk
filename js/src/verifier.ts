@@ -845,17 +845,15 @@ function signedHeadError(sh: any): string {
   const h = sh.head;
   if (!exactKeys(h, ["project", "env", "agent", "seq", "record_hash", "server_time"]))
     return "head fields are agent, env, project, record_hash, seq, server_time";
-  if (
-    !(
-      typeof h.project === "string" &&
-      (h.env === "test" || h.env === "live") &&
-      typeof h.agent === "string" &&
-      AGENT_RE.test(h.agent) &&
-      isU64(h.seq) &&
-      isHex(h.record_hash) &&
-      validTime(h.server_time)
-    )
-  ) {
+  if (!(
+    typeof h.project === "string" &&
+    (h.env === "test" || h.env === "live") &&
+    typeof h.agent === "string" &&
+    AGENT_RE.test(h.agent) &&
+    isU64(h.seq) &&
+    isHex(h.record_hash) &&
+    validTime(h.server_time)
+  )) {
     return "a head has an invalid value";
   }
   return "";

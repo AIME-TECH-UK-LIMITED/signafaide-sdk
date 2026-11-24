@@ -1937,7 +1937,12 @@ export class ChecksState {
       staleBlocked,
     };
     if (result === "block")
-      plan.blocked = this.blockError(decl, results.find((e) => e.result === "block")!, rs, f.rules);
+      plan.blocked = this.blockError(
+        decl,
+        results.find((e) => e.result === "block")!,
+        rs,
+        f.rules,
+      );
     else if (strict && rs && rs.mode === "enforce" && heldEntry?.enforce_result === "block")
       plan.heldBlock = this.heldBlockError(decl, heldEntry, rs);
     return plan;
