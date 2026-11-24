@@ -1,6 +1,6 @@
 {
   "name": "signafaide-verify",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Verify a signafAIde verification pack offline: the same checks and result line as every signafAIde verifier. Nothing else, no dependencies.",
   "license": "Apache-2.0",
   "type": "module",

@@ -4,7 +4,9 @@ Notable changes to the signafAIde SDK: the TypeScript and Python packages, the M
 Every release shares one version number and is a git tag; changes to the spec (`spec/SPEC.md`) are noted with the release that made them.
 Records and packs written by a version verify with that version and later ones, unless an entry says otherwise.
 
-## Unreleased
+## v0.5.7 (2026-11-24)
+
+Spec stays 1.1; records do not change. No change to how the SDK or the verifiers behave.
 
 - The conformance script makes its test HTTPS certificate with `openssl` at the start of each run and deletes the test CA's private key once it has signed; no private key is kept in the repository (`scripts/fixtures/tls` is gone).
 - The READMEs no longer explain how to clear the macOS quarantine flag: on a Mac, use the npm or PyPI package until the macOS binaries are notarised.

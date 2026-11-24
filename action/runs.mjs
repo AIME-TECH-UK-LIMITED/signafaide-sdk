@@ -51,7 +51,7 @@ const keyIn = (file) => {
 };
 
 if (!version && !env.SIGNAFAIDE_CI_JS_CLI) {
-  console.error("signafaide action: the version input is empty; set it to a released version, e.g. version: 0.5.6");
+  console.error("signafaide action: the version input is empty; set it to a released version, e.g. version: 0.5.7");
   process.exit(2);
 }
 
