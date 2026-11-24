@@ -37,9 +37,7 @@ const BINARY: Record<number, (m: Uint8Array, a: Uint8Array) => Uint8Array> = {
 };
 
 export type Attestation = (
-  | { kind: "bitcoin"; height: number }
-  | { kind: "pending"; uri: string }
-  | { kind: "unknown"; tag: string }
+  { kind: "bitcoin"; height: number } | { kind: "pending"; uri: string } | { kind: "unknown"; tag: string }
 ) & { msg: Uint8Array };
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");

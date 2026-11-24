@@ -1187,16 +1187,14 @@ export function rulingErrors(r: unknown): string | null {
   if (rules === null) {
     if (watch || (basis !== "fingerprint" && basis !== "default"))
       return 'without a rule set a ruling has `mode` "enforce" (On), with basis fingerprint or default';
-  } else if (
-    !(
-      sameSet(rules, ["set", "version", "hash"]) &&
-      typeof rules.set === "string" &&
-      SET_RE.test(rules.set) &&
-      isSafeInt(rules.version) &&
-      rules.version >= 1 &&
-      isHex64(rules.hash)
-    )
-  ) {
+  } else if (!(
+    sameSet(rules, ["set", "version", "hash"]) &&
+    typeof rules.set === "string" &&
+    SET_RE.test(rules.set) &&
+    isSafeInt(rules.version) &&
+    rules.version >= 1 &&
+    isHex64(rules.hash)
+  )) {
     return "the ruling's rules is null or {set, version, hash}";
   }
   if (!isSafeInt(r.fingerprints) || r.fingerprints < 0)
@@ -1244,7 +1242,7 @@ const UTF8 = new TextEncoder();
 function pctDecode(s: string): string | null {
   if (!/%[0-9A-Fa-f]{2}/.test(s)) return null;
   const bytes: number[] = [];
-  for (let i = 0; i < s.length; ) {
+  for (let i = 0; i < s.length;) {
     if (s[i] === "%" && /^[0-9A-Fa-f]{2}$/.test(s.slice(i + 1, i + 3))) {
       bytes.push(parseInt(s.slice(i + 1, i + 3), 16));
       i += 3;
@@ -1541,8 +1539,8 @@ function whatwgIpv4(host: string): bigint | null | "failure" {
 }
 
 const METADATA_NAMES = new Set(["metadata.google.internal", "metadata"]);
-const METADATA_IPS: Ip[] = ["169.254.169.254", "169.254.170.2", "100.100.100.200", "fd00:ec2::254"].map(
-  (s) => ipAddress(s)!,
+const METADATA_IPS: Ip[] = ["169.254.169.254", "169.254.170.2", "100.100.100.200", "fd00:ec2::254"].map((s) =>
+  ipAddress(s)!,
 );
 const V4: [string, string][] = [
   ["0.0.0.0/8", "unspecified"],

@@ -311,8 +311,8 @@ export async function verify(pack?: string | object | null, opts: VerifyOptions 
     const chainDir = path.join(rec.state.home, "chain");
     const content = opts.content ?? (fs.existsSync(chainDir) ? chainDir : undefined);
     let agentKeys:
-      | { agent: string; key_id: string; public_key: string; valid_from: string; valid_to: string | null }[]
-      | null = null;
+      { agent: string; key_id: string; public_key: string; valid_from: string; valid_to: string | null }[] | null =
+      null;
     if (opts.agentKeys !== undefined) {
       agentKeys = parseAgentKeys(await readInput(opts.agentKeys, "--agent-keys"));
       notes.push(`agent keys: ${typeof opts.agentKeys === "string" ? opts.agentKeys : "given"}`);

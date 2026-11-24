@@ -790,13 +790,11 @@ export function findTools(root: string, only?: string): Found {
   for (const s of srcs) {
     const { toks, text } = s;
     for (let i = 0; i + 3 < toks.length; i++) {
-      if (
-        !(
-          (isId(toks[i], "const") || isId(toks[i], "let") || isId(toks[i], "var")) &&
-          isId(toks[i + 1]) &&
-          /tools$/i.test(toks[i + 1].v)
-        )
-      )
+      if (!(
+        (isId(toks[i], "const") || isId(toks[i], "let") || isId(toks[i], "var")) &&
+        isId(toks[i + 1]) &&
+        /tools$/i.test(toks[i + 1].v)
+      ))
         continue;
       let k = i + 2;
       if (isP(toks[k], ":")) while (k < toks.length && !isP(toks[k], "=")) k++;

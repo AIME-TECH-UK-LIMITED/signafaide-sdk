@@ -88,7 +88,9 @@ def test_a_hanging_witness_never_blocks_a_tool_call(project, service, monkeypatc
     t0 = time.monotonic()
     out = signafaide.record(lambda: "done", name="pay")()
     took = time.monotonic() - t0
-    assert out == "done" and took < 0.5, took
+    # Well under the 3 s hang: the call did not wait for the witness. The local signing and disk
+    # write alone can take most of a second on a busy CI runner (0.72 s seen), so 0.5 s was flaky.
+    assert out == "done" and took < 1.5, took
     assert service.calls == []  # nothing was asked while the tool ran
     service.hang = 0
     rec._stopped = True

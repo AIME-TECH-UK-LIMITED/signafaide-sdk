@@ -160,15 +160,13 @@ function spanOf(t: FoundTool, text: string): [number, number] {
   for (let i = 0; i + 2 < toks.length; i++) {
     const a = toks[i];
     if (t.shape === "mcp") {
-      if (
-        !(
-          a.t === "id" &&
-          (a.v === "tool" || a.v === "registerTool") &&
-          toks[i + 1]?.v === "(" &&
-          toks[i + 2]?.t === "str" &&
-          toks[i + 2].v === t.name
-        )
-      )
+      if (!(
+        a.t === "id" &&
+        (a.v === "tool" || a.v === "registerTool") &&
+        toks[i + 1]?.v === "(" &&
+        toks[i + 2]?.t === "str" &&
+        toks[i + 2].v === t.name
+      ))
         continue;
       const c = closing(toks, i + 1);
       return [lineAt(text, a.s), lineAt(text, c >= 0 ? toks[c].e : a.e)];

@@ -81,7 +81,7 @@ export function tokenize(src: string): Token[] {
       else if (c === "`") j = templateEnd(j);
       else if (c === "/" && src[j + 1] === "/") j = lineEnd(j);
       else if (c === "/" && src[j + 1] === "*") j = blockEnd(j);
-      else if (c === "{") depth++, j++;
+      else if (c === "{") (depth++, j++);
       else if (c === "}") {
         if (depth === 0) return j + 1;
         depth--;
@@ -105,8 +105,8 @@ export function tokenize(src: string): Token[] {
       const c = src[j];
       if (c === "\n") return j;
       if (c === "\\") j += 2;
-      else if (c === "[") (cls = true), j++;
-      else if (c === "]") (cls = false), j++;
+      else if (c === "[") ((cls = true), j++);
+      else if (c === "]") ((cls = false), j++);
       else if (c === "/" && !cls) {
         j++;
         while (j < n && /[a-z]/i.test(src[j])) j++;
@@ -285,13 +285,13 @@ export function lineDiff(a: string, b: string, context = 2): string[] {
     let i = 0;
     let j = 0;
     while (i < m || j < k) {
-      if (i < m && j < k && xm[i] === ym[j]) ops.push([" ", xm[i]]), i++, j++;
-      else if (j < k && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) ops.push(["+", ym[j]]), j++;
-      else ops.push(["-", xm[i]]), i++;
+      if (i < m && j < k && xm[i] === ym[j]) (ops.push([" ", xm[i]]), i++, j++);
+      else if (j < k && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) (ops.push(["+", ym[j]]), j++);
+      else (ops.push(["-", xm[i]]), i++);
     }
   }
   // Within each run of changes, the removed lines first, then the added ones.
-  for (let i = 0; i < ops.length; ) {
+  for (let i = 0; i < ops.length;) {
     if (ops[i][0] === " ") {
       i++;
       continue;

@@ -74,8 +74,7 @@ export async function sandboxView(
   } = {},
 ): Promise<SandboxView | null> {
   const s = rec.state.sandbox() as
-    | (Record<string, unknown> & { claim_url?: string; project?: string; claimed?: boolean })
-    | null;
+    (Record<string, unknown> & { claim_url?: string; project?: string; claimed?: boolean }) | null;
   if (!s?.claim_url || !rec.apiKey?.startsWith("sfa_test_")) return null;
   let claimed = !!s.claimed;
   let expires = parseExpiry(s.expires_at);

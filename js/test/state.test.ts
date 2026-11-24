@@ -21,24 +21,22 @@ const C = `${BUCKET}/bot`;
 
 function append(st: State, n = 1, agent = "bot", chain = `${BUCKET}/${agent}`): SignedRecord[] {
   const key = st.loadKey(agent);
-  return Array.from(
-    { length: n },
-    () =>
-      st.append(
-        chain,
-        (seq, prev) =>
-          makeRecord(key, {
-            kind: "note",
-            project: "prj_01JC0000000000000000000000",
-            env: "test",
-            agent,
-            seq,
-            prev,
-            name: "n",
-            content: { i: 1 },
-          }),
-        (r) => wireRecord(r, false),
-      )!,
+  return Array.from({ length: n }, () =>
+    st.append(
+      chain,
+      (seq, prev) =>
+        makeRecord(key, {
+          kind: "note",
+          project: "prj_01JC0000000000000000000000",
+          env: "test",
+          agent,
+          seq,
+          prev,
+          name: "n",
+          content: { i: 1 },
+        }),
+      (r) => wireRecord(r, false),
+    )!,
   );
 }
 
