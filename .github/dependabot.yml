@@ -7,6 +7,10 @@ updates:
       - "/action"
     schedule:
       interval: weekly
+    # ossf/scorecard-action v2.6.0's image cannot be pulled (upstream issue 1752): stay on v2.5.0 until it is fixed.
+    ignore:
+      - dependency-name: "ossf/scorecard-action"
+        versions: ["2.6.0"]
     groups:
       actions:
         patterns: ["*"]
