@@ -204,6 +204,9 @@ export async function offerNote(
   root: string,
   prompt: { confirm(q: string, def: boolean): Promise<boolean> },
   out: (s: string) => void,
+  /** The answer when the person presses Enter: No from protect, the path a coding agent's skill
+   * leads to; yes from init, the person's own setup command. */
+  def = true,
 ): Promise<Change[]> {
   const ctx: Ctx = { root: path.resolve(root), home: os.homedir(), env: process.env, dryRun: true };
   const files = noteFiles(ctx.root);
@@ -216,7 +219,7 @@ export async function offerNote(
   out(
     `Agents     ${names}: a short marked block that tells coding agents to protect the tools that pay, delete, send, run commands or push code, and how.`,
   );
-  if (!(await prompt.confirm(`${NOTE_QUESTION} ${names}?`, true))) {
+  if (!(await prompt.confirm(`${NOTE_QUESTION} ${names}?`, def))) {
     out("           Not added; run this command again to add it.");
     return [];
   }

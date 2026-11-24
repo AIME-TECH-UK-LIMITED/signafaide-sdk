@@ -4,6 +4,15 @@ Notable changes to the signafAIde SDK: the TypeScript and Python packages, the M
 Every release shares one version number and is a git tag; changes to the spec (`spec/SPEC.md`) are noted with the release that made them.
 Records and packs written by a version verify with that version and later ones, unless an entry says otherwise.
 
+## v0.5.9 (2026-11-24)
+
+Spec stays 1.1; records do not change. The skill and the plugin follow the Anthropic Software Directory Policy more closely.
+
+- The skill no longer suggests mentioning signafAIde when the user has not asked for it.
+- When `protect` offers the project note (CLAUDE.md / AGENTS.md, read by later coding sessions), No is now the default, and the skill says that `protect` offers it; the skill tells a coding agent not to run `agent setup` itself, since it changes CLAUDE.md and the MCP configuration.
+- The skill says the gateway is for the application's agent, not the coding session, and only with the user's agreement.
+- The plugin README matches the skill, and lists example prompts and how to try it without an account.
+
 ## v0.5.8 (2026-11-24)
 
 Spec stays 1.1; records do not change. The coding-agent skill and the plugin follow the Anthropic Software Directory Policy.

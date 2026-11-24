@@ -4,7 +4,7 @@ The signafaide-verify program (the release binaries, the PyPI wheels and the sdi
 
 ## Apache License 2.0
 
-Used by: signafaide-verify 0.5.8, drand-verify 0.6.2, ureq-proto 0.7.1, zeroize 1.9.1
+Used by: signafaide-verify 0.5.9, drand-verify 0.6.2, ureq-proto 0.7.1, zeroize 1.9.1
 
 ```
 
@@ -3426,7 +3426,7 @@ limitations under the License.
 
 ## Apache License 2.0
 
-Used by: signafaide-core 0.5.8, fiat-crypto 0.2.9, itoa 1.0.19, libc 0.2.191, miniz_oxide 0.9.1, proc-macro2 1.0.107, quote 1.0.47, semver 1.0.28, serde 1.0.229, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.154, shlex 2.0.1, syn 2.0.119, syn 3.0.10, unicode-ident 1.0.27, utf8-zero 0.8.1
+Used by: signafaide-core 0.5.9, fiat-crypto 0.2.9, itoa 1.0.19, libc 0.2.191, miniz_oxide 0.9.1, proc-macro2 1.0.107, quote 1.0.47, semver 1.0.28, serde 1.0.229, serde_core 1.0.229, serde_derive 1.0.229, serde_json 1.0.154, shlex 2.0.1, syn 2.0.119, syn 3.0.10, unicode-ident 1.0.27, utf8-zero 0.8.1
 
 ```
 Apache License

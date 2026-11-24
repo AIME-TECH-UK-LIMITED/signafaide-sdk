@@ -4,8 +4,18 @@ signafAIde records what AI agents decide. Each record is signed by the agent's o
 
 This plugin adds:
 
-- the `signafaide` skill, which tells Claude when signafAIde fits: the user asks to audit, log or trace an agent's decisions, needs tamper-evidence or compliance evidence, or builds an agent whose tools take real actions. Claude then adds the SDK to the project (`signafaide` on npm and PyPI), wraps the tools that act, starts the MCP servers the application's agent uses through `signafaide gateway`, which records every tool call that passes through it, and declares the agent's full tool list, so a verifier can say which tools are recorded. It checks the records with the SDK's command line (`signafaide verify`, `status`, `replay`) on this machine. The gateway records every call that goes through it; a call the application makes around it is still not recorded, so the deployment has to make the gateway the only route to those tools.
+- the `signafaide` skill, which tells Claude when signafAIde fits: the user asks to add signafAIde, to check or block an AI agent's tool calls before they run, or for a signed audit trail of what an agent did. With the user's agreement Claude then adds the SDK to the project (`signafaide` on npm and PyPI), wraps the tools that act, starts the MCP servers the application's agent uses (not Claude's own) through `signafaide gateway`, which records every tool call that passes through it, and declares the agent's full tool list, so a verifier can say which tools are recorded. It checks the records with the SDK's command line (`signafaide verify`, `status`, `replay`) on this machine. The gateway records every call that goes through it; a call the application makes around it is still not recorded, so the deployment has to make the gateway the only route to those tools.
 - the hosted `signafaide` MCP server (`https://api.signafaide.co.uk/mcp`), read-only and with no account: `signafaide_quickstart` (the install command and code for a language and framework), `signafaide_explain_error` (what an error code means and what to do), `signafaide_check_auditor_link` (checks an auditor link), `signafaide_verify_pack` (verifies a verification pack) and `signafaide_service_keys` (the service's public keys). It reads nothing on your machine and changes nothing. It receives only what Claude passes to a tool: a language and framework, an error code, an auditor link, or a verification pack, which holds record hashes, tool names, agent names and times. It does not store or log what it receives; it counts calls per tool.
+
+## Example prompts
+
+- "Add signafAIde to my LangChain agent so approve_payout is blocked above 1,000 GBP."
+- "What does the signafAIde error chain_conflict mean, and how do I fix it?"
+- "Check this signafAIde auditor link: https://signafaide.co.uk/app/audit/..."
+- "Verify this signafAIde verification pack" (with pack.json attached).
+- "Which public keys does the signafAIde service sign with?"
+
+No account is needed to try it: the hosted MCP server needs no sign-in, and `signafaide init` (or the sandbox question in `signafaide protect`) makes a free sandbox with no account, email or card.
 
 ## What it sends, and where
 
