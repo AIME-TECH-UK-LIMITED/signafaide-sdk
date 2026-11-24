@@ -16,6 +16,11 @@ updates:
     directory: "/js"
     schedule:
       interval: weekly
+    # The signing and hashing libraries the SDK and the verifier check signatures with: a major
+    # version is a deliberate change, tested against every vector, never a routine update.
+    ignore:
+      - dependency-name: "@noble/*"
+        update-types: ["version-update:semver-major"]
     groups:
       npm:
         patterns: ["*"]

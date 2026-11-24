@@ -98,8 +98,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Filter by conclusion in jq, not with the API's status= parameter: that index can lag
+          # behind a run that already finished (seen on v0.5.7 and v0.5.9), and the release then
+          # stopped for no reason. Every attempt of each run is listed; one success is enough.
           for wf in ci.yml verify-node20.yml; do
-            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?head_sha=$GITHUB_SHA&event=push&status=success" --jq .total_count)
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/runs?head_sha=$GITHUB_SHA&event=push&per_page=100" \
+              --jq '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success")] | length')
             test "$n" -ge 1 || { echo "no successful $wf run on main for $GITHUB_SHA: wait for it, then run this again"; exit 1; }
           done
       - name: Not released yet (or a re-run of this very release), and the package names are ours
