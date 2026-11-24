@@ -40,7 +40,7 @@ gh attestation verify signafaide-verify-linux-x86_64 \
   --source-ref refs/heads/main
 ```
 
-On macOS use `shasum -a 256`; on Windows compare `Get-FileHash` with `SHA256SUMS`. The macOS programs are not notarised by Apple yet: after a browser download, Gatekeeper blocks one until you remove the quarantine flag (`xattr -d com.apple.quarantine <file>`), which you should do only after the checks above.
+On macOS use `shasum -a 256`; on Windows compare `Get-FileHash` with `SHA256SUMS`. The macOS programs are not notarised by Apple yet, so macOS may refuse to open them: on a Mac, use the npm or PyPI package instead.
 
 ## Read the result
 

@@ -28,9 +28,10 @@
 // content files with draft lines and lines whose content is not an object, a content directory
 // holding a JSON array file, --version, and exit 2 for unreadable input.
 //
-// The local https server runs in a child process with a certificate from a test-only CA
-// (scripts/fixtures/tls: the CA's private key was discarded when it was made, so nothing else is
-// signed by it). Only these cases trust it: SSL_CERT_FILE for the Rust binary (and the wheel, the
+// The local https server runs in a child process with a certificate from a test-only CA made for
+// this run with openssl in the run's temporary folder: the CA's private key is deleted as soon as
+// it has signed the server's certificate, so nothing else is signed by it, and no key is kept in
+// the repository. Only these cases trust it: SSL_CERT_FILE for the Rust binary (and the wheel, the
 // same binary), NODE_EXTRA_CA_CERTS for the npm package.
 // Exit 1 on any difference.
 
@@ -43,12 +44,99 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const TLS = path.join(root, "scripts/fixtures/tls");
 
-// The local https server: `--serve <routes.json>` answers each path from the routes file (read on
+/** A CA and a certificate for 127.0.0.1 signed by it, made in `tls` with openssl. The CA's private
+ * key is deleted once it has signed; `ca.pem`, `server.pem` and `server-key.pem` stay. */
+function makeTls(tls) {
+  fs.mkdirSync(tls, { recursive: true });
+  const cnf = path.join(tls, "openssl.cnf");
+  fs.writeFileSync(
+    cnf,
+    [
+      "[req]",
+      "distinguished_name = dn",
+      "prompt = no",
+      "[dn]",
+      "CN = signafaide verify-vectors test CA",
+      "[v3_ca]",
+      "basicConstraints = critical, CA:TRUE",
+      "keyUsage = critical, keyCertSign, cRLSign",
+      "subjectKeyIdentifier = hash",
+      "[srv]",
+      "basicConstraints = critical, CA:FALSE",
+      "keyUsage = critical, digitalSignature, keyEncipherment",
+      "extendedKeyUsage = serverAuth",
+      "subjectAltName = IP:127.0.0.1, DNS:localhost",
+      "",
+    ].join("\n"),
+  );
+  const f = (n) => path.join(tls, n);
+  const openssl = (args) => {
+    const r = spawnSync("openssl", args, { encoding: "utf8" });
+    if (r.error || r.status !== 0)
+      throw new Error(`verify-vectors: openssl ${args[0]} failed (openssl is needed): ${r.error?.message ?? r.stderr}`);
+  };
+  openssl([
+    "req",
+    "-x509",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-keyout",
+    f("ca.key"),
+    "-out",
+    f("ca.pem"),
+    "-days",
+    "2",
+    "-config",
+    cnf,
+    "-extensions",
+    "v3_ca",
+  ]);
+  openssl([
+    "req",
+    "-new",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-keyout",
+    f("server-key.pem"),
+    "-out",
+    f("server.csr"),
+    "-subj",
+    "/CN=127.0.0.1",
+    "-config",
+    cnf,
+  ]);
+  openssl([
+    "x509",
+    "-req",
+    "-in",
+    f("server.csr"),
+    "-CA",
+    f("ca.pem"),
+    "-CAkey",
+    f("ca.key"),
+    "-set_serial",
+    "1",
+    "-out",
+    f("server.pem"),
+    "-days",
+    "2",
+    "-extfile",
+    cnf,
+    "-extensions",
+    "srv",
+  ]);
+  fs.rmSync(f("ca.key"));
+  fs.rmSync(f("server.csr"));
+}
+
+// The local https server: `--serve <routes.json> <tls folder>` answers each path from the routes file (read on
 // every request): {"<path>": {"status": 200, "body": "...", "location": "..."}}; else 404.
 if (process.argv[2] === "--serve") {
   const routes = process.argv[3];
+  const TLS = process.argv[4];
   const server = https.createServer(
     { key: fs.readFileSync(path.join(TLS, "server-key.pem")), cert: fs.readFileSync(path.join(TLS, "server.pem")) },
     (req, res) => {
@@ -101,6 +189,8 @@ async function main() {
     "SIGNAFAIDE_VERIFY_KEYS_URL_PINNED",
   ])
     delete baseEnv[k];
+  const TLS = path.join(dir, "tls");
+  makeTls(TLS);
   const CA = path.join(TLS, "ca.pem");
   const trustTest = (extra = {}) => ({ ...baseEnv, SSL_CERT_FILE: CA, NODE_EXTRA_CA_CERTS: CA, ...extra });
   const run = (cmd, args, env = baseEnv) => {
@@ -135,7 +225,7 @@ async function main() {
     fs.writeFileSync(routesFile, JSON.stringify(routes));
   };
   setRoute("/", { body: "" });
-  const server = spawn(process.execPath, [fileURLToPath(import.meta.url), "--serve", routesFile], {
+  const server = spawn(process.execPath, [fileURLToPath(import.meta.url), "--serve", routesFile, TLS], {
     stdio: ["pipe", "pipe", "inherit"],
   });
   const port = await new Promise((resolve, reject) => {
