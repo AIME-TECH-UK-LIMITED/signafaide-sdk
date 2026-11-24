@@ -35,6 +35,10 @@ updates:
       - "/python-langchain"
     schedule:
       interval: weekly
+    # hatchling is the build backend ([build-system] in pyproject.toml), not a locked dependency:
+    # Dependabot's uv updater stops on it ("Previous version was not provided for: 'hatchling'").
+    ignore:
+      - dependency-name: "hatchling"
     groups:
       python:
         patterns: ["*"]
