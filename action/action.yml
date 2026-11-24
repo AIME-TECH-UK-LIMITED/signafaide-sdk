@@ -1,5 +1,5 @@
 name: signafAIde check
-description: Fails a pull request that adds an agent tool that pays, deletes, sends, runs commands, pushes code or edits secrets or config without signafAIde protect. No account, no key.
+description: Fails a pull request that adds a risky AI agent tool (pays, deletes, sends, runs commands) without signafAIde protect.
 author: AIME TECH UK LIMITED
 branding:
   icon: shield

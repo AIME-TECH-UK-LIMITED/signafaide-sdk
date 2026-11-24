@@ -136,7 +136,7 @@ gh attestation verify signafaide-verify-linux-x86_64 \
 chmod +x signafaide-verify-linux-x86_64
 ```
 
-On macOS use `shasum -a 256 --check --ignore-missing SHA256SUMS`; on Windows compare `Get-FileHash signafaide-verify-windows-x86_64.exe` with its line in `SHA256SUMS`. The files are `signafaide-verify-linux-x86_64`, `-linux-arm64`, `-macos-x86_64`, `-macos-arm64` and `-windows-x86_64.exe`. The macOS programs are not notarised by Apple yet: one downloaded with a browser is blocked by Gatekeeper until you remove the quarantine flag (`xattr -d com.apple.quarantine <file>`) after checking it as above; one downloaded with `curl` is not flagged.
+On macOS use `shasum -a 256 --check --ignore-missing SHA256SUMS`; on Windows compare `Get-FileHash signafaide-verify-windows-x86_64.exe` with its line in `SHA256SUMS`. The files are `signafaide-verify-linux-x86_64`, `-linux-arm64`, `-macos-x86_64`, `-macos-arm64` and `-windows-x86_64.exe`. The macOS programs are not notarised by Apple yet, so macOS may refuse to open them: on a Mac, use the npm or PyPI package above instead.
 
 What each one is: the PyPI wheels hold these same release binaries, file for file; on a platform without a wheel, pip builds the Rust verifier from the sdist, which needs a Rust toolchain. The npm package is a different implementation, the TypeScript verifier, in one file with no dependencies. All of them, and the SDKs' `signafaide verify`, give the same check ids, statuses and result line for the same inputs (spec §7); CI runs the spec vectors and the same input cases through each.
 
@@ -175,7 +175,3 @@ Apache-2.0, see [LICENSE](LICENSE).
 ## Contributing and security
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the layout and how to run the checks. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
-
-## Support the project
-
-If signafAIde is useful to you, a star on this repository helps other developers find it.
