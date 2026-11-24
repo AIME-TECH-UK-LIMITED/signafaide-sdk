@@ -1838,7 +1838,9 @@ def run_protect(
         out(f"  signafaide.declare_tools({json.dumps([t.name for t in found.tools])}, agent={json.dumps(agent)})")
         out("")
     # The project note, so the next coding agent here protects such tools too (asked; never twice).
-    note_changes = offer_note(root, prompt, out)
+    # Only a person at a terminal is offered it: a run without one (a coding agent's --yes) never
+    # writes AGENTS.md or CLAUDE.md, the instructions that shape later sessions.
+    note_changes = offer_note(root, prompt, out) if prompt.person else []
     if note_changes:
         out("")
     cp = checks_path(rec.state.root) or (root / CHECKS_FILE)

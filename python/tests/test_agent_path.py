@@ -134,19 +134,25 @@ def test_agent_run_without_a_key(flow, capsys):
         "protect": True,
         "mode": "watch",
     }  # watch: the kept rule blocks nothing
-    assert (project / "AGENTS.md").read_text() == note_section()
-    assert (project / "CLAUDE.md").read_text() == "@AGENTS.md\n"  # Claude Code reads the same note
-    assert re.search(r"AGENTS\.md +signafAIde note for coding agents", out)
+    # Without a person no instructions for later sessions are written (directory policy 1G).
+    assert not (project / "AGENTS.md").exists()
+    assert not (project / "CLAUDE.md").exists()
+    assert "Agents     " not in out
     assert ("POST", "/v1/sandbox") not in service.calls
-    code, again = run(capsys, *AGENT_RUN, prompter=FlagPrompter(yes=True))
-    assert "Agents     " not in again
-    assert (project / "AGENTS.md").read_text().count(SECTION_START) == 1
 
 
-def test_agent_run_adds_to_an_existing_claude_md_only(flow, capsys):
+def test_agent_run_leaves_claude_md_alone(flow, capsys):
     project, _ = flow
     (project / "CLAUDE.md").write_text("# Project\n")
     run(capsys, *AGENT_RUN, prompter=FlagPrompter(yes=True))
+    assert (project / "CLAUDE.md").read_text() == "# Project\n"
+    assert not (project / "AGENTS.md").exists()
+
+
+def test_a_person_is_offered_the_note_for_an_existing_claude_md(flow, capsys):
+    project, _ = flow
+    (project / "CLAUDE.md").write_text("# Project\n")
+    offer_note(project, ScriptedPrompter([True]), lambda s: None)
     assert (project / "CLAUDE.md").read_text() == "# Project\n\n" + note_section()
     assert not (project / "AGENTS.md").exists()
 
@@ -211,12 +217,12 @@ def test_claude_md_gets_the_note_once_or_imports_agents_md(flow, capsys):
     project, _ = flow
     (project / "AGENTS.md").write_text("# Team\n\n" + note_section())
     (project / "CLAUDE.md").write_text("# Project\n")
-    run(capsys, *AGENT_RUN, prompter=FlagPrompter(yes=True))
+    offer_note(project, ScriptedPrompter([True]), lambda s: None)
     assert (project / "CLAUDE.md").read_text() == "# Project\n\n" + note_section()
-    run(capsys, *AGENT_RUN, prompter=FlagPrompter(yes=True))
+    offer_note(project, ScriptedPrompter([True]), lambda s: None)
     assert (project / "CLAUDE.md").read_text().count(SECTION_START) == 1
     (project / "CLAUDE.md").write_text("# Project\n\n@AGENTS.md\n")
-    run(capsys, *AGENT_RUN, prompter=FlagPrompter(yes=True))
+    offer_note(project, ScriptedPrompter([True]), lambda s: None)
     assert (project / "CLAUDE.md").read_text() == "# Project\n\n@AGENTS.md\n"
 
 

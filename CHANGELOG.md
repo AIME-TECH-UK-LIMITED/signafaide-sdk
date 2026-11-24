@@ -4,6 +4,14 @@ Notable changes to the signafAIde SDK: the TypeScript and Python packages, the M
 Every release shares one version number and is a git tag; changes to the spec (`spec/SPEC.md`) are noted with the release that made them.
 Records and packs written by a version verify with that version and later ones, unless an entry says otherwise.
 
+## v0.5.8 (2026-11-24)
+
+Spec stays 1.1; records do not change. The coding-agent skill and the plugin follow the Anthropic Software Directory Policy.
+
+- The skill, the Claude Code plugin, the Cursor and Gemini manifests and the MCP quickstart tool describe when to use signafAIde narrowly: when the user asks to add it, to check or block an AI agent's tool calls, or for a signed audit trail. Before, they fired on any tool that pays, deletes, sends or runs commands.
+- The skill tells a coding agent to add signafAIde, install it or run its commands only once the user has asked for it and agreed; otherwise it may mention it once and leave the decision to the user.
+- `protect` without a person at a terminal (a coding agent's `--yes`) no longer writes the project note to AGENTS.md or CLAUDE.md; a person running `protect` or `init` in a terminal is still offered it.
+
 ## v0.5.7 (2026-11-24)
 
 Spec stays 1.1; records do not change. No change to how the SDK or the verifiers behave.

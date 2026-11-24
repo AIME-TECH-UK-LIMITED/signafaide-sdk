@@ -4,8 +4,8 @@ Checks a signafAIde verification pack on your own machine, without an account, t
 
 It comes three ways. Pin the release your customer's `signafaide prove` names:
 
-- PyPI: `uvx signafaide-verify@0.5.7 ...` or `pipx install signafaide-verify==0.5.7`. The wheels hold the release binaries below, file for file, with no Python dependencies. On a platform without a wheel, pip builds the Rust verifier from the sdist, which needs a Rust toolchain.
-- npm: `npx signafaide-verify@0.5.7 ...` (Node.js 20 or later). This is the TypeScript verifier in one file with no dependencies; the bundled `@noble` libraries' licences are in `THIRD-PARTY-NOTICES.md`.
+- PyPI: `uvx signafaide-verify@0.5.8 ...` or `pipx install signafaide-verify==0.5.8`. The wheels hold the release binaries below, file for file, with no Python dependencies. On a platform without a wheel, pip builds the Rust verifier from the sdist, which needs a Rust toolchain.
+- npm: `npx signafaide-verify@0.5.8 ...` (Node.js 20 or later). This is the TypeScript verifier in one file with no dependencies; the bundled `@noble` libraries' licences are in `THIRD-PARTY-NOTICES.md`.
 - A single program for Linux (static), macOS and Windows on [GitHub Releases](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/releases), with `SHA256SUMS` and signed build provenance.
 
 The PyPI package and the binaries are the Rust verifier; the npm package is the TypeScript one. They give the same check ids, statuses and result line for the same inputs, which CI checks with the spec's test vectors and the same input cases.

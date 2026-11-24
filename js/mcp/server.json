@@ -9,12 +9,12 @@
     "source": "github",
     "subfolder": "js/mcp"
   },
-  "version": "0.5.7",
+  "version": "0.5.8",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "signafaide-mcp",
-      "version": "0.5.7",
+      "version": "0.5.8",
       "transport": {
         "type": "stdio"
       }

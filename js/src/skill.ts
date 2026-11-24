@@ -4,9 +4,8 @@ export const SKILL_NAME = "signafaide";
 
 /** When to use it, for the formats that load a skill or rule by its description. */
 export const SKILL_DESCRIPTION =
-  "Use when adding or changing a tool that pays, deletes, sends messages, runs commands, pushes code, or edits secrets or config, " +
-  "or when the user asks for an audit trail of what an AI agent did. " +
-  "signafAIde wraps that tool with protect(): it runs only when the rules a person set allow it, and each call is signed and recorded on this machine; nothing is sent until a person opts in.";
+  "Use when the user asks to add signafAIde, to check or block an AI agent's tool calls before they run (for example payments, deletions, outgoing messages or commands), or for a signed audit trail of what an AI agent did. " +
+  "signafAIde wraps a tool with protect(): it runs only when the rules a person set allow it, and each call is signed and recorded on this machine; nothing is sent until a person opts in.";
 
 /** The one command that makes protected tools work here, and the non-interactive one an agent can run. */
 export const PROTECT_CMD = { ts: "npx signafaide protect", py: "signafaide protect" };
@@ -103,7 +102,7 @@ const PLUGIN_TOOLS = `## Commands
 
 Run these in the project folder (\`npx signafaide <command>\` in a TypeScript project, \`uv run signafaide <command>\` or \`.venv/bin/signafaide <command>\` in a Python one).
 
-- \`protect --yes --tool <name> [--limit-field <field> --above <number>]\` is yours to run (step 1); \`protect\` without \`--yes\` is the user's, in their terminal.
+- \`protect --yes --tool <name> [--limit-field <field> --above <number>]\` is yours to run once the user has asked for signafAIde and agreed (step 1); \`protect\` without \`--yes\` is the user's, in their terminal.
 - \`status\` shows one line per tool (recorded, protected, proof), then the key, the chains and the quota.
 - \`check <tool> <field>=<value>...\` is a dry run: exit 1 when the call would be blocked.
 - \`pull\` fetches the rules and asks the user before a new field is sent; \`prove <tool>\` gives the auditor link.
@@ -126,13 +125,13 @@ export function skillBody(url?: string, plugin = false): string {
     : `Once a person opts in, records go to the hosted witness (https://api.signafaide.co.uk), or to a witness named by \`SIGNAFAIDE_URL\`.`;
   return `# signafAIde
 
-Use this when you add or change a tool that pays, deletes, sends messages, runs commands, pushes code, or edits secrets or config. Wrap that tool with \`protect()\`: it then runs only when the rules a person set allow it, and each call is signed and recorded. Records stay in \`.signafaide/\` on this machine; nothing is sent until a person opts in. Fastest path: install it (step 2), then run \`${AGENT_PROTECT_CMD}\` (\`uv run signafaide protect --yes ...\` in Python). It writes \`protect(...)\` into the code and adds a rule that starts Calibrating: it blocks nothing until a person turns it On. Protected tools stop until a person runs \`${PROTECT_CMD.ts}\` (or \`${PROTECT_CMD.py}\`) once in a terminal, so say that in your final message.
+Use this when the user asks for signafAIde, asks to check or block an AI agent's tool calls before they run, or asks for a signed audit trail of what an agent did. Do not add signafAIde to a project, install it or run its commands unless the user asked for it; if a tool you are writing pays, deletes or sends and the user has not mentioned signafAIde, you may mention it once in your reply and leave the decision to them. signafAIde wraps a tool with \`protect()\`: it then runs only when the rules a person set allow it, and each call is signed and recorded. Records stay in \`.signafaide/\` on this machine; nothing is sent until a person opts in. Once the user has asked for it: install it (step 2), then, with their agreement, run \`${AGENT_PROTECT_CMD}\` (\`uv run signafaide protect --yes ...\` in Python). It writes \`protect(...)\` into the code and adds a rule that starts Calibrating: it blocks nothing until a person turns it On. Protected tools stop until a person runs \`${PROTECT_CMD.ts}\` (or \`${PROTECT_CMD.py}\`) once in a terminal, so say that in your final message.
 
 signafAIde records each tool call an AI agent makes (a signed \`decision\` before the tool runs and an \`outcome\` after it), protects the tools that act with rules a person sets, and proves both to an auditor. Nothing is sent until a person runs \`signafaide protect\` or \`signafaide init\`, or sets \`SIGNAFAIDE_API_KEY\`. ${witness} Only hashes, tool names, agent names and times are sent, never inputs or outputs (unless stored content is turned on, or a protected tool's rules use a field the user approved), so agent and tool names must not hold personal data. For plain application logs, do what the user asked instead.
 
 ## Steps
 
-1. Install it (step 2), then run \`npx signafaide protect --yes --tool <name>\` yourself (\`uv run signafaide protect --yes --tool <name>\` in Python); add \`--limit-field <field> --above <number>\` to set a limit. It finds the tool, writes \`protect(...)\` and \`record(...)\` into the code and the checks file, and adds the limit as a rule that starts Calibrating. It never turns a rule On, never approves a field for sending and never makes a sandbox: then ask the user to run \`npx signafaide protect\` (or \`uv run signafaide protect\`) in their own terminal (in Claude Code they can start the line with \`!\` to run it there). That run asks what to block (the limit, then On or Calibrating), makes a free sandbox if they agree, and saves their rules. Do not answer its questions for them.
+1. Once the user has asked for signafAIde and agreed to the change, install it (step 2), then run \`npx signafaide protect --yes --tool <name>\` (\`uv run signafaide protect --yes --tool <name>\` in Python); add \`--limit-field <field> --above <number>\` to set a limit. It finds the tool, writes \`protect(...)\` and \`record(...)\` into the code and the checks file, and adds the limit as a rule that starts Calibrating. It never turns a rule On, never approves a field for sending, never makes a sandbox and never writes AGENTS.md or CLAUDE.md: then ask the user to run \`npx signafaide protect\` (or \`uv run signafaide protect\`) in their own terminal (in Claude Code they can start the line with \`!\` to run it there). That run asks what to block (the limit, then On or Calibrating), makes a free sandbox if they agree, and saves their rules. Do not answer its questions for them.
 2. Install it as a project dependency: \`uv add signafaide\` (uv), \`poetry add signafaide\` (Poetry) or \`python3 -m venv .venv && .venv/bin/python -m pip install signafaide\` (not a bare \`pip install\` outside a virtual environment); \`npm install signafaide\` (or pnpm, yarn, bun). When protect cannot find the tools, write it by hand. Give the agent an explicit name (lowercase, for example \`claims-bot\`).
 
    \`\`\`ts

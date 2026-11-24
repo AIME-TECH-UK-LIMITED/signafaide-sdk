@@ -39,7 +39,7 @@ flowchart LR
 | [`python/`](python/README.md) | the Python SDK and CLI (`signafaide` on PyPI) |
 | [`python-langchain/`](python-langchain/README.md) | `langchain-signafaide`: a LangChain agent middleware that records every tool call the agent makes |
 | [`js/`](js/README.md) | the TypeScript SDK, CLI and `agent setup` for coding agents (`signafaide` on npm), and the MCP server (`signafaide-mcp`, in `js/mcp`) |
-| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.5.7`) |
+| [`CHANGELOG.md`](CHANGELOG.md) | what changed in each release; every release is a git tag (`v0.5.8`) |
 | [`verifier/`](verifier/README.md) | `signafaide-verify`, the standalone Rust verifier of a pack (also builds to WebAssembly); its PyPI package (`verifier/pyproject.toml`) and the release binaries |
 | [`js/verify/`](js/verify/package.json) | `signafaide-verify` on npm: the TypeScript verifier as one file, for auditors |
 | [`core/`](core) | the Rust protocol core shared by the verifier and the service |
@@ -95,14 +95,14 @@ The MCP server (`signafaide-mcp`, Node.js 20 or later) lets a coding agent previ
 ```json
 {
   "mcpServers": {
-    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.5.7"] }
+    "signafaide": { "command": "npx", "args": ["-y", "signafaide-mcp@0.5.8"] }
   }
 }
 ```
 
-- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.5.7`
+- Claude Code: `claude mcp add signafaide -- npx -y signafaide-mcp@0.5.8`
 - Gemini CLI: `gemini extensions install https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk`
-- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.5.7%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
+- Kiro: [![Add to Kiro](https://kiro.dev/images/add-to-kiro.svg)](https://kiro.dev/launch/mcp/add?name=signafaide&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22signafaide-mcp%400.5.8%22%5D%2C%22disabled%22%3Afalse%2C%22autoApprove%22%3A%5B%5D%7D)
 
 There are no API keys or other settings. To check it works, ask the agent to call `signafaide_status`.
 
@@ -121,8 +121,8 @@ What this shows, and what it does not: the gateway records every call that goes 
 `signafaide-verify` checks a verification pack on your own machine, without an account, the SDK or our console. It runs the 12 checks of spec §7 and ends with one result line. There are three ways to get it, each pinned to a release (the commands below name this one; use the version the customer's `signafaide prove` prints):
 
 ```bash
-npx signafaide-verify@0.5.7 pack.json --agent-keys agent-keys.json --head head.json   # npm, Node.js 20 or later
-uvx signafaide-verify@0.5.7 pack.json --agent-keys agent-keys.json --head head.json   # PyPI (or: pipx install signafaide-verify==0.5.7)
+npx signafaide-verify@0.5.8 pack.json --agent-keys agent-keys.json --head head.json   # npm, Node.js 20 or later
+uvx signafaide-verify@0.5.8 pack.json --agent-keys agent-keys.json --head head.json   # PyPI (or: pipx install signafaide-verify==0.5.8)
 ```
 
 Or download the single program for Linux (static), macOS or Windows from [GitHub Releases](https://github.com/AIME-TECH-UK-LIMITED/signafaide-sdk/releases), with `SHA256SUMS` from the same release, and check both the checksum and how it was built (by `release.yml` on `main`) before you run it. `LICENSE` and `THIRD-PARTY-NOTICES.md` (the licences of the Rust crates in it) are in the same release, and in every wheel and the sdist:
@@ -140,7 +140,7 @@ On macOS use `shasum -a 256 --check --ignore-missing SHA256SUMS`; on Windows com
 
 What each one is: the PyPI wheels hold these same release binaries, file for file; on a platform without a wheel, pip builds the Rust verifier from the sdist, which needs a Rust toolchain. The npm package is a different implementation, the TypeScript verifier, in one file with no dependencies. All of them, and the SDKs' `signafaide verify`, give the same check ids, statuses and result line for the same inputs (spec §7); CI runs the spec vectors and the same input cases through each.
 
-**The service keys.** Each release of `signafaide-verify` has the hosted witness's public keys pinned in it, and verifies with those. Online, it also reads the list published at `https://signafaide.co.uk/.well-known/signafaide-keys.json`: keys are never removed or changed, so every pinned key must be there with the same bytes. A key retired there (it has a `valid_to`) is applied, so records it signed later fail. A key revoked there (listed under `revoked`) is applied too: nothing it signed verifies. Both are named on the `service keys:` line and the run goes on. Newer keys in the list (after a rotation) and fields this release does not know are fine; a pack made since a newer key became valid needs a newer `signafaide-verify`, and the output names those keys. If a pinned key is missing or changed there, or its `revoked` list is malformed, it stops with `KEYS DIFFER` and exit code 2 and verifies nothing. If the list cannot be read (no network, an error, a redirect), it verifies with the pinned keys and says so above the result line: `service keys: pinned in signafaide-verify 0.5.7, not cross-checked (published list unreachable)`; the public timestamp is still looked up. With `--offline` nothing is looked up and the line says `not cross-checked (--offline)`. `--keys <file|url>` uses other keys, for example a self-hosted witness's own list, read the same way (a key that document lists as revoked verifies nothing), and unless it is exactly the pinned set (every entry the same, including `valid_from` and `valid_to`, and nothing revoked) the result line itself says so: `PASS (service keys from --keys differ from the pinned set): ...`. The line above the result always says where the keys came from, and `--json` has `service_keys_source`, `service_keys_cross_check` and `service_keys_pinned_set`. The agent keys, `agent-keys.json`, come from the customer (`signafaide keys export`), and `head.json` (their newest signed head) shows that no record was cut from the end.
+**The service keys.** Each release of `signafaide-verify` has the hosted witness's public keys pinned in it, and verifies with those. Online, it also reads the list published at `https://signafaide.co.uk/.well-known/signafaide-keys.json`: keys are never removed or changed, so every pinned key must be there with the same bytes. A key retired there (it has a `valid_to`) is applied, so records it signed later fail. A key revoked there (listed under `revoked`) is applied too: nothing it signed verifies. Both are named on the `service keys:` line and the run goes on. Newer keys in the list (after a rotation) and fields this release does not know are fine; a pack made since a newer key became valid needs a newer `signafaide-verify`, and the output names those keys. If a pinned key is missing or changed there, or its `revoked` list is malformed, it stops with `KEYS DIFFER` and exit code 2 and verifies nothing. If the list cannot be read (no network, an error, a redirect), it verifies with the pinned keys and says so above the result line: `service keys: pinned in signafaide-verify 0.5.8, not cross-checked (published list unreachable)`; the public timestamp is still looked up. With `--offline` nothing is looked up and the line says `not cross-checked (--offline)`. `--keys <file|url>` uses other keys, for example a self-hosted witness's own list, read the same way (a key that document lists as revoked verifies nothing), and unless it is exactly the pinned set (every entry the same, including `valid_from` and `valid_to`, and nothing revoked) the result line itself says so: `PASS (service keys from --keys differ from the pinned set): ...`. The line above the result always says where the keys came from, and `--json` has `service_keys_source`, `service_keys_cross_check` and `service_keys_pinned_set`. The agent keys, `agent-keys.json`, come from the customer (`signafaide keys export`), and `head.json` (their newest signed head) shows that no record was cut from the end.
 
 `--offline` makes no network request at all: the public timestamp check is then reported as not checked, never as passed. `--json` prints the report for other tools. Redirects are never followed. Behind a TLS-inspecting proxy, point `SSL_CERT_FILE` (binary and PyPI) or `NODE_EXTRA_CA_CERTS` (npm) at its CA certificates; the verifier says so on stderr.
 
